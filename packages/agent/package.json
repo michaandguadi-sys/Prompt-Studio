@@ -1,0 +1,14 @@
+{
+  "name": "prompt-studio-agent",
+  "version": "1.0.0",
+  "description": "Render Agent for Prompt Studio — renders broadcast-quality video on your own machine using Remotion",
+  "type": "module",
+  "main": "agent.mjs",
+  "bin": {
+    "ps-agent": "agent.mjs"
+  },
+  "engines": { "node": ">=18.0.0" },
+  "dependencies": {
+    "@remotion/renderer": "4.0.290"
+  }
+}

@@ -1,0 +1,15 @@
+node_modules/
+.next/
+out/
+.env.local
+presets/
+.dev-data/
+*.tsbuildinfo
+.DS_Store
+
+# clerk configuration (can include secrets)
+/.clerk/
+public/remotion-bundle
+.remotion-bundle-tmp
+.smoke-render.mp4
+.smoke-route.mp4

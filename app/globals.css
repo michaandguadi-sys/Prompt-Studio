@@ -1,0 +1,307 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Theme tokens (surfaces / text / borders) ────────────────────────────────
+   :root holds the original LIGHT values as RGB triples (so paper/graphite/line
+   render exactly as before across the app). `.editor-dark` flips them to a
+   cinematic dark theme for the animation editor only — every opacity variant
+   (text-graphite/70, border-line/60, …) follows automatically. */
+:root {
+  --c-paper: 255 255 255;
+  --c-paper-50: 247 248 252;
+  --c-paper-100: 238 241 248;
+  --c-paper-200: 227 231 241;
+  --c-line: 230 233 243;
+  --c-graphite: 14 21 37;
+  --c-graphite-muted: 91 101 128;
+}
+.editor-dark {
+  --c-paper: 11 15 29;        /* #0b0f1d — panels */
+  --c-paper-50: 6 7 13;       /* #06070d — editor page bg */
+  --c-paper-100: 17 21 38;    /* #111526 — hover / subtle */
+  --c-paper-200: 26 31 52;    /* #1a1f34 — raised / pressed */
+  --c-line: 44 52 74;         /* #2c344a — subtle dark border */
+  --c-graphite: 232 233 240;  /* #e8e9f0 — primary text */
+  --c-graphite-muted: 154 160 180; /* #9aa0b4 — secondary text */
+  color: rgb(232 233 240);
+}
+/* Literal light utilities used inside the editor → dark equivalents (the token
+   vars above don't cover hard-coded white/black classes). Scoped to .editor-dark
+   so the rest of the app is untouched. */
+.editor-dark .bg-white { background-color: #0b0f1d; }
+.editor-dark .bg-black\/5 { background-color: rgba(255,255,255,0.04); }
+.editor-dark .bg-black\/\[0\.04\] { background-color: rgba(255,255,255,0.04); }
+.editor-dark .hover\:bg-black\/5:hover { background-color: rgba(255,255,255,0.06); }
+.editor-dark .border-black\/5 { border-color: rgba(255,255,255,0.07); }
+.editor-dark .border-black\/10 { border-color: rgba(255,255,255,0.1); }
+.editor-dark .hover\:border-black\/20:hover { border-color: rgba(255,255,255,0.22); }
+.editor-dark .ring-black\/5 { --tw-ring-color: rgba(255,255,255,0.06); }
+.editor-dark .divide-black\/5 > * + * { border-color: rgba(255,255,255,0.06); }
+.editor-dark .glass-light { background: rgba(17,21,38,0.92); border-color: rgba(255,255,255,0.1); box-shadow: 0 16px 48px -16px rgba(0,0,0,0.7); }
+.editor-dark .card-light { background: #0b0f1d; border-color: rgba(255,255,255,0.08); box-shadow: 0 12px 32px -12px rgba(0,0,0,0.6); }
+
+/* ── Base reset ─────────────────────────────────────────────────────────── */
+html, body {
+  height: 100%;
+  margin: 0;
+  /* Bright editorial default — pages set their own surface; this is the root
+     fallback so there's never a dark flash before a light page paints. */
+  background: #f7f8fc;
+  color: #16181d;
+  /* True SF Pro on Apple devices; refined fallbacks elsewhere. */
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "cv02", "cv03", "cv04", "ss01";
+  letter-spacing: -0.011em;
+  scroll-behavior: smooth;
+}
+
+* { box-sizing: border-box; }
+
+/* Tighter, more confident tracking on headings (Apple-like display type). */
+h1, h2, h3 { letter-spacing: -0.022em; }
+
+/* ── Selection ──────────────────────────────────────────────────────────── */
+::selection {
+  background: rgba(110, 123, 255, 0.30);
+  color: #fff;
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────────────── */
+::-webkit-scrollbar          { width: 6px; height: 6px; }
+::-webkit-scrollbar-track    { background: transparent; }
+::-webkit-scrollbar-thumb    { background: #212b43; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(110,123,255,0.5); }
+::-webkit-scrollbar-corner   { background: transparent; }
+
+/* ── Mapbox attribution (shown in MP4 via Remotion per ToS) ─────────────── */
+.mapboxgl-ctrl-bottom-left,
+.mapboxgl-ctrl-bottom-right { display: none !important; }
+
+/* ── Keyframes ──────────────────────────────────────────────────────────── */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes slide-left {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+/* The editor canvas "develops in" when you land in the editor — a cinematic reveal. */
+@keyframes stageReveal {
+  from { opacity: 0; transform: scale(0.965) translateY(8px); filter: blur(6px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); filter: blur(0); }
+}
+@keyframes slide-right {
+  from { opacity: 0; transform: translateX(12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes shimmer-sweep {
+  0%   { left: -80%; }
+  100% { left: 200%; }
+}
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(110,123,255,0.18); }
+  50%       { box-shadow: 0 0 48px rgba(110,123,255,0.4), 0 0 90px rgba(110,123,255,0.12); }
+}
+@keyframes aurora {
+  0%, 100% { transform: translate3d(0,0,0) scale(1); opacity: 0.9; }
+  50%       { transform: translate3d(2%, -2%, 0) scale(1.08); opacity: 1; }
+}
+@keyframes breathe {
+  0%, 100% { opacity: 0.6; }
+  50%       { opacity: 1; }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-6px); }
+}
+@keyframes bar-fill {
+  from { width: 0%; }
+}
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ── Animation utilities ─────────────────────────────────────────────────── */
+.anim-fade-up          { animation: fade-up 0.4s cubic-bezier(0.16,1,0.3,1) both; }
+.anim-fade-in          { animation: fade-in 0.3s ease both; }
+.anim-slide-left       { animation: slide-left 0.35s cubic-bezier(0.16,1,0.3,1) both; }
+.anim-slide-right      { animation: slide-right 0.35s cubic-bezier(0.16,1,0.3,1) both; }
+.anim-scale-in         { animation: scale-in 0.25s cubic-bezier(0.16,1,0.3,1) both; }
+.anim-pulse-glow       { animation: pulse-glow 2.5s ease-in-out infinite; }
+.anim-breathe          { animation: breathe 3s ease-in-out infinite; }
+.anim-float            { animation: float 4s ease-in-out infinite; }
+
+/* Stagger children (.stagger > *) */
+.stagger > *:nth-child(1) { animation-delay: 0ms; }
+.stagger > *:nth-child(2) { animation-delay: 55ms; }
+.stagger > *:nth-child(3) { animation-delay: 110ms; }
+.stagger > *:nth-child(4) { animation-delay: 165ms; }
+.stagger > *:nth-child(5) { animation-delay: 220ms; }
+.stagger > *:nth-child(6) { animation-delay: 275ms; }
+.stagger > *:nth-child(7) { animation-delay: 330ms; }
+
+/* ── Glow utilities ──────────────────────────────────────────────────────── */
+.glow-amber    { box-shadow: 0 0 40px rgba(110,123,255,0.22), 0 0 90px rgba(110,123,255,0.07); }
+.glow-amber-sm { box-shadow: 0 0 16px rgba(110,123,255,0.3); }
+.glow-amber-lg { box-shadow: 0 0 80px rgba(110,123,255,0.18), 0 0 160px rgba(110,123,255,0.06); }
+
+/* ── Shimmer button effect ───────────────────────────────────────────────── */
+.btn-shimmer           { position: relative; overflow: hidden; }
+.btn-shimmer::after {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 35%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.16), transparent);
+  animation: shimmer-sweep 2.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* ── Focus ring ──────────────────────────────────────────────────────────── */
+*:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(110,123,255,0.6), 0 0 0 5px rgba(110,123,255,0.15);
+}
+
+/* ── Active press ────────────────────────────────────────────────────────── */
+button:active:not(:disabled) { transform: scale(0.975); }
+
+/* ── Number input arrows off ─────────────────────────────────────────────── */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; }
+
+/* ── Range slider (overrides Tailwind accent-amber) ─────────────────────── */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: #1a2236;
+  border-radius: 99px;
+  cursor: pointer;
+  border: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  background: #6e7bff;
+  border: 2px solid #05060e;
+  box-shadow: 0 0 10px rgba(110,123,255,0.6);
+  cursor: grab;
+  transition: box-shadow 150ms, transform 150ms;
+}
+input[type="range"]::-webkit-slider-thumb:active {
+  cursor: grabbing;
+  box-shadow: 0 0 18px rgba(110,123,255,0.9);
+  transform: scale(1.15);
+}
+input[type="range"]:focus { outline: none; box-shadow: none; }
+
+/* ── Color input ─────────────────────────────────────────────────────────── */
+input[type="color"] {
+  -webkit-appearance: none;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+}
+input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
+
+/* ── Glassmorphism ───────────────────────────────────────────────────────── */
+.glass {
+  background: rgba(20,26,43,0.6);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgba(255,255,255,0.07);
+}
+.glass-strong {
+  background: rgba(10,13,26,0.78);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid rgba(255,255,255,0.09);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 24px 70px -16px rgba(0,0,0,0.75);
+}
+
+/* ── Bright theme surfaces ───────────────────────────────────────────────── */
+.card-light {
+  background: #ffffff;
+  border: 1px solid #e6e9f3;
+  box-shadow: 0 1px 2px rgba(16,24,40,0.04), 0 12px 32px -12px rgba(16,24,40,0.12);
+  border-radius: 1rem;
+}
+.glass-light {
+  background: rgba(255,255,255,0.82);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border: 1px solid rgba(16,24,40,0.08);
+  box-shadow: 0 16px 48px -16px rgba(16,24,40,0.22);
+}
+
+/* ── Premium surface card (subtle top highlight + soft elevation) ─────────── */
+.card-premium {
+  background: linear-gradient(180deg, rgba(33,43,67,0.55) 0%, rgba(10,13,26,0.55) 100%);
+  border: 1px solid rgba(255,255,255,0.08);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 12px 40px -18px rgba(0,0,0,0.8);
+  border-radius: 1rem;
+}
+
+/* ── Brand gradient text (Apple "intelligence" gradient) ─────────────────── */
+.gradient-text {
+  background: linear-gradient(120deg, #8E97FF 0%, #B57BFF 48%, #2FE0FF 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* ── Brand gradient surface (buttons / chips / accents) ──────────────────────
+   Deeper than the heading gradient so WHITE text/icons clear ~4.6:1 across the
+   whole button (the lighter cyan/violet lives only in `.gradient-text` on a
+   white background, where contrast isn't a concern). */
+.bg-brand {
+  background: linear-gradient(120deg, #5359E6 0%, #7C4DD8 52%, #3F73E6 100%);
+}
+.bg-brand-soft {
+  background: linear-gradient(120deg, rgba(110,123,255,0.16) 0%, rgba(181,123,255,0.14) 50%, rgba(47,224,255,0.12) 100%);
+}
+
+/* ── Ambient aurora backdrop (drop behind hero sections) ─────────────────── */
+.aurora-bg {
+  position: absolute;
+  inset: -20% -10% auto -10%;
+  height: 520px;
+  pointer-events: none;
+  background:
+    radial-gradient(40% 60% at 18% 0%, rgba(110,123,255,0.22), transparent 60%),
+    radial-gradient(36% 56% at 82% 6%, rgba(181,123,255,0.18), transparent 60%),
+    radial-gradient(46% 60% at 50% 30%, rgba(47,224,255,0.12), transparent 62%);
+  filter: blur(28px);
+  animation: aurora 18s ease-in-out infinite;
+}
+
+/* ── Cinematic vignette for preview pane ─────────────────────────────────── */
+.preview-vignette {
+  background:
+    radial-gradient(ellipse at center, transparent 55%, rgba(6,8,15,0.7) 100%);
+  pointer-events: none;
+}
+
+/* ── Transition helpers ──────────────────────────────────────────────────── */
+.transition-smooth {
+  transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}

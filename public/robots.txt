@@ -1,0 +1,12 @@
+User-agent: *
+Allow: /
+Allow: /pricing
+
+# Keep authenticated studio routes private
+Disallow: /studio/
+Disallow: /dashboard
+Disallow: /brand
+Disallow: /styles
+Disallow: /api/
+
+Sitemap: https://promptstudio.app/sitemap.xml
