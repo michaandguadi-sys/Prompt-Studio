@@ -102,6 +102,13 @@
   0%   { transform: translateX(-110%); }
   100% { transform: translateX(310%); }
 }
+/* Hero entrance (landing uses inline `animation: fade-up …`; the Tailwind
+   animate-fade-up utility isn't referenced as a class so its keyframe would be
+   purged — define it here so the staggered hero reveal is guaranteed). */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
 
 /* ── Base reset ─────────────────────────────────────────────────────────── */
 html, body {
