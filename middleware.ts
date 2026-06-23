@@ -6,6 +6,9 @@ const isPublic = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/api/webhooks(.*)",
+  // Deploy-verification endpoint — booleans only, safe to leave open so you can
+  // confirm env wiring right after a deploy (before Clerk is fully set up).
+  "/api/health",
   // Public read-only shared-project viewer + its read API (capability is the
   // unguessable share token in the URL; only published projects are reachable).
   "/v/(.*)",
