@@ -123,19 +123,21 @@ export const LayersPanel: React.FC = () => {
               key={l.id}
               onClick={() => select(l.id)}
               className={[
-                "group flex items-center gap-2 rounded-lg px-2 py-2 cursor-pointer transition-colors",
-                active ? "bg-brand-soft ring-1 ring-iris/40" : "hover:bg-black/[0.04]",
+                "group relative flex items-center gap-2 rounded-lg px-2 py-1.5 cursor-pointer transition-all duration-150",
+                active ? "bg-iris/[0.12] ring-1 ring-inset ring-iris/30" : "hover:bg-graphite/[0.05]",
               ].join(" ")}
             >
+              {/* Active accent bar */}
+              {active && <span className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-full bg-iris" />}
               <button
                 onClick={(e) => { e.stopPropagation(); patchLayer(l.id, { enabled: !enabled }); }}
-                className={enabled ? "text-iris" : "text-graphite/25 hover:text-graphite/60"}
+                className={`rounded p-0.5 transition-colors ${enabled ? "text-iris hover:bg-iris/10" : "text-graphite/25 hover:text-graphite/60"}`}
                 title={enabled ? "Hide" : "Show"}
               >
                 {enabled ? <Eye size={13} /> : <EyeOff size={13} />}
               </button>
-              <span className="text-graphite/55">{iconFor(l.type)}</span>
-              <span className="min-w-0 flex-1 truncate text-xs text-graphite/85">
+              <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors ${active ? "bg-iris/15 text-iris" : "bg-graphite/[0.06] text-graphite/55 group-hover:text-graphite/75"}`}>{iconFor(l.type)}</span>
+              <span className={`min-w-0 flex-1 truncate text-xs transition-colors ${active ? "font-medium text-graphite" : "text-graphite/80"} ${enabled ? "" : "line-through opacity-50"}`}>
                 {l.name || LAYER_REGISTRY[l.type].label}
               </span>
               {l.type !== "camera" && (

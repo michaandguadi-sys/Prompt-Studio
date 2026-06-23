@@ -164,7 +164,7 @@ export const Editor: React.FC = () => {
       </header>
 
       {/* ── Workspace: floating, resizable cards on the grey canvas ───────── */}
-      <div className="flex min-h-0 flex-1 flex-col p-2">
+      <div className="editor-in flex min-h-0 flex-1 flex-col p-2">
         <div className="flex min-h-0 flex-1">
 
           {/* Left rail — Layers */}

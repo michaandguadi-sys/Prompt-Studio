@@ -56,13 +56,24 @@ export const Canvas: React.FC = () => {
           `container-type: size` makes 100cqw/100cqh = this inner box, so the
           stage fits the aspect within whatever space the rails leave. */}
       <div className="relative flex flex-1 items-center justify-center overflow-hidden p-6" style={{ containerType: "size" }}>
+        {/* Faint dot-grid texture around the stage — a subtle "drafting table". */}
+        <div
+          className="pointer-events-none absolute inset-0"
+          aria-hidden
+          style={{
+            backgroundImage: "radial-gradient(rgba(255,255,255,0.045) 1px, transparent 1px)",
+            backgroundSize: "20px 20px",
+            maskImage: "radial-gradient(80% 80% at 50% 50%, transparent 38%, #000 90%)",
+            WebkitMaskImage: "radial-gradient(80% 80% at 50% 50%, transparent 38%, #000 90%)",
+          }}
+        />
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center" aria-hidden>
-          <div className="h-[50%] w-[62%] rounded-full opacity-50 blur-[120px]" style={{ background: "radial-gradient(circle, rgba(110,123,255,0.10), transparent 70%)" }} />
+          <div className="h-[55%] w-[66%] rounded-full opacity-60 blur-[120px]" style={{ background: "radial-gradient(circle, rgba(110,123,255,0.12), transparent 70%)" }} />
         </div>
         <div
           ref={stageRef}
           onPointerDown={pickAt}
-          className="relative overflow-hidden rounded-2xl ring-1 ring-line"
+          className="relative overflow-hidden rounded-2xl ring-1 ring-white/[0.08]"
           data-stage
           style={{
             aspectRatio: `${width}/${height}`,

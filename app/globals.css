@@ -76,6 +76,32 @@
 .editor-pro .divide-black\/5 > * + * { border-color: rgba(255,255,255,0.06); }
 .editor-pro .glass-light { background: rgba(35,36,40,0.92); border-color: rgba(255,255,255,0.09); box-shadow: 0 16px 48px -16px rgba(0,0,0,0.6); }
 .editor-pro .card-light { background: #232428; border-color: rgba(255,255,255,0.07); box-shadow: 0 12px 32px -12px rgba(0,0,0,0.5); }
+/* Faint dot texture in the workspace gutters — only shows where panels don't. */
+.editor-pro {
+  background-image: radial-gradient(rgba(255,255,255,0.035) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+/* Thin, self-effacing scrollbars inside the editor — iris on hover. */
+.editor-pro ::-webkit-scrollbar { width: 9px; height: 9px; }
+.editor-pro ::-webkit-scrollbar-track { background: transparent; }
+.editor-pro ::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.12);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 99px;
+}
+.editor-pro ::-webkit-scrollbar-thumb:hover { background: rgba(110,123,255,0.6); background-clip: padding-box; }
+/* Soft entrance for the whole editor + its loading screen. */
+.editor-in { animation: editorIn 0.5s cubic-bezier(0.22,1,0.36,1) both; }
+@keyframes editorIn {
+  from { opacity: 0; transform: translateY(6px) scale(0.995); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* Indeterminate loader sweep. */
+@keyframes loaderSweep {
+  0%   { transform: translateX(-110%); }
+  100% { transform: translateX(310%); }
+}
 
 /* ── Base reset ─────────────────────────────────────────────────────────── */
 html, body {
