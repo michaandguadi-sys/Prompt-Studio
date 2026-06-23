@@ -73,8 +73,8 @@ h1, h2, h3 { letter-spacing: -0.022em; }
 /* ── Scrollbar ──────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar          { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track    { background: transparent; }
-::-webkit-scrollbar-thumb    { background: #212b43; border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(110,123,255,0.5); }
+::-webkit-scrollbar-thumb    { background: rgba(20, 28, 55, 0.16); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(110, 123, 255, 0.55); }
 ::-webkit-scrollbar-corner   { background: transparent; }
 
 /* ── Mapbox attribution (shown in MP4 via Remotion per ToS) ─────────────── */
