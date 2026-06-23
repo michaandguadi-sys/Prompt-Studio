@@ -51,11 +51,11 @@ export const Canvas: React.FC = () => {
   const storyProps = useMemo(() => ({ scenes, watermark }), [scenes, watermark]);
 
   return (
-    <div className="relative flex h-full flex-col bg-paper-100">
-      {/* Padding leaves room for the floating chrome (top bar + AI bar above, the
-          dock below) so the centered preview is never covered. `container-type:
-          size` makes 100cqw/100cqh = this inner box, so the stage fits the aspect. */}
-      <div className="relative flex flex-1 items-center justify-center overflow-hidden px-8 pt-24 pb-44" style={{ containerType: "size" }}>
+    <div className="relative flex h-full flex-col bg-paper-50">
+      {/* Chrome is docked (rails + dock), so the canvas just needs breathing room.
+          `container-type: size` makes 100cqw/100cqh = this inner box, so the
+          stage fits the aspect within whatever space the rails leave. */}
+      <div className="relative flex flex-1 items-center justify-center overflow-hidden p-6" style={{ containerType: "size" }}>
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center" aria-hidden>
           <div className="h-[50%] w-[62%] rounded-full opacity-50 blur-[120px]" style={{ background: "radial-gradient(circle, rgba(110,123,255,0.10), transparent 70%)" }} />
         </div>
@@ -71,7 +71,7 @@ export const Canvas: React.FC = () => {
             width: `min(100cqw, calc(100cqh * ${width} / ${height}))`,
             maxWidth: "min(1400px, 100cqw)",
             maxHeight: "100cqh",
-            boxShadow: "0 28px 80px -30px rgba(20,28,55,0.4), 0 4px 16px -6px rgba(20,28,55,0.18)",
+            boxShadow: "0 32px 80px -28px rgba(0,0,0,0.6), 0 6px 20px -8px rgba(0,0,0,0.4)",
             animation: "stageReveal 0.7s cubic-bezier(0.22,1,0.36,1) both",
           }}
         >

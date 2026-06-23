@@ -41,6 +41,42 @@
 .editor-dark .glass-light { background: rgba(17,21,38,0.92); border-color: rgba(255,255,255,0.1); box-shadow: 0 16px 48px -16px rgba(0,0,0,0.7); }
 .editor-dark .card-light { background: #0b0f1d; border-color: rgba(255,255,255,0.08); box-shadow: 0 12px 32px -12px rgba(0,0,0,0.6); }
 
+/* ── Neutral pro grey — the editor workspace theme ───────────────────────────
+   A calm, DESATURATED graphite (zinc) ramp — neither stark white nor full
+   black, no blue cast. Panels recede, the map canvas pops, dense controls read
+   cleanly for long sessions. Scoped to `.editor-pro` (wraps the editor shell)
+   so home / landing / dashboard stay bright editorial. Every paper/line/
+   graphite opacity variant follows the vars automatically; the literal-utility
+   block below catches the few hard-coded white/black classes in the panels. */
+.editor-pro {
+  --c-paper: 35 36 40;        /* #232428 — rails / panels */
+  --c-paper-50: 24 25 28;     /* #18191c — workspace bg + inset inputs */
+  --c-paper-100: 43 45 50;    /* #2b2d32 — hover / subtle */
+  --c-paper-200: 53 55 61;    /* #35373d — raised / pressed */
+  --c-line: 58 60 67;         /* #3a3c43 — neutral border */
+  --c-graphite: 237 238 242;  /* #edeef2 — primary text */
+  --c-graphite-muted: 156 158 168; /* #9c9ea8 — secondary text */
+  color: rgb(237 238 242);
+}
+.editor-pro .bg-white,
+.editor-pro .bg-white\/92,
+.editor-pro .bg-white\/90,
+.editor-pro .bg-white\/85 { background-color: #232428; }
+.editor-pro .bg-white\/70 { background-color: rgba(35,36,40,0.72); }
+.editor-pro .bg-white\/60 { background-color: rgba(35,36,40,0.6); }
+.editor-pro .bg-black\/10 { background-color: rgba(255,255,255,0.08); }
+.editor-pro .bg-black\/5 { background-color: rgba(255,255,255,0.05); }
+.editor-pro .bg-black\/\[0\.04\] { background-color: rgba(255,255,255,0.04); }
+.editor-pro .hover\:bg-black\/5:hover { background-color: rgba(255,255,255,0.06); }
+.editor-pro .hover\:bg-black\/\[0\.04\]:hover { background-color: rgba(255,255,255,0.05); }
+.editor-pro .border-black\/5 { border-color: rgba(255,255,255,0.07); }
+.editor-pro .border-black\/10 { border-color: rgba(255,255,255,0.1); }
+.editor-pro .hover\:border-black\/20:hover { border-color: rgba(255,255,255,0.22); }
+.editor-pro .ring-black\/5 { --tw-ring-color: rgba(255,255,255,0.06); }
+.editor-pro .divide-black\/5 > * + * { border-color: rgba(255,255,255,0.06); }
+.editor-pro .glass-light { background: rgba(35,36,40,0.92); border-color: rgba(255,255,255,0.09); box-shadow: 0 16px 48px -16px rgba(0,0,0,0.6); }
+.editor-pro .card-light { background: #232428; border-color: rgba(255,255,255,0.07); box-shadow: 0 12px 32px -12px rgba(0,0,0,0.5); }
+
 /* ── Base reset ─────────────────────────────────────────────────────────── */
 html, body {
   height: 100%;
