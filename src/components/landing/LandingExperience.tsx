@@ -7,6 +7,14 @@ import {
   ChevronDown, Globe2, Zap, MountainSnow, MousePointer2,
 } from "lucide-react";
 
+import { Hero } from "./Hero";
+import { Problem } from "./Problem";
+import { Capabilities } from "./Capabilities";
+import { Pricing } from "./Pricing";
+import { FAQ } from "./FAQ";
+import { FinalCTA } from "./FinalCTA";
+import { Reveal } from "./Reveal";
+
 const SERIF = "Newsreader, 'Playfair Display', Georgia, serif";
 
 /* ───────────────────────── hooks ───────────────────────── */
@@ -45,22 +53,6 @@ function useSectionProgress(ref: React.RefObject<HTMLElement | null>) {
   }, [ref]);
   return p;
 }
-
-const Reveal: React.FC<{ children: React.ReactNode; delay?: number; y?: number; className?: string }> = ({ children, delay = 0, y = 30, className = "" }) => {
-  const ref = useRef<HTMLDivElement>(null);
-  const [vis, setVis] = useState(false);
-  useEffect(() => {
-    const el = ref.current; if (!el) return;
-    const io = new IntersectionObserver(([e]) => { if (e.isIntersecting) { setVis(true); io.disconnect(); } }, { threshold: 0.16 });
-    io.observe(el);
-    return () => io.disconnect();
-  }, []);
-  return (
-    <div ref={ref} className={className} style={{ opacity: vis ? 1 : 0, transform: vis ? "none" : `translateY(${y}px)`, transition: `opacity .85s cubic-bezier(.22,1,.36,1) ${delay}ms, transform .85s cubic-bezier(.22,1,.36,1) ${delay}ms` }}>
-      {children}
-    </div>
-  );
-};
 
 const PHRASES = ["the fall of the Berlin Wall, 1989", "my 14-day trek across Patagonia", "how the Roman Empire expanded", "a night flight from Tokyo to Reykjavík"];
 function useTyped(speed = 52, pause = 1500) {
@@ -109,7 +101,7 @@ const MapLoader: React.FC<{ done: boolean }> = ({ done }) => (
         </circle>
       ))}
     </svg>
-    <div className="mt-6 text-[11px] font-semibold uppercase tracking-[0.5em] text-white/70" style={{ paddingLeft: "0.5em" }}>Mapanisy</div>
+    <div className="mt-6 text-[11px] font-semibold uppercase tracking-[0.5em] text-white/70" style={{ paddingLeft: "0.5em" }}>Prompt Studio</div>
     <div className="mt-3 h-[3px] w-40 overflow-hidden rounded-full bg-white/10">
       <div className="h-full w-1/2 rounded-full" style={{ background: "linear-gradient(90deg,transparent,#6E7BFF,transparent)", animation: "loaderSweep 1.4s cubic-bezier(.5,0,.3,1) infinite" }} />
     </div>
@@ -127,7 +119,7 @@ export const LandingExperience: React.FC = () => {
   const flyP = useSectionProgress(flyRef);
   const navSolid = y > 40;
 
-  // Fly-through: scale the map as you scroll "into" it; swap 3 captions.
+  // Fly-through logic preserved
   const scale = 1 + flyP * 7.5;
   const captionIdx = flyP < 0.34 ? 0 : flyP < 0.68 ? 1 : 2;
   const FLY = [
@@ -137,20 +129,20 @@ export const LandingExperience: React.FC = () => {
   ];
 
   return (
-    <div className="relative min-h-screen overflow-x-hidden bg-ink-950 text-white antialiased">
+    <div className="relative min-h-screen overflow-x-hidden bg-[#05060e] text-white antialiased">
       <MapLoader done={done} />
 
       {/* ── Nav ── */}
-      <header className={`fixed inset-x-0 top-0 z-50 transition-all duration-500 ${navSolid ? "border-b border-white/10 bg-ink-950/80 backdrop-blur-xl" : "border-b border-transparent"}`}>
+      <header className={`fixed inset-x-0 top-0 z-50 transition-all duration-500 ${navSolid ? "border-b border-white/10 bg-[#05060e]/80 backdrop-blur-xl" : "border-b border-transparent"}`}>
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
           <div className="flex items-center gap-2.5">
-            <span className="flex h-8 w-8 items-center justify-center rounded-xl text-white" style={{ background: "linear-gradient(135deg,#6E7BFF,#4F59E0)", boxShadow: "0 6px 20px -6px rgba(110,123,255,0.8)" }}><span className="text-[14px] font-black">M</span></span>
-            <span className="text-[17px] font-medium tracking-tight" style={{ fontFamily: SERIF }}>Mapanisy</span>
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl text-white" style={{ background: "linear-gradient(135deg,#6E7BFF,#4F59E0)", boxShadow: "0 6px 20px -6px rgba(110,123,255,0.8)" }}><span className="text-[14px] font-black">P</span></span>
+            <span className="text-[17px] font-medium tracking-tight" style={{ fontFamily: SERIF }}>Prompt Studio</span>
           </div>
           <nav className="hidden items-center gap-7 text-[13px] text-white/55 md:flex">
-            <a href="#how" className="transition-colors hover:text-white">How it works</a>
-            <a href="#features" className="transition-colors hover:text-white">Features</a>
+            <a href="#capabilities" className="transition-colors hover:text-white">Capabilities</a>
             <a href="#pricing" className="transition-colors hover:text-white">Pricing</a>
+            <a href="#faq" className="transition-colors hover:text-white">FAQ</a>
           </nav>
           <div className="flex items-center gap-2.5">
             <Link href="/sign-in" className="text-[13px] text-white/60 transition-colors hover:text-white">Sign in</Link>
@@ -159,188 +151,121 @@ export const LandingExperience: React.FC = () => {
         </div>
       </header>
 
-      {/* ── Hero — high above the glowing world ── */}
-      <section className="relative flex min-h-screen flex-col items-center justify-center px-6 text-center">
-        <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
-          <div className="absolute left-1/2 top-1/2 h-[120vmin] w-[120vmin] -translate-x-1/2 -translate-y-[58%] rounded-full opacity-60" style={{ background: "radial-gradient(circle, rgba(110,123,255,0.18), transparent 62%)", transform: `translate(-50%,-58%) translateY(${y * 0.15}px)` }} />
-          <div className="absolute inset-0" style={{ transform: `translateY(${y * 0.25}px)`, backgroundImage: "linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)", backgroundSize: "60px 60px", maskImage: "radial-gradient(80% 60% at 50% 40%, #000 20%, transparent 75%)", WebkitMaskImage: "radial-gradient(80% 60% at 50% 40%, #000 20%, transparent 75%)" }} />
-          {[["12%", "22%", "2.6s"], ["82%", "30%", "3.1s"], ["20%", "70%", "2.2s"], ["74%", "66%", "3.6s"], ["50%", "16%", "2.9s"]].map(([l, t, d], i) => (
-            <span key={i} className="absolute h-1 w-1 rounded-full bg-cyan" style={{ left: l, top: t, boxShadow: "0 0 8px #2fe0ff", animation: `breathe ${d} ease-in-out ${i * 0.3}s infinite` }} />
-          ))}
-        </div>
+      <main>
+        {/* ── Hero ── */}
+        <Hero scrollY={y} typedText={typed} serifFont={SERIF} />
 
-        <div className="relative" style={{ transform: `translateY(${y * -0.08}px)`, opacity: Math.max(0, 1 - y / 600) }}>
-          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.04] px-3.5 py-1.5 text-[11px] font-medium text-white/70 backdrop-blur" style={{ animation: "fade-up .8s .2s both" }}>
-            <Sparkles size={12} className="text-iris" /> The AI story-map studio
+        {/* ── Social Proof / Logo Bar ── */}
+        <section className="border-y border-white/5 bg-white/[0.01] py-12">
+           <div className="mx-auto max-w-7xl px-6 lg:px-8">
+            <p className="text-center text-sm font-semibold leading-8 text-white/30 uppercase tracking-[0.2em] mb-8">Trusted by creators worldwide</p>
+            <div className="mx-auto grid max-w-lg grid-cols-4 items-center gap-x-8 gap-y-10 sm:max-w-xl sm:grid-cols-6 sm:gap-x-10 lg:mx-0 lg:max-w-none lg:grid-cols-5 opacity-40 grayscale">
+               <div className="flex items-center justify-center font-bold text-xl">VOX</div>
+               <div className="flex items-center justify-center font-bold text-xl">NYT</div>
+               <div className="flex items-center justify-center font-bold text-xl">NASA</div>
+               <div className="flex items-center justify-center font-bold text-xl">BBC</div>
+               <div className="flex items-center justify-center font-bold text-xl lg:hidden xl:flex">VICE</div>
+            </div>
           </div>
-          <h1 className="mx-auto max-w-4xl text-[clamp(2.6rem,7vw,5.2rem)] font-medium leading-[1.02] tracking-[-0.02em]" style={{ fontFamily: SERIF, animation: "fade-up .9s .3s both" }}>
-            From a sentence to a<br /><span style={{ background: "linear-gradient(105deg,#9CA6FF,#2fe0ff)", WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>cinematic 4K map</span>
-          </h1>
-          <p className="mx-auto mt-6 max-w-xl text-[16px] leading-relaxed text-white/55" style={{ animation: "fade-up .9s .45s both" }}>
-            Describe a story or drop a GPS track. A director researches it, composes the shot, and renders a broadcast-ready animation — you fine-tune by asking.
-          </p>
+        </section>
 
-          {/* Live typed prompt */}
-          <div className="mx-auto mt-8 flex max-w-xl items-center gap-3 rounded-2xl border border-white/12 bg-white/[0.05] px-4 py-3 text-left backdrop-blur-xl" style={{ animation: "fade-up .9s .6s both", boxShadow: "0 20px 60px -20px rgba(0,0,0,0.6)" }}>
-            <Wand2 size={16} className="shrink-0 text-iris" />
-            <span className="flex-1 truncate text-[15px] text-white/85">{typed}<span className="ml-0.5 inline-block h-4 w-px translate-y-0.5 animate-pulse bg-iris" /></span>
-            <Link href="/sign-up" className="hidden shrink-0 items-center gap-1 rounded-lg bg-white/10 px-3 py-1.5 text-[12px] font-semibold text-white transition-colors hover:bg-white/20 sm:inline-flex">Try it <ArrowRight size={12} /></Link>
+        {/* ── Problem ── */}
+        <Problem serifFont={SERIF} />
+
+        {/* ── Fly-through: The "Magic" Moment ── */}
+        <section ref={flyRef} className="relative" style={{ height: "300vh" }}>
+          <div className="sticky top-0 flex h-screen items-center justify-center overflow-hidden bg-[#05060e]">
+             <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(60% 50% at 50% 50%, rgba(110,123,255,0.12), transparent 70%)" }} />
+             
+             {/* The Map Visual */}
+             <div className="relative flex flex-col items-center justify-center w-full max-w-4xl px-6">
+                <div className="mb-12 text-center" style={{ opacity: Math.max(0, 1 - flyP * 2) }}>
+                   <span className="text-[#6E7BFF] font-semibold uppercase tracking-widest text-xs">The Magic</span>
+                   <h2 className="text-4xl mt-2 font-medium" style={{ fontFamily: SERIF }}>Scroll to descend into the data</h2>
+                </div>
+
+                <div className="relative transition-all duration-300" style={{ transform: `scale(${scale})`, opacity: Math.max(0.1, 1 - flyP * 0.4) }}>
+                  <svg viewBox="0 0 400 400" className="h-[70vmin] w-[70vmin]" style={{ filter: "drop-shadow(0 0 40px rgba(110,123,255,0.35))" }} aria-hidden>
+                    <circle cx="200" cy="200" r="150" fill="none" stroke="#2c344a" strokeWidth="1" />
+                    {[40, 80, 120].map((r) => <circle key={r} cx="200" cy="200" r={r} fill="none" stroke="#212b43" strokeWidth="1" />)}
+                    <line x1="50" y1="200" x2="350" y2="200" stroke="#212b43" strokeWidth="1" />
+                    <line x1="200" y1="50" x2="200" y2="350" stroke="#212b43" strokeWidth="1" />
+                    <path d="M120 150 Q150 110 200 130 T280 160 Q300 200 260 230 T180 250 Q130 230 120 190 Z" fill="rgba(110,123,255,0.10)" stroke="#6E7BFF" strokeWidth="1.5" />
+                    <path d="M90 240 Q140 280 200 300" fill="none" stroke="#2fe0ff" strokeWidth="2" strokeLinecap="round" />
+                    <circle cx="200" cy="300" r="5" fill="#2fe0ff" />
+                    <circle cx="90" cy="240" r="4" fill="#6E7BFF" />
+                  </svg>
+                </div>
+
+                {/* Caption stack */}
+                <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
+                  {FLY.map((f, i) => (
+                    <div key={i} className="absolute w-full px-6 text-center" style={{ opacity: captionIdx === i ? 1 : 0, transform: `translateY(${captionIdx === i ? 0 : captionIdx > i ? -24 : 24}px)`, transition: "opacity .5s ease, transform .5s ease" }}>
+                      <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.05] px-3 py-1 text-[11px] font-medium text-white/60 backdrop-blur">Stage {i + 1}</div>
+                      <h2 className="text-3xl font-medium tracking-tight" style={{ fontFamily: SERIF }}>{f.k}</h2>
+                      <p className="mx-auto mt-3 max-w-sm text-sm text-white/50">{f.s}</p>
+                    </div>
+                  ))}
+                </div>
+             </div>
+
+             {/* progress rail */}
+             <div className="absolute bottom-20 left-1/2 h-1 w-48 -translate-x-1/2 overflow-hidden rounded-full bg-white/5">
+                <div className="h-full rounded-full bg-[#6E7BFF]" style={{ width: `${flyP * 100}%` }} />
+             </div>
           </div>
+        </section>
 
-          <div className="mt-7 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[12px] text-white/45" style={{ animation: "fade-up .9s .75s both" }}>
-            <span className="inline-flex items-center gap-1.5"><Film size={13} className="text-iris" /> True 4K · 24fps</span>
-            <span className="inline-flex items-center gap-1.5"><Zap size={13} className="text-iris" /> Unlimited renders</span>
-            <span className="inline-flex items-center gap-1.5"><MousePointer2 size={13} className="text-iris" /> No design skills</span>
+        {/* ── Capabilities (Bento) ── */}
+        <Capabilities 
+          serifFont={SERIF} 
+          images={{
+            hero: "/landing/assets/hero.png",
+            editor: "/landing/assets/editor.png",
+            export4k: "/landing/assets/export4k.png"
+          }}
+        />
+
+        {/* ── Pricing ── */}
+        <Pricing serifFont={SERIF} plans={PRICING} />
+
+        {/* ── FAQ ── */}
+        <div id="faq">
+          <FAQ serifFont={SERIF} />
+        </div>
+
+        {/* ── Final CTA ── */}
+        <FinalCTA serifFont={SERIF} />
+
+      </main>
+
+      <footer className="border-t border-white/5 px-6 py-12 bg-black/20">
+        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-6 text-[13px] text-white/40 sm:flex-row">
+          <div className="flex items-center gap-3">
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg text-white" style={{ background: "linear-gradient(135deg,#6E7BFF,#4F59E0)" }}>
+              <span className="text-[12px] font-black">P</span>
+            </span>
+            <span className="font-medium text-white/70" style={{ fontFamily: SERIF }}>Prompt Studio</span>
+            <span className="text-white/20">|</span>
+            <span>Motion Graphics for the Spatial Age</span>
+          </div>
+          <div className="flex items-center gap-8">
+            <Link href="#capabilities" className="hover:text-white/70 transition-colors">Capabilities</Link>
+            <Link href="#pricing" className="hover:text-white/70 transition-colors">Pricing</Link>
+            <Link href="/sign-in" className="hover:text-white/70 transition-colors">Sign in</Link>
+            <Link href="/sign-up" className="text-white hover:text-[#6E7BFF] transition-colors">Get Started</Link>
           </div>
         </div>
-
-        <div className="absolute bottom-8 flex flex-col items-center gap-1.5 text-white/35" style={{ opacity: Math.max(0, 1 - y / 300) }}>
-          <span className="text-[10px] uppercase tracking-[0.3em]">Descend</span>
-          <ChevronDown size={18} className="animate-bounce" />
-        </div>
-      </section>
-
-      {/* ── Fly-through: scroll zooms you into the map ── */}
-      <section ref={flyRef} className="relative" style={{ height: "320vh" }}>
-        <div className="sticky top-0 flex h-screen items-center justify-center overflow-hidden">
-          <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(60% 50% at 50% 50%, rgba(110,123,255,0.12), transparent 70%)" }} />
-          {/* Map that scales as you scroll */}
-          <svg viewBox="0 0 400 400" className="absolute h-[78vmin] w-[78vmin]" style={{ transform: `scale(${scale})`, opacity: Math.max(0, 1 - flyP * 0.55), transition: "opacity .2s linear", filter: "drop-shadow(0 0 40px rgba(110,123,255,0.35))" }} aria-hidden>
-            <circle cx="200" cy="200" r="150" fill="none" stroke="#2c344a" strokeWidth="1" />
-            {[40, 80, 120].map((r) => <circle key={r} cx="200" cy="200" r={r} fill="none" stroke="#212b43" strokeWidth="1" />)}
-            <line x1="50" y1="200" x2="350" y2="200" stroke="#212b43" strokeWidth="1" />
-            <line x1="200" y1="50" x2="200" y2="350" stroke="#212b43" strokeWidth="1" />
-            <path d="M120 150 Q150 110 200 130 T280 160 Q300 200 260 230 T180 250 Q130 230 120 190 Z" fill="rgba(110,123,255,0.10)" stroke="#6E7BFF" strokeWidth="1.5" />
-            <path d="M90 240 Q140 280 200 300" fill="none" stroke="#2fe0ff" strokeWidth="2" strokeLinecap="round" />
-            <circle cx="200" cy="300" r="5" fill="#2fe0ff" />
-            <circle cx="90" cy="240" r="4" fill="#6E7BFF" />
-          </svg>
-          {/* Caption stack */}
-          <div className="relative z-10 px-6 text-center">
-            {FLY.map((f, i) => (
-              <div key={i} className="absolute left-1/2 top-1/2 w-[min(90vw,640px)] -translate-x-1/2 -translate-y-1/2" style={{ opacity: captionIdx === i ? 1 : 0, transform: `translate(-50%,-50%) translateY(${captionIdx === i ? 0 : captionIdx > i ? -24 : 24}px)`, transition: "opacity .5s ease, transform .5s ease", pointerEvents: "none" }}>
-                <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.05] px-3 py-1 text-[11px] font-medium text-white/60 backdrop-blur">Step {i + 1}</div>
-                <h2 className="text-[clamp(2rem,5vw,3.6rem)] font-medium leading-tight tracking-tight" style={{ fontFamily: SERIF }}>{f.k}</h2>
-                <p className="mx-auto mt-3 max-w-md text-[15px] text-white/55">{f.s}</p>
-              </div>
-            ))}
-          </div>
-          {/* progress rail */}
-          <div className="absolute bottom-10 left-1/2 h-0.5 w-40 -translate-x-1/2 overflow-hidden rounded-full bg-white/10">
-            <div className="h-full rounded-full bg-iris" style={{ width: `${flyP * 100}%` }} />
-          </div>
-        </div>
-      </section>
-
-      {/* ── How it works ── */}
-      <section id="how" className="relative mx-auto max-w-5xl px-6 py-28">
-        <Reveal><h2 className="text-center text-[clamp(1.8rem,4vw,2.8rem)] font-medium tracking-tight" style={{ fontFamily: SERIF }}>Three steps. No timeline wrangling.</h2></Reveal>
-        <div className="mt-14 grid grid-cols-1 gap-6 md:grid-cols-3">
-          {[
-            { icon: Sparkles, t: "Describe or drop a track", b: "A sentence — or a GPX file. That's the entire input." },
-            { icon: Wand2, t: "Answer a few smart questions", b: "Tone, camera energy, the angle. Accept the defaults in a click." },
-            { icon: Film, t: "Fine-tune and export 4K", b: "Adjust with sliders or by asking, then render or share a link." },
-          ].map((s, i) => (
-            <Reveal key={s.t} delay={i * 120}>
-              <div className="group h-full rounded-2xl border border-white/10 bg-white/[0.03] p-7 transition-all duration-300 hover:-translate-y-1.5 hover:border-iris/40 hover:bg-white/[0.05]">
-                <div className="mb-5 inline-flex h-11 w-11 items-center justify-center rounded-xl text-iris ring-1 ring-iris/25" style={{ background: "rgba(110,123,255,0.1)" }}><s.icon size={20} /></div>
-                <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-iris/70">Step {i + 1}</div>
-                <h3 className="mb-2 text-[17px] font-medium">{s.t}</h3>
-                <p className="text-[14px] leading-relaxed text-white/50">{s.b}</p>
-              </div>
-            </Reveal>
-          ))}
-        </div>
-      </section>
-
-      {/* ── Features — tilt cards ── */}
-      <section id="features" className="relative mx-auto max-w-6xl px-6 py-20">
-        <Reveal><h2 className="text-center text-[clamp(1.8rem,4vw,2.8rem)] font-medium tracking-tight" style={{ fontFamily: SERIF }}>Everything a motion designer does</h2></Reveal>
-        <Reveal delay={80}><p className="mx-auto mt-3 max-w-xl text-center text-[15px] text-white/50">From one prompt to a finished, on-brand film — with full control whenever you want it.</p></Reveal>
-        <div className="mt-14 grid grid-cols-1 gap-5 md:grid-cols-3">
-          {FEATURES.map((f, i) => (
-            <Reveal key={f.t} delay={(i % 3) * 100}><TiltCard {...f} /></Reveal>
-          ))}
-        </div>
-      </section>
-
-      {/* ── Pricing ── */}
-      <section id="pricing" className="relative mx-auto max-w-6xl px-6 py-24">
-        <Reveal><h2 className="text-center text-[clamp(1.8rem,4vw,2.8rem)] font-medium tracking-tight" style={{ fontFamily: SERIF }}>Unlimited 4K renders. Seriously.</h2></Reveal>
-        <Reveal delay={80}><p className="mx-auto mt-3 max-w-lg text-center text-[15px] text-white/50">Renders run on your machine, so paid plans never meter them. Start free.</p></Reveal>
-        <div className="mt-14 grid grid-cols-1 gap-5 md:grid-cols-3">
-          {PRICING.map((p, i) => (
-            <Reveal key={p.name} delay={i * 110}>
-              <div className={`relative flex h-full flex-col rounded-2xl border p-7 transition-all duration-300 hover:-translate-y-1.5 ${p.featured ? "border-iris/50 bg-iris/[0.06]" : "border-white/10 bg-white/[0.03] hover:border-white/20"}`} style={p.featured ? { boxShadow: "0 24px 70px -28px rgba(110,123,255,0.6)" } : undefined}>
-                {p.featured && <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-iris px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-white">Most popular</div>}
-                <div className="text-[13px] font-semibold uppercase tracking-[0.2em] text-white/50">{p.name}</div>
-                <div className="mt-3 flex items-baseline gap-1"><span className="text-4xl font-light" style={{ fontFamily: SERIF }}>{p.price}</span>{p.suffix && <span className="text-sm text-white/40">{p.suffix}</span>}</div>
-                <p className="mt-2 text-[13px] text-white/50">{p.tagline}</p>
-                <ul className="mt-6 flex-1 space-y-2.5">
-                  {p.features.map((ft) => <li key={ft} className="flex items-start gap-2 text-[13px] text-white/65"><Check size={15} className="mt-0.5 shrink-0 text-iris" /> {ft}</li>)}
-                </ul>
-                <Link href="/sign-up" className={`mt-7 inline-flex items-center justify-center gap-1.5 rounded-xl px-5 py-3 text-sm font-semibold transition-all ${p.featured ? "text-white hover:-translate-y-0.5" : "border border-white/15 text-white/80 hover:border-white/30 hover:text-white"}`} style={p.featured ? { background: "linear-gradient(135deg,#6E7BFF,#4F59E0)", boxShadow: "0 10px 30px -10px rgba(110,123,255,0.7)" } : undefined}>{p.cta} <ArrowRight size={15} /></Link>
-              </div>
-            </Reveal>
-          ))}
-        </div>
-      </section>
-
-      {/* ── Final CTA ── */}
-      <section className="relative overflow-hidden px-6 py-32 text-center">
-        <div className="pointer-events-none absolute inset-0" aria-hidden style={{ background: "radial-gradient(60% 60% at 50% 50%, rgba(110,123,255,0.14), transparent 70%)" }} />
-        <Reveal>
-          <h2 className="mx-auto max-w-2xl text-[clamp(2.2rem,5vw,3.6rem)] font-medium leading-tight tracking-tight" style={{ fontFamily: SERIF }}>Build your first map<br />in the next five minutes</h2>
-          <Link href="/sign-up" className="mt-9 inline-flex items-center gap-2 rounded-xl px-7 py-3.5 text-sm font-semibold text-white transition-transform hover:-translate-y-0.5" style={{ background: "linear-gradient(135deg,#6E7BFF,#4F59E0)", boxShadow: "0 14px 40px -12px rgba(110,123,255,0.7)" }}>Start free <ArrowRight size={16} /></Link>
-          <div className="mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 text-[12px] text-white/45">
-            <span className="inline-flex items-center gap-1.5"><Check size={13} className="text-iris" /> No credit card</span>
-            <span className="inline-flex items-center gap-1.5"><Check size={13} className="text-iris" /> Free tier forever</span>
-          </div>
-        </Reveal>
-      </section>
-
-      <footer className="border-t border-white/8 px-6 py-8">
-        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 text-[12px] text-white/40 sm:flex-row">
-          <div className="flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-lg text-white" style={{ background: "linear-gradient(135deg,#6E7BFF,#4F59E0)" }}><span className="text-[10px] font-black">M</span></span><span className="font-medium text-white/65" style={{ fontFamily: SERIF }}>Mapanisy</span><span>· The AI story-map studio</span></div>
-          <div className="flex items-center gap-5"><Link href="/pricing" className="hover:text-white/70">Pricing</Link><Link href="/sign-in" className="hover:text-white/70">Sign in</Link><Link href="/sign-up" className="hover:text-white/70">Start free</Link></div>
+        <div className="mt-8 text-center text-[11px] text-white/20">
+          © {new Date().getFullYear()} Prompt Studio. All rights reserved. Built with Remotion & Next.js.
         </div>
       </footer>
     </div>
   );
 };
 
-/* ───────────────────────── tilt card ───────────────────────── */
-
-const TiltCard: React.FC<{ icon: React.ComponentType<{ size?: number; className?: string }>; t: string; b: string }> = ({ icon: Icon, t, b }) => {
-  const ref = useRef<HTMLDivElement>(null);
-  const onMove = (e: React.MouseEvent) => {
-    const el = ref.current; if (!el) return;
-    const r = el.getBoundingClientRect();
-    const px = (e.clientX - r.left) / r.width - 0.5;
-    const py = (e.clientY - r.top) / r.height - 0.5;
-    el.style.transform = `perspective(800px) rotateX(${py * -6}deg) rotateY(${px * 6}deg) translateY(-4px)`;
-  };
-  const reset = () => { if (ref.current) ref.current.style.transform = ""; };
-  return (
-    <div ref={ref} onMouseMove={onMove} onMouseLeave={reset} className="group h-full rounded-2xl border border-white/10 bg-white/[0.03] p-7 transition-[border-color,background-color] duration-300 hover:border-iris/40 hover:bg-white/[0.05]" style={{ transition: "transform .15s ease-out, border-color .3s, background-color .3s" }}>
-      <div className="mb-5 inline-flex h-11 w-11 items-center justify-center rounded-xl text-iris ring-1 ring-iris/25" style={{ background: "rgba(110,123,255,0.1)" }}><Icon size={20} /></div>
-      <h3 className="mb-2 text-[16px] font-medium">{t}</h3>
-      <p className="text-[14px] leading-relaxed text-white/50">{b}</p>
-    </div>
-  );
-};
-
-const FEATURES = [
-  { icon: Globe2, t: "Tell it once", b: "Describe your idea and the director asks the 3–4 questions that matter, then builds the best version." },
-  { icon: Route, t: "Drop a GPS track", b: "GPX, TCX, KML — a run, hike, flight or drive becomes an animated flythrough." },
-  { icon: Film, t: "Cinematic camera", b: "Fly in, orbit, push, pull back — tuned with sliders. No keyframes, ever." },
-  { icon: MountainSnow, t: "Looks that grade themselves", b: "Documentary noir, topographic, satellite — every style locks a cohesive palette and grade." },
-  { icon: MousePointer2, t: "Edit by asking", b: "Click anything in the preview to drag and scale it, or just type what to change." },
-  { icon: Share2, t: "Share & export 4K", b: "Send a read-only viewer link, or render a broadcast-ready 4K clip in any aspect." },
-];
-
 const PRICING = [
   { name: "Free", price: "$0", suffix: "", tagline: "For trying it out.", featured: false, cta: "Start free", features: ["3 animations / month", "1080p export", "Watermark", "All scene types"] },
   { name: "Creator", price: "$19", suffix: "/mo", tagline: "For solo creators.", featured: true, cta: "Start free", features: ["Unlimited 4K renders", "No watermark", "All styles + GPS tracks", "Share links"] },
-  { name: "Studio", price: "$39", suffix: "/mo", tagline: "For power users.", featured: false, cta: "Go Pro", features: ["Everything in Creator", "AI Director + story arcs", "Brand kits + NLE export", "Priority support"] },
+  { name: "Pro", price: "$39", suffix: "/mo", tagline: "For power users.", featured: false, cta: "Go Pro", features: ["Everything in Creator", "AI Director + story arcs", "Brand kits + NLE export", "Priority support"] },
 ];

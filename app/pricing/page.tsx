@@ -5,7 +5,7 @@ import { PricingCheckoutButton } from "@/components/PricingCheckoutButton/Pricin
 
 export const metadata = { title: "Pricing — Mapanisy" };
 
-const DISPLAY_ORDER = ["free", "creator", "teams", "agency"] as const;
+const DISPLAY_ORDER = ["free", "creator", "teams", "custom"] as const;
 
 export default function PricingPage() {
   return (
@@ -38,12 +38,12 @@ export default function PricingPage() {
         <div className="relative max-w-2xl mx-auto">
           <div className="text-[10px] uppercase tracking-[0.4em] text-amber mb-4">Pricing</div>
           <h1 className="text-5xl font-light mb-5 leading-tight">
-            Cinematic animations,<br />
-            <span className="text-amber">billed by render time</span>
+            Unlimited 4K renders,<br />
+            <span className="text-amber">on every paid plan</span>
           </h1>
           <p className="text-graphite/50 max-w-lg mx-auto leading-relaxed">
-            You only pay for what you render. No seats, no feature gates.
-            Start free, upgrade when you outgrow it.
+            Renders run on your machine, so we never meter them. Pay only to unlock
+            4K, drop the watermark, and add pro features. Start free.
           </p>
         </div>
       </section>
@@ -85,9 +85,11 @@ export default function PricingPage() {
                   </div>
                   <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-line bg-paper-100 px-2.5 py-1 text-[11px] text-graphite/60">
                     <Zap size={10} className="text-amber" />
-                    {tier.maxRenders != null
-                      ? `${tier.maxRenders} free animation${tier.maxRenders === 1 ? "" : "s"}`
-                      : `${tier.minutesPerMonth} min/mo`}
+                    {tier.unlimited
+                      ? "Unlimited 4K renders"
+                      : tier.maxRenders != null
+                        ? `${tier.maxRenders} free animation${tier.maxRenders === 1 ? "" : "s"}`
+                        : `${tier.minutesPerMonth} min/mo`}
                   </div>
                 </div>
 
@@ -109,13 +111,6 @@ export default function PricingPage() {
                   >
                     Start for free
                   </Link>
-                ) : key === "agency" ? (
-                  <a
-                    href="mailto:michaandguadi@gmail.com?subject=Mapanisy Agency Plan"
-                    className="block rounded-lg py-2.5 text-center text-xs font-semibold bg-paper-100 text-graphite hover:bg-paper-200 border border-line transition-colors"
-                  >
-                    Contact us
-                  </a>
                 ) : (
                   <PricingCheckoutButton
                     priceId={tier.stripePriceId}
@@ -128,17 +123,17 @@ export default function PricingPage() {
           })}
         </div>
 
-        {/* Agency / Custom strip */}
+        {/* Enterprise strip */}
         <div className="mt-6 rounded-xl border border-line/60 bg-paper-100 p-7 flex flex-col md:flex-row items-center justify-between gap-5">
           <div>
-            <div className="text-sm font-semibold text-graphite mb-1">Custom / Agency</div>
+            <div className="text-sm font-semibold text-graphite mb-1">Enterprise</div>
             <p className="text-xs text-graphite/45 max-w-md">
-              Need more than 1500 min/mo, white-label, or a custom production deal?
-              We&apos;ll set up a plan that fits your pipeline.
+              Need team seats at scale, white-label, an API, or a custom production
+              deal? We&apos;ll set up a plan that fits your pipeline.
             </p>
           </div>
           <a
-            href="mailto:michaandguadi@gmail.com?subject=Mapanisy Agency Plan"
+            href="mailto:michaandguadi@gmail.com?subject=Mapanisy Enterprise Plan"
             className="shrink-0 rounded-lg border border-amber/30 bg-amber/8 px-5 py-2.5 text-xs font-semibold text-amber hover:bg-amber/15 transition-colors"
           >
             Contact us →

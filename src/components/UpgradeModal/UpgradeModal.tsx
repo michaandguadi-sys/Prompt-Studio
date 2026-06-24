@@ -66,7 +66,7 @@ export const UpgradeModal: React.FC<{
               return (
                 <div key={t} className="rounded-lg border border-ink-700 bg-ink-900/40 p-3 text-center">
                   <div className="text-[10px] uppercase tracking-wider text-amber mb-1">{tc.label}</div>
-                  <div className="text-sm font-semibold text-white">{tc.minutesPerMonth} min</div>
+                  <div className="text-sm font-semibold text-white">{tc.unlimited ? "Unlimited" : `${tc.minutesPerMonth} min`}</div>
                   <div className="text-[10px] text-white/40">${tc.priceUSD}/mo</div>
                 </div>
               );
