@@ -57,6 +57,13 @@ type EditorState = {
   /** Preview the WHOLE story (all scenes back-to-back) instead of the active scene. */
   playStory: boolean;
   setPlayStory: (v: boolean) => void;
+
+  /** Live playback position (frames) of the scene preview — drives the timeline playhead. Transient (not persisted). */
+  playheadFrame: number;
+  setPlayheadFrame: (f: number) => void;
+  /** The scene Player registers a seek fn here so the timeline ruler can scrub. */
+  requestSeek: ((frame: number) => void) | null;
+  registerSeek: (fn: ((frame: number) => void) | null) => void;
   /** Pro mode reveals the camera layer + advanced fine-tuning controls. Simple
    *  mode (default) keeps the camera auto-managed and the panels beginner-clean. */
   proMode: boolean;
@@ -309,6 +316,11 @@ export const useEditor = create<EditorState>()(
         }),
         canUndo: () => get().past.length > 0,
         canRedo: () => get().future.length > 0,
+
+        playheadFrame: 0,
+        setPlayheadFrame: (f) => set({ playheadFrame: f }),
+        requestSeek: null,
+        registerSeek: (fn) => set({ requestSeek: fn }),
       };
     },
     {

@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useMemo, useRef } from "react";
-import { Player } from "@remotion/player";
+import React, { useEffect, useMemo, useRef } from "react";
+import { Player, type PlayerRef } from "@remotion/player";
 import { MapComposition } from "../render/MapComposition";
 import { StoryComposition, storyFrames } from "../render/StoryComposition";
 import { dimsFor } from "../doc/schema";
@@ -49,6 +49,20 @@ export const Canvas: React.FC = () => {
   const totalFrames = useMemo(() => storyFrames(scenes), [scenes]);
   const sceneProps = useMemo(() => ({ comp, watermark }), [comp, watermark]);
   const storyProps = useMemo(() => ({ scenes, watermark }), [scenes, watermark]);
+
+  // Sync the scene Player's playback frame → store (drives the timeline playhead)
+  // and register a seek fn so the timeline ruler can scrub the preview.
+  const playerRef = useRef<PlayerRef>(null);
+  const setPlayheadFrame = useEditor((s) => s.setPlayheadFrame);
+  const registerSeek = useEditor((s) => s.registerSeek);
+  useEffect(() => {
+    const p = playerRef.current;
+    if (playStory || !p) return;
+    const onFrame = (e: { detail: { frame: number } }) => setPlayheadFrame(e.detail.frame);
+    p.addEventListener("frameupdate", onFrame);
+    registerSeek((f) => playerRef.current?.seekTo(f));
+    return () => { p.removeEventListener("frameupdate", onFrame); registerSeek(null); };
+  }, [playStory, setPlayheadFrame, registerSeek]);
 
   return (
     <div className="relative flex h-full flex-col bg-paper-50">
@@ -103,7 +117,8 @@ export const Canvas: React.FC = () => {
           ) : (
             <>
               <Player
-                key={`${comp.aspect}-${comp.layers.length}`}
+                ref={playerRef}
+                key={comp.aspect}
                 component={MapComposition as any}
                 inputProps={sceneProps}
                 durationInFrames={sceneFrames}

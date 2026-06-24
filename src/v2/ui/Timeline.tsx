@@ -143,6 +143,14 @@ const BeatTracks: React.FC<{
   patchLayer: (id: string, p: any) => void;
 }> = ({ layers, dur, selectedId, select, patchTiming, patchLayer }) => {
   const ticks = Array.from({ length: Math.floor(dur) + 1 }, (_, i) => i);
+  const playheadFrame = useEditor((s) => s.playheadFrame);
+  const fps = useEditor((s) => s.project.composition.fps);
+  const requestSeek = useEditor((s) => s.requestSeek);
+  const pct = dur > 0 && fps > 0 ? clamp((playheadFrame / fps / dur) * 100, 0, 100) : 0;
+  const seekAt = (e: React.PointerEvent) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    requestSeek?.(Math.round(clamp((e.clientX - r.left) / r.width, 0, 1) * dur * fps));
+  };
 
   const startDrag = (e: React.PointerEvent, l: Layer, mode: "move" | "left" | "right") => {
     e.stopPropagation();
@@ -182,11 +190,11 @@ const BeatTracks: React.FC<{
   };
 
   return (
-    <div>
-      {/* Ruler */}
+    <div className="relative">
+      {/* Ruler — click to scrub the preview */}
       <div className="flex h-5 border-b border-line">
         <div className="w-28 shrink-0" />
-        <div className="relative flex-1">
+        <div className="relative flex-1 cursor-pointer" onPointerDown={seekAt}>
           {ticks.map((t) => (
             <span key={t} className="absolute top-0.5 -translate-x-1/2 text-[9px] tabular-nums text-graphite/45" style={{ left: `${(t / dur) * 100}%` }}>{t}s</span>
           ))}
@@ -236,6 +244,17 @@ const BeatTracks: React.FC<{
           );
         })}
       </div>
+
+      {/* Playhead — a creative scrubber synced to the live preview. Offset past
+          the 7rem (w-28) track-label gutter so it lands over the timeline area. */}
+      {dur > 0 && fps > 0 && (
+        <div className="pointer-events-none absolute inset-y-0 z-10" style={{ left: "7rem", right: 0 }}>
+          <div className="absolute inset-y-0" style={{ left: `${pct}%` }}>
+            <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2" style={{ background: "#6E7BFF", boxShadow: "0 0 6px 0 rgba(110,123,255,0.85)" }} />
+            <div className="absolute left-1/2 top-0 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/3 rotate-45 rounded-[2px]" style={{ background: "#6E7BFF", boxShadow: "0 0 8px 1px rgba(110,123,255,0.9)" }} />
+          </div>
+        </div>
+      )}
     </div>
   );
 };
