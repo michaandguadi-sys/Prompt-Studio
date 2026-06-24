@@ -29,6 +29,12 @@ export default function DashboardPage() {
   const [copied, setCopied]           = useState(false);
   const [rotating, setRotating]       = useState(false);
   const [agentKeyError, setAgentKeyError] = useState<string | null>(null);
+  const [agentOs, setAgentOs] = useState<"mac" | "win" | "linux">("mac");
+  const [outFolder, setOutFolder] = useState("");
+  useEffect(() => {
+    const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+    setAgentOs(/Win/i.test(ua) ? "win" : /Linux|X11/i.test(ua) && !/Android/i.test(ua) ? "linux" : "mac");
+  }, []);
   const statusIntervalRef             = useRef<ReturnType<typeof setInterval>>(undefined);
 
   const fetchAgentKey = useCallback(async () => {
@@ -106,16 +112,29 @@ export default function DashboardPage() {
   }, [fetchAgentKey, pollAgentStatus]);
 
   const tierCfg         = quota ? TIERS[quota.tier] : null;
+  const unlimited       = !!tierCfg?.unlimited;
   const remainingMin    = quota ? Math.max(0, quota.limitMinutes - quota.usedMinutes) : 0;
   const pctUsed         = quota ? Math.min(100, Math.round(quota.fraction * 100)) : 0;
   // Free tier is metered by animation count; paid tiers by render minutes.
   const isCount         = quota?.unit === "animation";
   const animWord        = quota && quota.maxRenders === 1 ? "animation" : "animations";
   const usedValue       = quota ? (isCount ? `${quota.usedRenders}` : `${quota.usedMinutes.toFixed(1)} min`) : "—";
-  const usedSub         = quota ? (isCount ? `of ${quota.maxRenders} free ${animWord}` : `of ${quota.limitMinutes} min`) : "";
-  const remainingValue  = quota ? (isCount ? `${Math.max(0, (quota.maxRenders ?? 0) - quota.usedRenders)}` : `${remainingMin.toFixed(1)} min`) : "—";
+  const usedSub         = quota ? (unlimited ? "rendered this period" : isCount ? `of ${quota.maxRenders} free ${animWord}` : `of ${quota.limitMinutes} min`) : "";
+  const remainingValue  = quota ? (unlimited ? "Unlimited" : isCount ? `${Math.max(0, (quota.maxRenders ?? 0) - quota.usedRenders)}` : `${remainingMin.toFixed(1)} min`) : "—";
   const statusColor     = pctUsed >= 90 ? "bg-red-500" : pctUsed >= 70 ? "bg-amber" : "bg-emerald-500";
   const statusText      = pctUsed >= 90 ? "text-red-400" : pctUsed >= 70 ? "text-amber" : "text-emerald-400";
+
+  // Render-agent connect command — per-OS, with the chosen output folder. The
+  // renderer is plain Node + Remotion, so it runs on macOS, Windows and Linux.
+  const agentOrigin = typeof window !== "undefined" ? window.location.origin : "";
+  const agentKeyStr = agentKey ?? "YOUR_KEY";
+  const outArg      = outFolder.trim() ? ` --output "${outFolder.trim()}"` : "";
+  const connectCmd  = agentOs === "win"
+    ? `mkdir "$HOME\\.mapanisy-agent" -Force; curl.exe -fsSL "${agentOrigin}/api/agent/script" -o "$HOME\\.mapanisy-agent\\agent.mjs"; node "$HOME\\.mapanisy-agent\\agent.mjs" --key ${agentKeyStr}${outArg}`
+    : `mkdir -p ~/.mapanisy-agent && curl -fsSL '${agentOrigin}/api/agent/script' -o ~/.mapanisy-agent/agent.mjs && node ~/.mapanisy-agent/agent.mjs --key ${agentKeyStr}${outArg}`;
+  const restartCmd  = agentOs === "win"
+    ? `node "$HOME\\.mapanisy-agent\\agent.mjs" --key ${agentKeyStr}${outArg}`
+    : `node ~/.mapanisy-agent/agent.mjs --key ${agentKeyStr}${outArg}`;
 
   return (
     <div className="h-full overflow-y-auto bg-paper-50">
@@ -181,7 +200,7 @@ export default function DashboardPage() {
                 icon={<TrendingUp size={16} />}
                 label="Remaining"
                 value={remainingValue}
-                sub={`${100 - pctUsed}% left`}
+                sub={unlimited ? "no limit" : `${100 - pctUsed}% left`}
                 delay={110}
               />
             </div>
@@ -210,7 +229,7 @@ export default function DashboardPage() {
                   {isCount ? `${quota.usedRenders} ${animWord} used` : `${quota.usedMinutes.toFixed(1)} min used`}
                 </span>
                 <span className="text-[11px] text-graphite/30">
-                  {isCount ? `${quota.maxRenders} ${animWord} limit` : `${quota.limitMinutes} min limit`}
+                  {unlimited ? "Unlimited" : isCount ? `${quota.maxRenders} ${animWord} limit` : `${quota.limitMinutes} min limit`}
                 </span>
               </div>
 
@@ -238,7 +257,7 @@ export default function DashboardPage() {
             </div>
 
             {/* ── Upgrade CTA ────────────────────────────────────────── */}
-            {quota.tier !== "agency" && (
+            {quota.tier !== "custom" && quota.tier !== "agency" && (
               <Link
                 href="/pricing"
                 className="group flex items-center justify-between rounded-xl border border-amber/25 bg-amber/5 hover:bg-amber/8 hover:border-amber/40 px-6 py-5 transition-all duration-200 anim-fade-up"
@@ -373,24 +392,51 @@ export default function DashboardPage() {
               )}
             </div>
 
-            {/* Setup instructions — one command */}
+            {/* Connect — one command, any OS */}
             <div className="space-y-3">
-              <div className="text-[10px] uppercase tracking-[0.2em] text-graphite/30">Setup · one command</div>
-              <SetupStep n={1} label="Paste this into Terminal — that's it (needs Node.js 18+)">
-                <CopyCmd highlight text={`mkdir -p ~/.mapanisy-agent && curl -fsSL '${typeof window !== "undefined" ? window.location.origin : ""}/api/agent/script' -o ~/.mapanisy-agent/agent.mjs && node ~/.mapanisy-agent/agent.mjs --key ${agentKey ?? "YOUR_KEY"}`} />
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-graphite/30">Connect · one command</div>
+                <div className="flex items-center rounded-lg border border-line/60 bg-paper-100 p-0.5">
+                  {([["mac", "macOS"], ["win", "Windows"], ["linux", "Linux"]] as const).map(([id, lbl]) => (
+                    <button
+                      key={id}
+                      onClick={() => setAgentOs(id)}
+                      className={`rounded-md px-2.5 py-1 text-[10px] font-semibold transition-colors ${agentOs === id ? "bg-brand text-white shadow-glow-iris" : "text-graphite/45 hover:text-graphite/70"}`}
+                    >
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Where to save renders (blank = Downloads) */}
+              <div className="flex items-center gap-2">
+                <span className="shrink-0 text-[11px] text-graphite/45">Save renders to</span>
+                <input
+                  value={outFolder}
+                  onChange={(e) => setOutFolder(e.target.value)}
+                  placeholder={agentOs === "win" ? "Downloads (default) — or e.g. C:\\Users\\you\\Videos" : "Downloads (default) — or e.g. ~/Movies"}
+                  className="flex-1 rounded-lg border border-line/60 bg-white px-3 py-1.5 text-[11px] text-graphite/70 placeholder:text-graphite/30 focus:border-iris/50 focus:outline-none"
+                />
+              </div>
+
+              <SetupStep n={1} label={agentOs === "win" ? "Paste into PowerShell — that's it (needs Node.js 18+)" : agentOs === "linux" ? "Paste into your terminal — that's it (needs Node.js 18+)" : "Paste into Terminal — that's it (needs Node.js 18+)"}>
+                <CopyCmd highlight text={connectCmd} />
               </SetupStep>
+
               <p className="text-[11px] text-graphite/35 leading-relaxed">
-                The <span className="text-graphite/50">first run installs the render engine automatically</span> (~200 MB incl. a headless browser) — one time, then it's instant. Keep the terminal open; the agent shows as{" "}
-                <span className="text-emerald-400/70">Connected</span> above while it runs and renders straight to your Downloads.
+                First run installs the render engine automatically (~200 MB incl. a headless browser) — one time, then instant. Keep the window open; the agent shows as{" "}
+                <span className="text-emerald-400/70">Connected</span> above, renders full 4K on your machine, and{" "}
+                <span className="text-graphite/50">opens the output folder for you the moment each render finishes</span>.
               </p>
+
               <details className="group">
-                <summary className="cursor-pointer text-[11px] text-graphite/30 hover:text-graphite/50 select-none">Restart it later / Windows / no Node?</summary>
+                <summary className="cursor-pointer select-none text-[11px] text-graphite/30 hover:text-graphite/50">Restart later · no Node?</summary>
                 <div className="mt-2 space-y-2">
                   <div className="text-[10px] uppercase tracking-[0.2em] text-graphite/25">Restart anytime</div>
-                  <CopyCmd text={`node ~/.mapanisy-agent/agent.mjs --key ${agentKey ?? "YOUR_KEY"}`} />
-                  <p className="text-[11px] text-graphite/25 leading-relaxed">
-                    No Node yet? Install it from <span className="text-graphite/40">nodejs.org</span> (LTS), then re-run the command.
-                    Windows (PowerShell): <span className="font-mono text-graphite/40">mkdir ~/.mapanisy-agent</span>, then the same <span className="font-mono text-graphite/40">curl …</span> and <span className="font-mono text-graphite/40">node …</span> lines.
+                  <CopyCmd text={restartCmd} />
+                  <p className="text-[11px] leading-relaxed text-graphite/25">
+                    No Node yet? Install the LTS from <span className="text-graphite/40">nodejs.org</span>, then re-run. The renderer runs on macOS, Windows and Linux.
                   </p>
                 </div>
               </details>

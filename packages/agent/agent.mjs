@@ -70,6 +70,10 @@ function getArg(name) {
 const PS_HOST   = (getArg("url") ?? "https://app.promptstudio.io").replace(/\/$/, "");
 const AGENT_KEY = getArg("key");
 const OUT_DIR   = getArg("output") ?? join(homedir(), "Downloads");
+// After each render, open the output folder in the OS file manager (Finder on
+// macOS, Explorer on Windows, the default file manager on Linux). On by default;
+// pass --no-reveal to disable (e.g. on a headless server).
+const REVEAL    = !args.includes("--no-reveal");
 // Sent as the x-agent-machine HTTP header - must stay ASCII/Latin-1.
 // Header values are ByteStrings; chars > 255 (an em dash, an accented
 // hostname) throw at fetch time. Strip anything non-ASCII.
@@ -140,6 +144,21 @@ async function reportComplete(jobId, error) {
       method: "POST",
       body: JSON.stringify({ agentKey: AGENT_KEY, jobId, ...(error ? { error: String(error) } : {}) }),
     });
+  } catch {}
+}
+
+// Reveal the finished file in the OS file manager — cross-platform, fire-and-
+// forget, and wrapped so it can NEVER crash the agent (a missing file manager
+// on a headless box just no-ops).
+function revealInFinder(file) {
+  if (!REVEAL) return;
+  try {
+    const p = process.platform;
+    const cmd     = p === "darwin" ? "open" : p === "win32" ? "explorer" : "xdg-open";
+    const cmdArgs = p === "darwin" ? ["-R", file] : p === "win32" ? [`/select,${file}`] : [dirname(file)];
+    const proc = spawn(cmd, cmdArgs, { stdio: "ignore", detached: true });
+    proc.on("error", () => {});
+    proc.unref();
   } catch {}
 }
 
@@ -286,6 +305,7 @@ async function renderJob(job) {
 
   console.log(`\n✅  Done — saved to ${outFile}`);
   await reportProgress(jobId, 1.0, `Saved to ${outFile}`);
+  revealInFinder(outFile); // pop the folder open so the file is right there
   return outFile;
 }
 
@@ -348,11 +368,12 @@ try { BROWSER_EXECUTABLE = await resolveBrowser(); }
 catch (e) { console.error(`\n❌  ${e.message}\n`); process.exit(1); }
 
 console.log(`\n╔══════════════════════════════════════╗`);
-console.log(`║   Prompt Studio Render Agent v1.5    ║`);
+console.log(`║   Prompt Studio Render Agent v1.6    ║`);
 console.log(`╚══════════════════════════════════════╝`);
 console.log(`  Server : ${PS_HOST}`);
 console.log(`  Key    : ${AGENT_KEY.slice(0, 8)}…`);
 console.log(`  Output : ${OUT_DIR}`);
+console.log(`  Reveal : ${REVEAL ? "opens the folder when a render finishes" : "off (--no-reveal)"}`);
 console.log(`  Browser: ${BROWSER_EXECUTABLE ? `${BROWSER_EXECUTABLE} (installed)` : "Remotion headless shell (downloaded)"}`);
 console.log(`  GL     : ${GL_BACKEND} (maps need WebGL; use --gl=swangle if blank)`);
 console.log(`\n  Polling for render jobs… (Ctrl+C to stop)\n`);
