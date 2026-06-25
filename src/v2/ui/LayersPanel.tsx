@@ -3,10 +3,10 @@
 import React, { useRef, useState } from "react";
 import {
   Video, Globe2, Plane, MapPin, Flag, Type, BarChart3, Image as ImageIcon,
-  Swords, MessageSquare, Share2, Sun, Eye, EyeOff, ChevronUp, ChevronDown, Trash2, Plus, Copy, Route, Loader2,
+  Swords, MessageSquare, Share2, Sun, Eye, EyeOff, ChevronUp, ChevronDown, Trash2, Plus, Copy, Route, Loader2, CircleDot,
 } from "lucide-react";
 import { useEditor } from "../store/editor";
-import { ADDABLE_LAYERS, LAYER_REGISTRY } from "../layers/registry";
+import { LAYER_REGISTRY } from "../layers/registry";
 import type { LayerType } from "../doc/schema";
 import { parseTrackFile } from "../track";
 import { STYLE_PRESETS, VARIANT_PRESETS } from "../track/presets";
@@ -16,8 +16,17 @@ const ICONS: Record<string, React.ReactNode> = {
   MapPin: <MapPin size={14} />, Flag: <Flag size={14} />, Type: <Type size={14} />,
   BarChart3: <BarChart3 size={14} />, Image: <ImageIcon size={14} />, Swords: <Swords size={14} />,
   MessageSquare: <MessageSquare size={14} />, Share2: <Share2 size={14} />, Sun: <Sun size={14} />,
+  Route: <Route size={14} />, CircleDot: <CircleDot size={14} />,
 };
 const iconFor = (t: LayerType) => ICONS[LAYER_REGISTRY[t].icon] ?? <MapPin size={14} />;
+
+/** Add-layer palette, grouped so every overlay (incl. Highlight) is easy to find. */
+const ADD_CATEGORIES: { label: string; types: LayerType[] }[] = [
+  { label: "Places & pins", types: ["label", "marker", "flag", "annotation", "spotlight"] },
+  { label: "Regions & data", types: ["highlight", "choropleth", "bubble", "chart"] },
+  { label: "Routes & networks", types: ["route", "connections"] },
+  { label: "Titles & media", types: ["title", "image"] },
+];
 
 export const LayersPanel: React.FC = () => {
   const allLayers = useEditor((s) => s.project.composition.layers);
@@ -94,19 +103,27 @@ export const LayersPanel: React.FC = () => {
           {addOpen && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setAddOpen(false)} />
-              <div className="absolute right-0 z-20 mt-1 w-60 overflow-hidden rounded-xl glass-light p-1">
-                {ADDABLE_LAYERS.map((m) => (
-                  <button
-                    key={m.type}
-                    onClick={() => { addLayer(m.type); setAddOpen(false); }}
-                    className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-black/5 transition-colors"
-                  >
-                    <span className="mt-0.5 text-iris">{iconFor(m.type)}</span>
-                    <span className="min-w-0">
-                      <span className="block text-xs font-medium text-graphite">{m.label}</span>
-                      <span className="block text-[10px] text-graphite/40 leading-tight">{m.hint}</span>
-                    </span>
-                  </button>
+              <div className="absolute right-0 z-20 mt-1 max-h-[62vh] w-72 overflow-y-auto rounded-xl glass-light p-1.5">
+                {ADD_CATEGORIES.map((cat) => (
+                  <div key={cat.label} className="mb-1 last:mb-0">
+                    <div className="px-2 pb-1 pt-1.5 text-[9px] font-semibold uppercase tracking-[0.18em] text-graphite/40">{cat.label}</div>
+                    {cat.types.map((t) => {
+                      const m = LAYER_REGISTRY[t];
+                      return (
+                        <button
+                          key={t}
+                          onClick={() => { addLayer(t); setAddOpen(false); }}
+                          className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-black/5 transition-colors"
+                        >
+                          <span className="mt-0.5 text-iris">{iconFor(t)}</span>
+                          <span className="min-w-0">
+                            <span className="block text-xs font-medium text-graphite">{m.label}</span>
+                            <span className="block text-[10px] leading-tight text-graphite/40">{m.hint}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 ))}
               </div>
             </>
