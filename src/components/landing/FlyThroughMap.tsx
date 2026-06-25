@@ -28,13 +28,15 @@ const ROUTE: [number, number][] = [
   [83.958, 28.428], [83.932, 28.450], [83.912, 28.478], [83.892, 28.506],
   [83.872, 28.532], [83.852, 28.557], [83.832, 28.578], [83.814, 28.596],
 ];
-// Facts that GLOW past — opacity is windowed on camera progress, so each fades
-// in as you approach, peaks alongside, and is gone once you've flown past it.
-const FEATURES: { at: number; lngLat: [number, number]; label: string; sub: string }[] = [
-  { at: 0.16, lngLat: [83.912, 28.480], label: "AI-directed", sub: "it researches & frames the shot" },
-  { at: 0.37, lngLat: [83.880, 28.524], label: "Cinematic camera", sub: "fly · orbit · push — no keyframes" },
-  { at: 0.56, lngLat: [83.850, 28.558], label: "Looks that grade themselves", sub: "noir · topographic · satellite" },
-  { at: 0.72, lngLat: [83.830, 28.580], label: "Highlight · route · data", sub: "every overlay, one prompt away" },
+// Facts that GLOW past — bold tracked text, windowed on camera progress so each
+// fades in as you approach, peaks alongside, and is gone once you've flown past.
+const FACTS: { at: number; lngLat: [number, number]; text: string }[] = [
+  { at: 0.13, lngLat: [83.918, 28.470], text: "Describe a moment — it builds the whole scene" },
+  { at: 0.28, lngLat: [83.895, 28.504], text: "Draw animated routes between any places" },
+  { at: 0.42, lngLat: [83.872, 28.534], text: "Highlight a country, a region, an area" },
+  { at: 0.56, lngLat: [83.850, 28.558], text: "A cinematic camera — fly, orbit, push in" },
+  { at: 0.68, lngLat: [83.836, 28.574], text: "Looks that grade themselves" },
+  { at: 0.78, lngLat: [83.822, 28.588], text: "Export broadcast-ready 4K, in minutes" },
 ];
 // ALL zoom values stay in [12, 13) → one raster level the whole way → no switch.
 const CAM = [
@@ -148,7 +150,7 @@ export const FlyThroughMap: React.FC = () => {
   const hlOpacity = clamp((p - 0.68) / 0.18);
   const titleP = clamp((p - 0.80) / 0.12);     // reveals, then holds to 1.0
   const barVh = lerp(0, 6, clamp(p / 0.05));
-  const dissolve = clamp((p - 0.95) / 0.05);     // seamless dissolve into the page below
+  const dissolve = clamp((p - 0.97) / 0.03);     // short, seamless dissolve into the page below
 
   return (
     <section ref={ref} id="how" className="relative" style={{ height: "480vh" }}>
@@ -172,16 +174,16 @@ export const FlyThroughMap: React.FC = () => {
             <Layer id="ft-hl-fill" type="fill" paint={{ "fill-color": "#6E7BFF", "fill-opacity": 0.24 * hlOpacity }} />
             <Layer id="ft-hl-line" type="line" paint={{ "line-color": "#9CA6FF", "line-width": 2, "line-opacity": hlOpacity }} />
           </Source>
-          {FEATURES.map((w, i) => {
+          {FACTS.map((w, i) => {
             // Windowed on camera progress → glows in, peaks, then is gone once passed.
-            const o = ease(clamp(1 - Math.abs(p - w.at) / 0.08));
+            const o = ease(clamp(1 - Math.abs(p - w.at) / 0.09));
             return (
-              <Marker key={i} longitude={w.lngLat[0]} latitude={w.lngLat[1]} anchor="bottom">
-                <div className="pointer-events-none flex flex-col items-center" style={{ opacity: o, transform: `translateY(${(1 - o) * 16}px)` }}>
-                  <div className="whitespace-nowrap text-[15px] font-semibold tracking-tight text-white" style={{ textShadow: "0 0 18px rgba(47,224,255,0.95), 0 1px 12px rgba(0,0,0,0.9)" }}>{w.label}</div>
-                  <div className="mt-0.5 whitespace-nowrap text-[11px] text-cyan" style={{ textShadow: "0 0 14px rgba(47,224,255,0.9)" }}>{w.sub}</div>
-                  <div className="mt-1.5 w-px" style={{ height: 40, background: "linear-gradient(to bottom,#2fe0ff,rgba(47,224,255,0))" }} />
-                  <div className="-mt-0.5 h-1.5 w-1.5 rounded-full bg-cyan" style={{ boxShadow: "0 0 12px #2fe0ff" }} />
+              <Marker key={i} longitude={w.lngLat[0]} latitude={w.lngLat[1]} anchor="center">
+                <div
+                  className="pointer-events-none max-w-[44vw] text-center text-[clamp(17px,2.6vw,30px)] font-bold leading-[1.12] tracking-tight text-white"
+                  style={{ opacity: o, transform: `translateY(${(1 - o) * 20}px)`, textShadow: "0 0 24px rgba(47,224,255,0.95), 0 2px 18px rgba(0,0,0,0.95)" }}
+                >
+                  {w.text}
                 </div>
               </Marker>
             );
@@ -223,25 +225,22 @@ export const FlyThroughMap: React.FC = () => {
           <p className="mx-auto mt-3 max-w-md text-[15px] text-white/85" style={{ textShadow: "0 1px 16px rgba(0,0,0,0.9)" }}>Drop a track or describe a story — watch a cinematic map build itself.</p>
         </div>
 
-        {/* bold scroll cue */}
-        <div className="pointer-events-none absolute bottom-[9vh] left-1/2 z-10 flex -translate-x-1/2 flex-col items-center gap-2.5" style={{ opacity: clamp(1 - p / 0.05) }}>
-          <div className="relative h-9 w-[22px] rounded-full border-2 border-white/75" style={{ boxShadow: "0 0 18px rgba(47,224,255,0.55)" }}>
-            <span className="absolute left-1/2 top-2 h-1.5 w-1 rounded-full bg-cyan" style={{ animation: "scrollDot 1.5s ease-in-out infinite" }} />
-          </div>
-          <span className="text-[11px] font-semibold uppercase tracking-[0.32em] text-white/85" style={{ textShadow: "0 1px 12px rgba(0,0,0,0.9)" }}>Scroll to fly</span>
-          <div className="-space-y-2 text-cyan" style={{ animation: "breathe 1.8s ease-in-out infinite" }}>
-            <ChevronDown size={18} className="block" /><ChevronDown size={18} className="-mt-2 block" />
+        {/* creative scroll cue — big centered glowing ring, icon only */}
+        <div className="pointer-events-none absolute bottom-[10vh] left-1/2 z-10 -translate-x-1/2" style={{ opacity: clamp(1 - p / 0.05) }}>
+          <div className="relative grid h-16 w-16 place-items-center">
+            <span className="absolute inset-0 rounded-full border border-cyan/50 animate-ping" />
+            <span className="absolute inset-1.5 rounded-full border-2 border-white/30" style={{ boxShadow: "0 0 26px rgba(47,224,255,0.55), inset 0 0 14px rgba(47,224,255,0.25)" }} />
+            <ChevronDown size={26} className="relative text-cyan animate-bounce" style={{ filter: "drop-shadow(0 0 10px #2fe0ff)" }} />
           </div>
         </div>
 
         {/* title reveal (holds through the push-in) */}
         <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center px-6 text-center" style={{ opacity: titleP, transform: `translateY(${(1 - titleP) * 26}px) scale(${lerp(0.96, 1, titleP)})` }}>
           <div className="absolute h-[64vmin] w-[64vmin] rounded-full" style={{ background: "radial-gradient(circle, rgba(5,6,14,0.76), transparent 70%)" }} />
-          <div className="relative text-[11px] font-semibold uppercase tracking-[0.4em] text-white/80" style={{ textShadow: "0 1px 16px rgba(0,0,0,0.9)" }}>Cinematic · 4K · in minutes</div>
-          <h2 className="relative mt-3 text-[clamp(2.4rem,7vw,5rem)] font-medium leading-[1.02] tracking-tight text-white" style={{ fontFamily: SERIF, textShadow: "0 2px 40px rgba(0,0,0,0.85)" }}>
-            Maps,<br /><span style={{ background: GRAD, WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>directed by AI</span>
+          <h2 className="relative text-[clamp(2.4rem,7vw,5rem)] font-medium leading-[1.04] tracking-tight text-white" style={{ fontFamily: SERIF, textShadow: "0 2px 40px rgba(0,0,0,0.85)" }}>
+            Tell your story<br />with a <span style={{ background: GRAD, WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>MAP</span>
           </h2>
-          <p className="relative mx-auto mt-4 max-w-md text-[15px] text-white/80" style={{ textShadow: "0 1px 16px rgba(0,0,0,0.85)" }}>Describe it or drop a track — the studio films the rest.</p>
+          <p className="relative mx-auto mt-5 text-[13px] font-medium uppercase tracking-[0.3em] text-white/75" style={{ textShadow: "0 1px 14px rgba(0,0,0,0.9)" }}>Tell · choose · export — in minutes</p>
         </div>
 
         <div className="pointer-events-none absolute bottom-2 right-3 z-10 text-[9px] text-white/40">Imagery © Esri, Maxar · Terrain © AWS</div>
