@@ -553,6 +553,8 @@ const CURATED_STYLES: CuratedStyle[] = [
   { id: "photoreal", name: "Photoreal 3D", hint: "real buildings · like Google Earth", kind: "photoreal", swatch: { background: "linear-gradient(135deg,#3a4a2c,#6b7a4a 45%,#9a8a5a 70%,#2a4b63)" } },
   { id: "papercraft", name: "Paper-craft", hint: "folded-paper 3D", kind: "3d", preset3dId: "papercraft", swatch: { background: "linear-gradient(135deg,#efe7d6,#d8cdb6 60%,#b9a98a)" } },
   { id: "holographic", name: "Holographic", hint: "cyan hologram 3D", kind: "3d", preset3dId: "holographic", swatch: { background: "linear-gradient(135deg,#06121f,#0b3a4a 45%,#2FE0FF)" } },
+  { id: "aurora", name: "Aurora", hint: "teal-violet relief 3D", kind: "3d", preset3dId: "aurora", swatch: { background: "linear-gradient(135deg,#06161a,#155e57 45%,#36d39a 72%,#6E7BFF)" } },
+  { id: "molten", name: "Molten", hint: "lava & ember 3D", kind: "3d", preset3dId: "molten", swatch: { background: "linear-gradient(135deg,#120806,#7a2410 45%,#ff6a2a 78%,#ff8a3a)" } },
 ];
 /** Niche bases kept available as a small text row (not in the visual grid). */
 const MORE_STYLES: { url: string; name: string }[] = [
@@ -568,8 +570,27 @@ const MapStylePanel: React.FC = () => {
   const layers = useEditor((s) => s.project.composition.layers);
   const patchComposition = useEditor((s) => s.patchComposition);
   const patchLayer = useEditor((s) => s.patchLayer);
+  const { tier } = useTier();
+  const isPro = PRO_DATA_TIERS.has(tier ?? "");
+  const [customUrl, setCustomUrl] = useState("");
   const style3d = (basemap as any).style3d || "";
   const photoreal = !!(basemap as any).photoreal3d;
+  const isCustom = /^https?:\/\//i.test(basemap.styleUrl) && !MORE_STYLES.some((m) => m.url === basemap.styleUrl);
+  // ── Pro Style Creator — craft a look from all art-direction fields, save + reload ──
+  const [styleName, setStyleName] = useState("");
+  const [stylePresets, setStylePresets] = useState<{ id: string; name: string; basemap: Record<string, unknown> }[]>([]);
+  useEffect(() => { try { setStylePresets(JSON.parse(localStorage.getItem("mapanisy-style-presets") || "[]")); } catch { /* none */ } }, []);
+  const persistStyles = (next: typeof stylePresets) => { setStylePresets(next); try { localStorage.setItem("mapanisy-style-presets", JSON.stringify(next)); } catch { /* quota */ } };
+  const saveStyle = () => {
+    const name = styleName.trim(); if (!name) return;
+    const b = basemap as any;
+    const keep = ["styleUrl", "style3d", "landColor", "waterColor", "buildingColor", "buildingOpacity", "buildingHeightMult", "buildingGradient", "boundaryGlow", "skyColor", "terrain", "buildings3d", "terrainStrength"];
+    const snap: Record<string, unknown> = {}; for (const k of keep) snap[k] = b[k];
+    persistStyles([...stylePresets.filter((x) => x.name !== name), { id: "ms_" + Math.random().toString(36).slice(2, 8), name, basemap: snap }]);
+    setStyleName("");
+  };
+  const loadStyle = (p: { basemap: Record<string, unknown> }) => patchComposition({ basemap: { ...basemap, ...p.basemap, photoreal3d: false } as any });
+  const delStyle = (id: string) => persistStyles(stylePresets.filter((x) => x.id !== id));
   // Apply a creative 3D world: merge its basemap + look + tilt the camera (same as the old modal).
   const apply3d = (st: (typeof MAP3D_STYLES)[number]) => {
     patchComposition({ basemap: { ...basemap, ...(st.basemap as any), style3d: st.id, photoreal3d: false } as any, look: { ...look, ...(st.look as any) } as any });
@@ -619,7 +640,23 @@ const MapStylePanel: React.FC = () => {
         })}
         {(style3d || photoreal) && <button onClick={clear3d} className="ml-auto transition-colors hover:text-iris">↺ flat</button>}
       </div>
-      {photoreal && <p className="text-[10px] leading-snug text-graphite/40">Photoreal 3D streams Google&apos;s real-building tiles — add a Google Maps key in Settings for the live preview (without one it still exports as a 3D-satellite world).</p>}
+      {photoreal && <p className="text-[10px] leading-snug text-graphite/40">Photoreal 3D streams Google&apos;s real, textured buildings (like Google Earth) — needs a Google Maps key in Settings for the live preview. The difference: <b>Satellite</b> = flat aerial imagery, <b>Photoreal</b> = a real 3-D city you fly through.</p>}
+
+      {/* Pro — bring your own map style (MapTiler / MapLibre style JSON; key lives in the URL) */}
+      {isPro ? (
+        <div className="space-y-1 pt-0.5">
+          <div className="text-[10px] uppercase tracking-wider text-graphite/45">Custom style <span className="font-normal normal-case text-graphite/35">· your own MapTiler / MapLibre style JSON</span></div>
+          <div className="flex gap-1.5">
+            <input value={customUrl} onChange={(e) => setCustomUrl(e.target.value)} placeholder="https://api.maptiler.com/maps/…/style.json?key=…"
+              className="min-w-0 flex-1 rounded-md border border-line bg-paper-50 px-2 py-1 text-[11px] text-graphite placeholder:text-graphite/35 focus:border-iris focus:outline-none" />
+            <button onClick={() => { const u = customUrl.trim(); if (/^https?:\/\//i.test(u)) patchComposition({ basemap: { ...basemap, styleUrl: u, style3d: "", photoreal3d: false } as any }); }}
+              className="shrink-0 rounded-md bg-iris px-2.5 py-1 text-[11px] font-semibold text-white transition-colors hover:bg-iris/90">Use</button>
+          </div>
+          {isCustom && <div className="truncate text-[10px] text-graphite/40">Active custom style: {basemap.styleUrl}</div>}
+        </div>
+      ) : (
+        <div className="pt-0.5 text-[10px] text-graphite/40">🔒 Bring your own map-style token (MapTiler / Mapbox) — <a href="/dashboard" className="text-iris hover:underline">upgrade to Pro</a></div>
+      )}
 
         {/^https?:.*openhistorical/i.test(basemap.styleUrl) && (() => {
           const labelYr = (y: number) => (y < 0 ? `${Math.abs(y)} BC` : `${y}`);
@@ -690,6 +727,38 @@ const MapStylePanel: React.FC = () => {
           </Field>
         </div>
         <Toggle label="Transparent background (overlay export)" checked={basemap.transparentBg} onChange={(v) => patchComposition({ basemap: { ...basemap, transparentBg: v } })} />
+
+        {/* ── Pro Style Creator — full art-direction + save/reload your own styles ── */}
+        {isPro ? (
+          <div className="space-y-2 rounded-lg border border-iris/25 bg-iris/[0.03] p-2.5">
+            <div className="text-[10px] uppercase tracking-wider text-iris/70">Style creator <span className="font-normal normal-case text-graphite/40">· craft &amp; save your own look</span></div>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Building colour"><ColorInput value={(basemap as any).buildingColor || "#2a3550"} onChange={(v) => patchComposition({ basemap: { ...basemap, buildingColor: v, buildings3d: true } as any })} /></Field>
+              <Field label="Boundary glow"><ColorInput value={(basemap as any).boundaryGlow || "#6E7BFF"} onChange={(v) => patchComposition({ basemap: { ...basemap, boundaryGlow: v } as any })} /></Field>
+            </div>
+            <Slider label="Building opacity" value={(basemap as any).buildingOpacity ?? 0.62} onChange={(v) => patchComposition({ basemap: { ...basemap, buildingOpacity: v } as any })} />
+            <Slider label="Building height" value={(basemap as any).buildingHeightMult ?? 1} min={0.2} max={8} step={0.1} onChange={(v) => patchComposition({ basemap: { ...basemap, buildingHeightMult: v } as any })} format={(v) => `${v.toFixed(1)}×`} />
+            <div className="grid grid-cols-2 gap-2">
+              <Toggle label="Glassy buildings" checked={(basemap as any).buildingGradient ?? false} onChange={(v) => patchComposition({ basemap: { ...basemap, buildingGradient: v } as any })} />
+              <Field label="Sky tint"><ColorInput value={(basemap as any).skyColor || "#0a1430"} onChange={(v) => patchComposition({ basemap: { ...basemap, skyColor: v } as any })} /></Field>
+            </div>
+            <div className="flex gap-1.5">
+              <input value={styleName} onChange={(e) => setStyleName(e.target.value)} placeholder="Name this style…" className="min-w-0 flex-1 rounded-md border border-line bg-paper-50 px-2 py-1 text-[11px] text-graphite placeholder:text-graphite/35 focus:border-iris focus:outline-none" />
+              <button onClick={saveStyle} disabled={!styleName.trim()} className="shrink-0 rounded-md bg-iris px-2.5 py-1 text-[11px] font-semibold text-white transition-colors hover:bg-iris/90 disabled:opacity-40">Save</button>
+            </div>
+            {stylePresets.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {stylePresets.map((p) => (
+                  <button key={p.id} onClick={() => loadStyle(p)} onContextMenu={(e) => { e.preventDefault(); if (window.confirm(`Delete style "${p.name}"?`)) delStyle(p.id); }}
+                    title={`${p.name} — click to load, right-click to delete`}
+                    className="rounded-full border border-line px-2.5 py-1 text-[11px] font-medium text-graphite/70 transition-colors hover:border-iris hover:text-iris">{p.name}</button>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="text-[10px] text-graphite/40">🔒 Build &amp; save your own map styles (land, water, buildings, glow) — <a href="/dashboard" className="text-iris hover:underline">upgrade to Pro</a></div>
+        )}
       </Section>
   );
 };
