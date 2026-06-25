@@ -86,6 +86,8 @@ export function createDefaultProject(name = "Untitled animation"): Project {
       skyColor: "",
       style3d: "",
       photoreal3d: false,
+      timeOfDay: 13,
+      sunDate: "",
     },
     theme: {
       name: "Default",

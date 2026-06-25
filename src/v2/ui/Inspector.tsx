@@ -40,44 +40,10 @@ const CAMERA_MOVES: { v: string; label: string; pitch: number }[] = [
   { v: "hold", label: "Hold", pitch: 0 },
 ];
 
-const PriorityControl: React.FC<{ layerId: string; type: "camera" | "route" | "highlight" }> = ({ layerId, type }) => {
-  const layers = useEditor((s) => s.project.composition.layers);
-  const patchLayer = useEditor((s) => s.patchLayer);
-  // Camera authority is decoupled from z-order: by default the CAMERA layer
-  // frames the scene; a route/highlight can opt in to drive it instead.
-  const on = layers.filter((l) => l.enabled);
-  const explicit = on.find((l) => (l.type === "route" || l.type === "highlight") && (l as any).framesCamera);
-  const me = layers.find((l) => l.id === layerId);
-  const framesCamera = !!(me as any)?.framesCamera;
-
-  const setDriver = (drive: boolean) => {
-    // Only one layer drives the camera at a time.
-    for (const l of layers) {
-      if (l.type === "route" || l.type === "highlight") {
-        const want = drive && l.id === layerId;
-        if (!!(l as any).framesCamera !== want) patchLayer(l.id, { framesCamera: want } as any);
-      }
-    }
-  };
-
-  if (type === "camera") {
-    return (
-      <div className="flex items-center gap-1.5 rounded-lg border border-iris/25 bg-iris/5 px-2.5 py-1.5 text-[11px]">
-        {explicit
-          ? <span className="text-graphite/60"><span className="font-semibold text-graphite/80">{explicit.type === "route" ? "A route" : "A highlight"}</span> is set to drive the camera. Turn its “Drive the camera” off to hand framing back here.</span>
-          : <span className="text-iris"><span className="font-semibold">▲ This camera frames the scene</span> — z-order of other layers doesn’t affect it.</span>}
-      </div>
-    );
-  }
-  return (
-    <div className="space-y-1 rounded-lg border border-line bg-paper-100 px-2.5 py-1.5">
-      <Toggle label="Drive the camera" checked={framesCamera} onChange={setDriver} />
-      <p className="text-[10px] leading-relaxed text-graphite/45">
-        {framesCamera ? "This layer is framing the scene (follows / reveals it)." : "Off — the camera layer frames the scene. Position this layer anywhere in the stack."}
-      </p>
-    </div>
-  );
-};
+// The Camera layer is now the SOLE camera driver — routes/highlights never
+// hijack the framing — so the old per-layer "drive the camera" picker is gone.
+// Kept as a no-op component so existing call sites stay valid (and easy to drop).
+const PriorityControl: React.FC<{ layerId: string; type: "camera" | "route" | "highlight" }> = () => null;
 
 const IDENTITY_TF = { offsetXPct: 0, offsetYPct: 0, scale: 1, rotation: 0 };
 
@@ -431,7 +397,8 @@ const QuickAdjust: React.FC = () => {
   };
   return (
     <Section title="Camera & motion">
-      <Field label="Camera move" hint="how the whole shot moves">
+      <p className="-mt-1 text-[10px] leading-relaxed text-graphite/45">Quick controls for the one <span className="font-medium text-graphite/70">Camera layer</span> — the only thing that drives the shot. Pick the Camera layer in <span className="font-medium text-graphite/70">Layers</span> for precise Start / Stop / End framing.</p>
+      <Field label="Shot move" hint="the cinematic move the camera makes">
         <div className="grid grid-cols-3 gap-1.5">
           {CAMERA_MOVES.map((m) => (
             <button key={m.v} onClick={() => applyMove(m)}
@@ -555,6 +522,12 @@ const CURATED_STYLES: CuratedStyle[] = [
   { id: "holographic", name: "Holographic", hint: "cyan hologram 3D", kind: "3d", preset3dId: "holographic", swatch: { background: "linear-gradient(135deg,#06121f,#0b3a4a 45%,#2FE0FF)" } },
   { id: "aurora", name: "Aurora", hint: "teal-violet relief 3D", kind: "3d", preset3dId: "aurora", swatch: { background: "linear-gradient(135deg,#06161a,#155e57 45%,#36d39a 72%,#6E7BFF)" } },
   { id: "molten", name: "Molten", hint: "lava & ember 3D", kind: "3d", preset3dId: "molten", swatch: { background: "linear-gradient(135deg,#120806,#7a2410 45%,#ff6a2a 78%,#ff8a3a)" } },
+  { id: "neon-noir", name: "Neon Noir", hint: "synthwave magenta 3D", kind: "3d", preset3dId: "neon-noir", swatch: { background: "linear-gradient(135deg,#14061f,#5e0a55 45%,#ff3df0)" } },
+  { id: "blueprint", name: "Blueprint", hint: "glowing technical 3D", kind: "3d", preset3dId: "blueprint", swatch: { background: "linear-gradient(135deg,#0a1f4d,#1d3f86 50%,#bcd4ff)" } },
+  { id: "crystal-ice", name: "Crystal Ice", hint: "glacial translucent 3D", kind: "3d", preset3dId: "crystal-ice", swatch: { background: "linear-gradient(135deg,#0a1622,#3a6d8a 50%,#bfe9ff)" } },
+  { id: "sakura", name: "Sakura", hint: "cherry-blossom dusk 3D", kind: "3d", preset3dId: "sakura", swatch: { background: "linear-gradient(135deg,#1a0a12,#7a2a52 48%,#ff9ec9)" } },
+  { id: "emerald", name: "Emerald", hint: "bio-luminescent green 3D", kind: "3d", preset3dId: "emerald", swatch: { background: "linear-gradient(135deg,#04140c,#0f5e3a 48%,#2fd98a)" } },
+  { id: "war-room", name: "War Room", hint: "tactical sand-table 3D", kind: "3d", preset3dId: "war-room", swatch: { background: "linear-gradient(135deg,#0e1622,#3a4a63 55%,#ffb020)" } },
 ];
 /** Niche bases kept available as a small text row (not in the visual grid). */
 const MORE_STYLES: { url: string; name: string }[] = [
@@ -712,6 +685,15 @@ const MapStylePanel: React.FC = () => {
           <Slider label="Terrain strength" value={(basemap as any).terrainStrength ?? 1.4} min={0} max={5} step={0.1}
             onChange={(v) => patchComposition({ basemap: { ...basemap, terrainStrength: v } })} format={(v) => `${v.toFixed(1)}×`} />
         )}
+        {/* Time of day — real sun (lighting + shadows) on Photoreal/3D + atmosphere everywhere. */}
+        <Slider label="Time of day" hint="sun, shadows & atmosphere — Google-Earth style" value={(basemap as any).timeOfDay ?? 13} min={0} max={24} step={0.5}
+          onChange={(v) => patchComposition({ basemap: { ...basemap, timeOfDay: v } as any })}
+          format={(v) => { const h = Math.floor(v); const m = Math.round((v % 1) * 60); const ap = h < 12 ? "AM" : "PM"; const hh = ((h + 11) % 12) + 1; return `${hh}:${String(m).padStart(2, "0")} ${ap}`; }} />
+        <div className="flex items-center gap-2 text-[10px] text-graphite/45">
+          <span className="uppercase tracking-wider">Date</span>
+          <input type="date" value={(basemap as any).sunDate || ""} onChange={(e) => patchComposition({ basemap: { ...basemap, sunDate: e.target.value } as any })} className="rounded border border-line bg-paper-50 px-1.5 py-0.5 text-[10px] text-graphite focus:border-iris focus:outline-none" />
+          {(basemap as any).sunDate ? <button onClick={() => patchComposition({ basemap: { ...basemap, sunDate: "" } as any })} className="hover:text-iris">clear</button> : <span className="text-graphite/30">(season → sun angle)</span>}
+        </div>
         <div className="grid grid-cols-2 gap-2">
           <Field label="Land colour" hint="the map itself">
             <div className="flex items-center gap-1.5">

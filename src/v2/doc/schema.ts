@@ -691,6 +691,11 @@ export const Basemap = z.object({
   /** PHOTOREAL 3D (Google Earth) — render Google's Photorealistic 3D Tiles in
    *  the preview (needs a user Google Maps Platform key). Export falls back. */
   photoreal3d: z.boolean().default(false),
+  /** Time of day, 0–24h — drives a real sun (lighting + shadows on 3-D) + the
+   *  sky/atmosphere, Google-Earth style. 13 = early afternoon. */
+  timeOfDay: z.number().min(0).max(24).default(13),
+  /** Optional date (YYYY-MM-DD) — sets the sun's seasonal angle. Empty = today. */
+  sunDate: z.string().default(""),
 });
 export type Basemap = z.infer<typeof Basemap>;
 

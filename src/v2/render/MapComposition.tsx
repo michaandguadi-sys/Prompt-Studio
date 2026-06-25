@@ -425,14 +425,14 @@ function highlightPose(geojson: any, p: number, cam?: CameraLayer): CameraPose {
  */
 export function findDirector(layers: Layer[]): Layer | undefined {
   const on = layers.filter((l) => l.enabled);
-  const explicit = on.find((l) => (l.type === "route" || l.type === "highlight") && (l as any).framesCamera);
-  if (explicit) return explicit;
-  // A GPS track IS the shot — it always drives the camera (flythrough).
-  const track = on.find((l) => l.type === "track" && (l as TrackLayer).points.length > 1);
-  if (track) return track;
+  // ONLY the Camera layer drives the camera (routes/highlights never hijack the
+  // framing — they just render). A GPS track is the exception: the imported track
+  // IS the flight path, so it drives when there's no explicit camera.
   const cam = on.find((l) => l.type === "camera");
   if (cam) return cam;
-  return on.find((l) => l.type === "route" || l.type === "highlight");
+  const track = on.find((l) => l.type === "track" && (l as TrackLayer).points.length > 1);
+  if (track) return track;
+  return undefined;
 }
 
 /* ── The composition ──────────────────────────────────────────────────────── */
@@ -917,7 +917,7 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean }
             and only when the user has supplied a Google Maps key. */}
         {photoreal3d && (
           <React.Suspense fallback={null}>
-            <LazyGoogle3D apiKey={googleKey} onAttribution={setGoogleCredit} />
+            <LazyGoogle3D apiKey={googleKey} onAttribution={setGoogleCredit} timeOfDay={(comp.basemap as any).timeOfDay ?? 13} sunDate={(comp.basemap as any).sunDate} />
           </React.Suspense>
         )}
         {/* Map-drawn layers in STACK ORDER: the editor's layer panel decides
@@ -951,6 +951,7 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean }
 
       {/* Colour grade UNDER the text — map gets the treatment, type stays crisp. */}
       {!isTransparent && comp.look && <LookUnder look={comp.look} />}
+      {!isTransparent && <TimeAtmosphere t={(comp.basemap as any).timeOfDay ?? 13} />}
 
       {/* DOM overlay layers, in stack order. Reversed like the canvas layers so
           layers[0] (top of the panel) paints LAST = on top — a route placed above
@@ -1057,6 +1058,22 @@ function mapFilterCss(look?: Look): string | undefined {
 
 /** The COLOUR grade (tint + texture + grain) — rendered UNDER the text/overlay
  *  layers so titles and labels stay crisp while the map gets the treatment. */
+/** Time-of-day atmosphere — warms dawn/dusk, cools + darkens night, near-clear at
+ *  midday. Applies on EVERY style so the chosen hour reads even without photoreal. */
+const TimeAtmosphere: React.FC<{ t: number }> = ({ t }) => {
+  const day = Math.max(0, Math.sin(((t - 6) / 12) * Math.PI)); // 0 at dawn/dusk/night, 1 noon
+  const night = t < 5.5 ? clampN((5.5 - t) / 4, 0, 1) : t > 19.5 ? clampN((t - 19.5) / 4, 0, 1) : 0;
+  const golden = !night && day < 0.5 ? (0.5 - day) / 0.5 : 0;
+  if (night < 0.02 && golden < 0.02) return null;
+  return (
+    <AbsoluteFill style={{ pointerEvents: "none" }}>
+      {golden > 0.02 && <AbsoluteFill style={{ background: `linear-gradient(to top, rgba(255,138,46,${(0.3 * golden).toFixed(3)}), transparent 58%)`, mixBlendMode: "screen" }} />}
+      {night > 0.02 && <AbsoluteFill style={{ background: `rgba(8,16,46,${(0.52 * night).toFixed(3)})`, mixBlendMode: "multiply" }} />}
+      {night > 0.02 && <AbsoluteFill style={{ background: `radial-gradient(130% 80% at 50% -12%, rgba(34,46,96,${(0.5 * night).toFixed(3)}), transparent 55%)` }} />}
+    </AbsoluteFill>
+  );
+};
+
 const LookUnder: React.FC<{ look: Look }> = ({ look }) => {
   const tex = textureStyle(look.texture ?? "none", look.textureOpacity ?? 0.5);
   // 3-way grade: tint shadows / mids / highlights independently. Screen lifts &
