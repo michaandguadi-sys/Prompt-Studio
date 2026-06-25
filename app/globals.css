@@ -159,6 +159,11 @@
   84%  { opacity: 0.6; }
   100% { transform: translate(12px, 52px); opacity: 0; }
 }
+/* Cascading scroll chevrons — a clear flowing "scroll down" cue. */
+@keyframes cascade {
+  0%, 100% { opacity: 0.2; transform: translateY(-3px); }
+  50%      { opacity: 1;   transform: translateY(4px); }
+}
 
 /* ── Base reset ─────────────────────────────────────────────────────────── */
 html, body {

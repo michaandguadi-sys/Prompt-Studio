@@ -25,10 +25,10 @@ const ROUTE: [number, number][] = [
   [83.874, 28.532], [83.854, 28.557], [83.834, 28.578], [83.816, 28.596],
 ];
 // Capability facts (no AI-as-sell). lngLat is derived along the route at render.
-const FACTS: { at: number; text: string }[] = [
+const FACTS: { at: number; text: string; hatch?: boolean }[] = [
   { at: 0.15, text: "Describe a moment — it builds the whole scene" },
   { at: 0.32, text: "Draw animated routes between any places" },
-  { at: 0.48, text: "Highlight a country, a region, an area" },
+  { at: 0.48, text: "Highlight a country, a region, an area", hatch: true },
   { at: 0.63, text: "A cinematic camera — fly, orbit, push in" },
   { at: 0.77, text: "Export broadcast-ready 4K, in minutes" },
 ];
@@ -61,10 +61,29 @@ function pointAlong(coords: [number, number][], t: number): [number, number] {
 function flyCam(p: number) {
   const reveal = clamp((p - 0.86) / 0.14);
   const f = ease(clamp(p / 0.9));
+  const dive = ease(clamp(p / 0.78)); // progressively closer + lower → more immersed
   const a = pointAlong(ROUTE, f);
-  const b = pointAlong(ROUTE, Math.min(1, f + 0.08)); // look-ahead → smooth banked heading
-  return { lng: a[0], lat: a[1], zoom: lerp(12.2, 12.0, reveal), pitch: lerp(72, 54, reveal), bearing: headingOf(a, b) };
+  const b = pointAlong(ROUTE, Math.min(1, f + 0.12)); // longer look-ahead → smoother banking
+  return {
+    lng: a[0], lat: a[1],
+    zoom: lerp(lerp(12.1, 12.46, dive), 12.3, reveal),  // closer over the dive, stays in z12 → no resolution switch
+    pitch: lerp(lerp(66, 79, dive), 54, reveal),
+    bearing: headingOf(a, b),
+  };
 }
+
+const HatchBadge: React.FC = () => (
+  <svg className="absolute inset-0 h-full w-full" viewBox="0 0 200 80" preserveAspectRatio="none" aria-hidden style={{ filter: "drop-shadow(0 0 14px rgba(110,123,255,0.75))" }}>
+    <defs>
+      <pattern id="ft-hatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <line x1="0" y1="0" x2="0" y2="7" stroke="#7c8cff" strokeWidth="1.3" strokeOpacity="0.5" />
+      </pattern>
+    </defs>
+    <polygon points="10,16 158,5 196,38 186,72 42,78 4,42" fill="url(#ft-hatch)" stroke="#9CA6FF" strokeWidth="2" strokeDasharray="9 7" strokeLinejoin="round" vectorEffect="non-scaling-stroke">
+      <animate attributeName="stroke-dashoffset" from="32" to="0" dur="1.1s" repeatCount="indefinite" />
+    </polygon>
+  </svg>
+);
 
 export const FlyThroughMap: React.FC = () => {
   const ref = useRef<HTMLElement>(null);
@@ -111,7 +130,7 @@ export const FlyThroughMap: React.FC = () => {
     if (!loaded) return;
     let raf = 0; let last = -1;
     const tick = () => {
-      curRef.current += (targetRef.current - curRef.current) * 0.08;
+      curRef.current += (targetRef.current - curRef.current) * 0.065;
       if (Math.abs(targetRef.current - curRef.current) < 0.0004) curRef.current = targetRef.current;
       const cur = curRef.current;
       if (Math.abs(cur - last) > 0.0002) {
@@ -150,7 +169,14 @@ export const FlyThroughMap: React.FC = () => {
           interactive={false}
           attributionControl={false}
           maxPitch={82}
-          onLoad={() => setLoaded(true)}
+          onLoad={(e) => {
+            // Wait for the FIRST view's tiles before revealing → no missing/black tile at the start.
+            const map = e.target as unknown as { setMaxTileCacheSize?: (n: number) => void; areTilesLoaded?: () => boolean };
+            try { map.setMaxTileCacheSize?.(768); } catch { /* ignore */ }
+            let tries = 0;
+            const check = () => { tries += 1; if ((map.areTilesLoaded?.() ?? true) || tries > 32) setLoaded(true); else setTimeout(check, 150); };
+            check();
+          }}
           onError={() => { /* tile hiccups must never break the hero */ }}
           style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
         >
@@ -168,11 +194,11 @@ export const FlyThroughMap: React.FC = () => {
             const pos = pointAlong(ROUTE, clamp(ease(w.at / 0.9) + 0.05, 0, 1));
             return (
               <Marker key={i} longitude={pos[0]} latitude={pos[1]} anchor="center">
-                <div
-                  className="pointer-events-none max-w-[46vw] text-center text-[clamp(18px,2.8vw,32px)] font-bold leading-[1.12] tracking-tight text-white"
-                  style={{ opacity: o, transform: `translateY(${(1 - o) * 18}px)`, textShadow: "0 0 26px rgba(47,224,255,0.95), 0 2px 20px rgba(0,0,0,0.98)" }}
-                >
-                  {w.text}
+                <div className="pointer-events-none" style={{ opacity: o, transform: `translateY(${(1 - o) * 18}px)` }}>
+                  <span className="relative inline-block max-w-[46vw] px-7 py-3">
+                    {w.hatch && <HatchBadge />}
+                    <span className="relative block text-center text-[clamp(18px,2.8vw,32px)] font-bold leading-[1.12] tracking-tight text-white" style={{ textShadow: "0 0 26px rgba(47,224,255,0.95), 0 2px 20px rgba(0,0,0,0.98)" }}>{w.text}</span>
+                  </span>
                 </div>
               </Marker>
             );
@@ -215,9 +241,11 @@ export const FlyThroughMap: React.FC = () => {
           </div>
         )}
 
-        {/* big centered scroll chevron — no circle, no text */}
-        <div className="pointer-events-none absolute left-1/2 top-[56%] z-10 -translate-x-1/2" style={{ opacity: clamp(1 - p / 0.05) }}>
-          <ChevronDown size={40} className="text-cyan animate-bounce" style={{ filter: "drop-shadow(0 0 16px #2fe0ff)" }} />
+        {/* scroll cue — cascading chevrons (clear, interesting), no circle/text */}
+        <div className="pointer-events-none absolute left-1/2 top-[53%] z-10 flex -translate-x-1/2 flex-col items-center" style={{ opacity: clamp(1 - p / 0.05) }}>
+          {[0, 1, 2].map((i) => (
+            <ChevronDown key={i} size={34} className="text-cyan" style={{ marginTop: i ? -18 : 0, filter: "drop-shadow(0 0 12px #2fe0ff)", animation: `cascade 1.5s ease-in-out ${i * 0.18}s infinite` }} />
+          ))}
         </div>
 
         {/* title reveal */}
