@@ -9,6 +9,8 @@ import {
 
 const SERIF = "Newsreader, 'Playfair Display', Georgia, serif";
 const GRAD = "linear-gradient(105deg,#9CA6FF,#2fe0ff)";
+const clamp = (v: number, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, v));
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 /* ───────────────────────── hooks ───────────────────────── */
 
@@ -146,17 +148,7 @@ export const LandingExperience: React.FC = () => {
   useEffect(() => { const t = setTimeout(() => setDone(true), 2100); return () => clearTimeout(t); }, []);
   const y = useScrollY();
   const typed = useTyped();
-  const flyRef = useRef<HTMLElement>(null);
-  const flyP = useSectionProgress(flyRef);
   const navSolid = y > 40;
-
-  const scale = 1 + flyP * 7.5;
-  const captionIdx = flyP < 0.34 ? 0 : flyP < 0.68 ? 1 : 2;
-  const FLY = [
-    { k: "Name any place or moment", s: "“the Berlin Wall, 1989” — a sentence is the whole brief." },
-    { k: "A director researches it", s: "Facts checked, the angle found, the scene composed." },
-    { k: "You land in 4K", s: "Cinematic camera, graded look, ready to publish." },
-  ];
 
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-[#05060e] text-white antialiased">
@@ -229,34 +221,8 @@ export const LandingExperience: React.FC = () => {
         </p>
       </section>
 
-      {/* ── Fly-through: scroll zooms you into the map ── */}
-      <section id="how" ref={flyRef} className="relative" style={{ height: "320vh" }}>
-        <div className="sticky top-0 flex h-screen items-center justify-center overflow-hidden">
-          <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(60% 50% at 50% 50%, rgba(110,123,255,0.12), transparent 70%)" }} />
-          <svg viewBox="0 0 400 400" className="absolute h-[78vmin] w-[78vmin]" style={{ transform: `scale(${scale})`, opacity: Math.max(0, 1 - flyP * 0.55), transition: "opacity .2s linear", filter: "drop-shadow(0 0 40px rgba(110,123,255,0.35))" }} aria-hidden>
-            <circle cx="200" cy="200" r="150" fill="none" stroke="#2c344a" strokeWidth="1" />
-            {[40, 80, 120].map((r) => <circle key={r} cx="200" cy="200" r={r} fill="none" stroke="#212b43" strokeWidth="1" />)}
-            <line x1="50" y1="200" x2="350" y2="200" stroke="#212b43" strokeWidth="1" />
-            <line x1="200" y1="50" x2="200" y2="350" stroke="#212b43" strokeWidth="1" />
-            <path d="M120 150 Q150 110 200 130 T280 160 Q300 200 260 230 T180 250 Q130 230 120 190 Z" fill="rgba(110,123,255,0.10)" stroke="#6E7BFF" strokeWidth="1.5" />
-            <path d="M90 240 Q140 280 200 300" fill="none" stroke="#2fe0ff" strokeWidth="2" strokeLinecap="round" />
-            <circle cx="200" cy="300" r="5" fill="#2fe0ff" />
-            <circle cx="90" cy="240" r="4" fill="#6E7BFF" />
-          </svg>
-          <div className="relative z-10 px-6 text-center">
-            {FLY.map((f, i) => (
-              <div key={i} className="absolute left-1/2 top-1/2 w-[min(90vw,640px)] -translate-x-1/2 -translate-y-1/2" style={{ opacity: captionIdx === i ? 1 : 0, transform: `translate(-50%,-50%) translateY(${captionIdx === i ? 0 : captionIdx > i ? -24 : 24}px)`, transition: "opacity .5s ease, transform .5s ease", pointerEvents: "none" }}>
-                <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.05] px-3 py-1 text-[11px] font-medium text-white/60 backdrop-blur">Step {i + 1}</div>
-                <h2 className="text-[clamp(2rem,5vw,3.6rem)] font-medium leading-tight tracking-tight" style={{ fontFamily: SERIF }}>{f.k}</h2>
-                <p className="mx-auto mt-3 max-w-md text-[15px] text-white/55">{f.s}</p>
-              </div>
-            ))}
-          </div>
-          <div className="absolute bottom-10 left-1/2 h-0.5 w-40 -translate-x-1/2 overflow-hidden rounded-full bg-white/10">
-            <div className="h-full rounded-full bg-iris" style={{ width: `${flyP * 100}%` }} />
-          </div>
-        </div>
-      </section>
+      {/* ── Fly-through: a route builds itself through the range, then reveals ── */}
+      <FlyThrough />
 
       {/* ── Features — tilt cards ── */}
       <section id="features" className="relative mx-auto max-w-6xl px-6 py-24">
@@ -350,6 +316,114 @@ export const LandingExperience: React.FC = () => {
 };
 
 /* ───────────────────────── sub-components ───────────────────────── */
+
+/**
+ * The signature scroll experience — a glowing route DRAWS itself up through a
+ * stylised mountain range while the camera (an animated viewBox window) follows
+ * the drawing head; waypoint labels pop tracked to the terrain; a summit region
+ * lights up; then the camera ZOOMS OUT to reveal the whole journey + a selling
+ * title. Pure SVG + scroll progress — no map tiles, fast, never empty.
+ */
+const WAYPOINTS: { at: number; label: string; sub: string }[] = [
+  { at: 0.24, label: "Trailhead", sub: "1,400 m" },
+  { at: 0.54, label: "The high pass", sub: "4,200 m" },
+  { at: 0.82, label: "Summit ridge", sub: "5,416 m" },
+];
+
+const FlyThrough: React.FC = () => {
+  const ref = useRef<HTMLElement>(null);
+  const p = useSectionProgress(ref);
+  const pathRef = useRef<SVGPathElement>(null);
+  const [len, setLen] = useState(0);
+  useEffect(() => { const el = pathRef.current; if (el) setLen(el.getTotalLength()); }, []);
+
+  const intro = clamp(p / 0.12);
+  const drawP = clamp((p - 0.12) / 0.6);      // route draws 12%→72%
+  const zoomOut = clamp((p - 0.82) / 0.18);   // camera pulls back over the last 18%
+  const revealLen = len * drawP;
+  const dashOffset = Math.max(0, len - revealLen);
+  const ready = len > 0 && !!pathRef.current;
+
+  // Camera = a square viewBox window. It zooms IN over the intro, FOLLOWS the
+  // drawing head while the route builds, then expands to reveal everything.
+  const head: { x: number; y: number } = ready ? pathRef.current!.getPointAtLength(revealLen) : { x: 150, y: 920 };
+  const win = lerp(lerp(820, 470, intro), 1160, zoomOut);
+  const cx = lerp(head.x, 500, zoomOut);
+  const cy = lerp(head.y, 520, zoomOut);
+  const viewBox = `${cx - win / 2} ${cy - win / 2} ${win} ${win}`;
+  const titleP = clamp((p - 0.86) / 0.14);
+
+  return (
+    <section ref={ref} id="how" className="relative" style={{ height: "440vh" }}>
+      <div className="sticky top-0 h-screen overflow-hidden bg-[#05060e]">
+        <svg className="absolute inset-0 h-full w-full" viewBox={viewBox} preserveAspectRatio="xMidYMid slice" aria-hidden>
+          <defs>
+            <linearGradient id="ft-sky" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#0a1430" /><stop offset="100%" stopColor="#05060e" />
+            </linearGradient>
+          </defs>
+          <rect x="-600" y="-600" width="2200" height="2200" fill="url(#ft-sky)" />
+          {/* aurora glow over the summit */}
+          <ellipse cx="780" cy="220" rx="360" ry="240" fill="#6E7BFF" opacity="0.12" />
+          {/* terrain ridges, far → near for depth */}
+          <path d="M-300 560 L60 420 L200 520 L360 360 L520 500 L680 320 L840 480 L1040 360 L1300 500 L1300 1400 L-300 1400 Z" fill="#0c1430" />
+          <path d="M-300 690 L120 520 L300 630 L470 460 L640 610 L840 440 L1020 610 L1300 470 L1300 1400 L-300 1400 Z" fill="#0e1a3a" />
+          <path d="M-300 840 L160 660 L390 790 L580 620 L780 770 L1000 620 L1300 760 L1300 1400 L-300 1400 Z" fill="#11214a" />
+          {/* contour rings on the summit */}
+          {[0, 1, 2, 3, 4].map((i) => (
+            <ellipse key={i} cx="800" cy="210" rx={150 - i * 28} ry={92 - i * 17} fill="none" stroke="#2c3a66" strokeWidth="1" opacity="0.55" />
+          ))}
+          {/* highlighted summit region — lights up as the route nears it */}
+          <path d="M700 120 Q 880 130 920 250 Q 900 360 760 350 Q 640 300 660 200 Z" fill="rgba(110,123,255,0.20)" stroke="#6E7BFF" strokeWidth="2.5" style={{ opacity: clamp((drawP - 0.74) / 0.26), filter: "drop-shadow(0 0 14px rgba(110,123,255,0.7))" }} />
+          {/* the route — draws itself */}
+          <path
+            ref={pathRef}
+            d="M120 960 C 300 900 250 770 400 730 S 540 640 510 510 S 690 450 720 350 S 730 230 820 190"
+            fill="none" stroke="#2fe0ff" strokeWidth="5" strokeLinecap="round"
+            style={{ strokeDasharray: len || 1, strokeDashoffset: dashOffset, filter: "drop-shadow(0 0 12px rgba(47,224,255,0.85))" }}
+          />
+          {/* head dot */}
+          {ready && drawP < 0.999 && (
+            <circle cx={head.x} cy={head.y} r="8" fill="#fff" style={{ filter: "drop-shadow(0 0 12px #2fe0ff)" }} />
+          )}
+          {/* waypoint labels — tracked to the terrain, appear as the route reaches them */}
+          {ready && WAYPOINTS.map((w, i) => {
+            const pt = pathRef.current!.getPointAtLength(len * w.at);
+            const on = revealLen >= len * w.at - 4;
+            return (
+              <g key={i} style={{ opacity: on ? 1 : 0, transition: "opacity .45s ease" }}>
+                <line x1={pt.x} y1={pt.y} x2={pt.x + 34} y2={pt.y - 34} stroke="#6E7BFF" strokeWidth="1.5" />
+                <circle cx={pt.x} cy={pt.y} r="5" fill="#6E7BFF" />
+                <text x={pt.x + 40} y={pt.y - 36} fill="#ffffff" fontSize="17" fontWeight="600" style={{ fontFamily: "system-ui, sans-serif" }}>{w.label}</text>
+                <text x={pt.x + 40} y={pt.y - 18} fill="#9CA6FF" fontSize="13" style={{ fontFamily: "system-ui, sans-serif" }}>{w.sub}</text>
+              </g>
+            );
+          })}
+        </svg>
+
+        {/* lead-in caption — fades as you descend into the range */}
+        <div className="pointer-events-none absolute inset-x-0 top-[13vh] px-6 text-center" style={{ opacity: clamp(1 - p / 0.16) }}>
+          <div className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.05] px-3 py-1 text-[11px] font-medium text-white/60 backdrop-blur"><Route size={12} className="text-iris" /> Drop a GPS track</div>
+          <p className="mx-auto mt-3 max-w-md text-[15px] text-white/55">Scroll — watch the route build itself through the range.</p>
+        </div>
+
+        {/* zoom-out reveal — the sell */}
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-6 text-center" style={{ opacity: titleP, transform: `translateY(${(1 - titleP) * 28}px)` }}>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.4em] text-white/55">From one GPS file</div>
+          <h2 className="mt-3 text-[clamp(2.4rem,7vw,5rem)] font-medium leading-[1.02] tracking-tight" style={{ fontFamily: SERIF }}>
+            The Annapurna Circuit,<br /><span style={{ background: GRAD, WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>rendered in 4K</span>
+          </h2>
+          <p className="mx-auto mt-4 max-w-md text-[15px] text-white/55">Every switchback, every pass — a cinematic flythrough, automatically.</p>
+        </div>
+
+        {/* progress rail */}
+        <div className="absolute bottom-10 left-1/2 h-0.5 w-40 -translate-x-1/2 overflow-hidden rounded-full bg-white/10">
+          <div className="h-full rounded-full bg-iris" style={{ width: `${p * 100}%` }} />
+        </div>
+      </div>
+    </section>
+  );
+};
 
 const TiltCard: React.FC<{ icon: React.ComponentType<{ size?: number; className?: string }>; t: string; b: string }> = ({ icon: Icon, t, b }) => {
   const ref = useRef<HTMLDivElement>(null);
