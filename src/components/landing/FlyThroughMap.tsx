@@ -25,14 +25,16 @@ const ease = (t: number) => t * t * (3 - 2 * t);
 
 // A winding ascent up the Annapurna massif — the camera follows + it builds.
 const ROUTE: [number, number][] = [
-  [83.945, 28.435], [83.922, 28.460], [83.906, 28.490], [83.885, 28.516],
-  [83.866, 28.540], [83.846, 28.562], [83.826, 28.582], [83.810, 28.596],
+  [83.958, 28.428], [83.932, 28.450], [83.912, 28.478], [83.892, 28.506],
+  [83.872, 28.532], [83.852, 28.557], [83.832, 28.578], [83.814, 28.596],
 ];
+// Facts that GLOW past — opacity is windowed on camera progress, so each fades
+// in as you approach, peaks alongside, and is gone once you've flown past it.
 const FEATURES: { at: number; lngLat: [number, number]; label: string; sub: string }[] = [
-  { at: 0.20, lngLat: [83.906, 28.490], label: "AI-directed", sub: "researches & composes the shot" },
-  { at: 0.46, lngLat: [83.860, 28.548], label: "Cinematic camera", sub: "fly · orbit · push — no keyframes" },
-  { at: 0.72, lngLat: [83.832, 28.578], label: "Looks that grade themselves", sub: "noir · topographic · satellite" },
-  { at: 0.92, lngLat: [83.811, 28.595], label: "Highlight any region", sub: "+ routes · markers · live data" },
+  { at: 0.16, lngLat: [83.912, 28.480], label: "AI-directed", sub: "it researches & frames the shot" },
+  { at: 0.37, lngLat: [83.880, 28.524], label: "Cinematic camera", sub: "fly · orbit · push — no keyframes" },
+  { at: 0.56, lngLat: [83.850, 28.558], label: "Looks that grade themselves", sub: "noir · topographic · satellite" },
+  { at: 0.72, lngLat: [83.830, 28.580], label: "Highlight · route · data", sub: "every overlay, one prompt away" },
 ];
 // ALL zoom values stay in [12, 13) → one raster level the whole way → no switch.
 const CAM = [
@@ -96,7 +98,7 @@ export const FlyThroughMap: React.FC = () => {
         id: "esri", type: "raster", source: "esri",
         paint: { "raster-saturation": -0.5, "raster-contrast": 0.2, "raster-brightness-max": 0.82, "raster-fade-duration": 300 },
       }],
-      terrain: { source: "dem", exaggeration: 1.5 },
+      terrain: { source: "dem", exaggeration: 1.1 },
     } as any;
   }, []);
 
@@ -143,7 +145,6 @@ export const FlyThroughMap: React.FC = () => {
   const drawT = clamp((p - 0.05) / 0.7);
   const sliced = useMemo(() => sliceRoute(ROUTE, drawT), [drawT]);
   const routeData = useMemo(() => ({ type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: sliced } }] }), [sliced]) as any;
-  const head = sliced[sliced.length - 1];
   const hlOpacity = clamp((p - 0.68) / 0.18);
   const titleP = clamp((p - 0.80) / 0.12);     // reveals, then holds to 1.0
   const barVh = lerp(0, 6, clamp(p / 0.05));
@@ -164,32 +165,23 @@ export const FlyThroughMap: React.FC = () => {
           style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
         >
           <Source id="ft-route" type="geojson" data={routeData}>
-            <Layer id="ft-route-glow" type="line" paint={{ "line-color": "#2fe0ff", "line-width": 12, "line-opacity": 0.4, "line-blur": 8 }} layout={{ "line-cap": "round", "line-join": "round" }} />
-            <Layer id="ft-route-line" type="line" paint={{ "line-color": "#7df0ff", "line-width": 3.5 }} layout={{ "line-cap": "round", "line-join": "round" }} />
+            <Layer id="ft-route-glow" type="line" paint={{ "line-color": "#2fe0ff", "line-width": 24, "line-opacity": 0.32, "line-blur": 14 }} layout={{ "line-cap": "round", "line-join": "round" }} />
+            <Layer id="ft-route-line" type="line" paint={{ "line-color": "#9af4ff", "line-width": 6.5 }} layout={{ "line-cap": "round", "line-join": "round" }} />
           </Source>
           <Source id="ft-hl" type="geojson" data={HIGHLIGHT}>
             <Layer id="ft-hl-fill" type="fill" paint={{ "fill-color": "#6E7BFF", "fill-opacity": 0.24 * hlOpacity }} />
             <Layer id="ft-hl-line" type="line" paint={{ "line-color": "#9CA6FF", "line-width": 2, "line-opacity": hlOpacity }} />
           </Source>
-          {head && drawT > 0.02 && drawT < 0.998 && (
-            <Marker longitude={head[0]} latitude={head[1]} anchor="center">
-              <div className="h-3 w-3 rounded-full bg-white" style={{ boxShadow: "0 0 18px 5px #2fe0ff", animation: "breathe 1.1s ease-in-out infinite" }} />
-            </Marker>
-          )}
           {FEATURES.map((w, i) => {
-            const on = drawT >= w.at;
+            // Windowed on camera progress → glows in, peaks, then is gone once passed.
+            const o = ease(clamp(1 - Math.abs(p - w.at) / 0.08));
             return (
               <Marker key={i} longitude={w.lngLat[0]} latitude={w.lngLat[1]} anchor="bottom">
-                <div className="pointer-events-none flex flex-col items-center" style={{ opacity: on ? 1 : 0, transform: `translateY(${on ? 0 : 10}px)`, transition: "opacity .55s ease, transform .55s ease" }}>
-                  <div className="flex items-center gap-1.5 rounded-lg border border-iris/40 bg-black/70 px-2.5 py-1.5 backdrop-blur">
-                    <Sparkles size={11} className="shrink-0 text-iris" />
-                    <div className="text-left">
-                      <div className="whitespace-nowrap text-[12px] font-semibold leading-none text-white">{w.label}</div>
-                      <div className="mt-0.5 whitespace-nowrap text-[10px] text-white/55">{w.sub}</div>
-                    </div>
-                  </div>
-                  <div className="mt-1 w-px" style={{ height: 48, background: "linear-gradient(to bottom,#6E7BFF,rgba(110,123,255,0))" }} />
-                  <div className="-mt-0.5 h-2 w-2 rounded-full bg-iris" style={{ boxShadow: "0 0 12px #6E7BFF" }} />
+                <div className="pointer-events-none flex flex-col items-center" style={{ opacity: o, transform: `translateY(${(1 - o) * 16}px)` }}>
+                  <div className="whitespace-nowrap text-[15px] font-semibold tracking-tight text-white" style={{ textShadow: "0 0 18px rgba(47,224,255,0.95), 0 1px 12px rgba(0,0,0,0.9)" }}>{w.label}</div>
+                  <div className="mt-0.5 whitespace-nowrap text-[11px] text-cyan" style={{ textShadow: "0 0 14px rgba(47,224,255,0.9)" }}>{w.sub}</div>
+                  <div className="mt-1.5 w-px" style={{ height: 40, background: "linear-gradient(to bottom,#2fe0ff,rgba(47,224,255,0))" }} />
+                  <div className="-mt-0.5 h-1.5 w-1.5 rounded-full bg-cyan" style={{ boxShadow: "0 0 12px #2fe0ff" }} />
                 </div>
               </Marker>
             );
@@ -245,11 +237,11 @@ export const FlyThroughMap: React.FC = () => {
         {/* title reveal (holds through the push-in) */}
         <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center px-6 text-center" style={{ opacity: titleP, transform: `translateY(${(1 - titleP) * 26}px) scale(${lerp(0.96, 1, titleP)})` }}>
           <div className="absolute h-[64vmin] w-[64vmin] rounded-full" style={{ background: "radial-gradient(circle, rgba(5,6,14,0.76), transparent 70%)" }} />
-          <div className="relative text-[11px] font-semibold uppercase tracking-[0.4em] text-white/80" style={{ textShadow: "0 1px 16px rgba(0,0,0,0.9)" }}>From a sentence or a track</div>
+          <div className="relative text-[11px] font-semibold uppercase tracking-[0.4em] text-white/80" style={{ textShadow: "0 1px 16px rgba(0,0,0,0.9)" }}>Cinematic · 4K · in minutes</div>
           <h2 className="relative mt-3 text-[clamp(2.4rem,7vw,5rem)] font-medium leading-[1.02] tracking-tight text-white" style={{ fontFamily: SERIF, textShadow: "0 2px 40px rgba(0,0,0,0.85)" }}>
-            Your map,<br /><span style={{ background: GRAD, WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>rendered in 4K</span>
+            Maps,<br /><span style={{ background: GRAD, WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>directed by AI</span>
           </h2>
-          <p className="relative mx-auto mt-4 max-w-md text-[15px] text-white/80" style={{ textShadow: "0 1px 16px rgba(0,0,0,0.85)" }}>Cinematic camera, graded look, broadcast-ready — automatically.</p>
+          <p className="relative mx-auto mt-4 max-w-md text-[15px] text-white/80" style={{ textShadow: "0 1px 16px rgba(0,0,0,0.85)" }}>Describe it or drop a track — the studio films the rest.</p>
         </div>
 
         <div className="pointer-events-none absolute bottom-2 right-3 z-10 text-[9px] text-white/40">Imagery © Esri, Maxar · Terrain © AWS</div>
