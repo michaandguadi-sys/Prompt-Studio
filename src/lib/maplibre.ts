@@ -46,7 +46,9 @@ export function satelliteStyle(): Record<string, unknown> {
         attribution: "Esri, Maxar, Earthstar Geographics",
       },
     },
-    layers: [{ id: "esri", type: "raster", source: "esri" }],
+    // raster-fade-duration:0 → tiles don't cross-fade as the camera moves, which
+    // is what made overlays (highlights) shimmer over the satellite basemap.
+    layers: [{ id: "esri", type: "raster", source: "esri", paint: { "raster-fade-duration": 0 } }],
   };
 }
 

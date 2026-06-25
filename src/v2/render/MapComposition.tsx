@@ -905,7 +905,7 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean }
         {[...comp.layers].reverse().map((l, ri) => {
           if (!l.enabled) return null;
           if (l.type === "highlight" && l.geojson)
-            return <HighlightSource key={`${l.id}-${ri}`} layer={l} frame={frame} fps={fps} totalFrames={totalFrames} terrain={!!comp.basemap.terrain} />;
+            return <HighlightSource key={`${l.id}-${ri}`} layer={l} frame={frame} fps={fps} totalFrames={totalFrames} terrain={!!comp.basemap.terrain || /satellite/i.test(String(comp.basemap.styleUrl ?? ""))} />;
           if (l.type === "route" && l.coordinates.length > 1 && l.showLine !== false)
             return <RouteSource key={`${l.id}-${ri}`} layer={l} frame={frame} fps={fps} totalFrames={totalFrames} />;
           if (l.type === "track" && l.points.length > 1)
