@@ -1321,10 +1321,10 @@ const HighlightSource: React.FC<LV<HighlightLayer> & { terrain?: boolean }> = ({
     // glow + border always trace the full target outline.
     <>
       <Source id={`${l.id}-glowS`} type="geojson" data={data}>
-        <MapLayer id={`${l.id}-glow`} type="line" paint={{ "line-color": l.glowColor, "line-width": terrain ? Math.min(l.glowWidth, 5) : l.glowWidth, "line-blur": terrain ? 2 : 10, ...glowPaint }} layout={{ "line-cap": "round", "line-join": "round" }} />
+        <MapLayer id={`${l.id}-glow`} type="line" paint={{ "line-color": l.glowColor, "line-width": terrain ? Math.min(l.glowWidth, 5) : l.glowWidth, "line-blur": terrain ? 2 : 10, ...glowPaint, ...(terrain ? { "line-opacity": 0 } : {}) }} layout={{ "line-cap": "round", "line-join": "round" }} />
       </Source>
       <Source id={`${l.id}-fillS`} type="geojson" data={fillData}>
-        <MapLayer id={`${l.id}-fill`} type="fill" paint={l.fillType === "flag" ? { "fill-opacity": 0 } : { ...fillSource(l), ...fillExtra }} />
+        <MapLayer id={`${l.id}-fill`} type="fill" paint={l.fillType === "flag" ? { "fill-opacity": 0 } : { ...fillSource(l), ...fillExtra, ...(terrain ? { "fill-antialias": false } : {}) }} />
         {((l as any).extrude ?? 0) > 0 && (
           <MapLayer
             id={`${l.id}-extrude`}
