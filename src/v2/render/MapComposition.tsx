@@ -747,6 +747,17 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean }
         } else if (map.getLayer("ps-3d-buildings")) {
           map.removeLayer("ps-3d-buildings");
         }
+        // Sun on the 3-D extrusion buildings, driven by time of day. Crude solar
+        // arc (azimuth sweeps with the clock, altitude peaks at noon) → MapLibre
+        // light direction. Unlike Google's photoreal tiles, this DOES render in
+        // the headless export, so 3-D + time-of-day survives to 4K.
+        try {
+          const tod = Math.max(0, Math.min(24, (bm as any).timeOfDay ?? 13));
+          const altitude = Math.max(0, Math.sin(((tod - 6) / 12) * Math.PI)); // 0 at dawn/dusk, 1 at noon
+          const azimuth = ((tod / 24) * 360 + 90) % 360;                       // moves E→W over the day
+          const night = tod < 5.5 || tod > 19.5;
+          map.setLight({ anchor: "map", position: [1.5, azimuth, 90 - altitude * 75], color: night ? "#9fb4e6" : altitude < 0.4 ? "#ffd9a8" : "#ffffff", intensity: night ? 0.25 : 0.4 + altitude * 0.4 } as any);
+        } catch {}
       } catch {}
       // ── Land & water recolour — repaint the MAP ITSELF, not the grade ──
       // Overrides the basemap's water fills + land background; clearing the
@@ -802,7 +813,7 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean }
     let tries = 0;
     const retry = setInterval(() => { if (map.isStyleLoaded?.()) { apply(); clearInterval(retry); } else if (++tries > 50) clearInterval(retry); }, 80);
     return () => { map.off?.("styledata", apply); map.off?.("idle", apply); clearInterval(retry); };
-  }, [bm.showStreets, bm.showLabels, (bm as any).labelDetail, bm.terrain, bm.buildings3d, bm.styleUrl, (bm as any).terrainStrength, (bm as any).landColor, (bm as any).waterColor, (bm as any).buildingColor, (bm as any).buildingOpacity, (bm as any).buildingHeightMult, (bm as any).buildingGradient, (bm as any).boundaryGlow, (bm as any).photoreal3d, photoreal3d, photorealExportFallback]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [bm.showStreets, bm.showLabels, (bm as any).labelDetail, bm.terrain, bm.buildings3d, bm.styleUrl, (bm as any).terrainStrength, (bm as any).landColor, (bm as any).waterColor, (bm as any).buildingColor, (bm as any).buildingOpacity, (bm as any).buildingHeightMult, (bm as any).buildingGradient, (bm as any).boundaryGlow, (bm as any).timeOfDay, (bm as any).photoreal3d, photoreal3d, photorealExportFallback]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── OpenHistoricalMap: show the world AS OF `ohmYear` (animated or static) ──
   // Re-applies the date filter whenever the displayed year TICKS, so borders and
