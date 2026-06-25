@@ -18,13 +18,15 @@ export function evalTiming(
   fps: number,
   totalFrames: number,
 ): TimingResult {
-  const ramp = Math.max(1, Math.round(RAMP_SEC * fps));
+  // Per-layer fade DURATIONS (fall back to the legacy 0.35s ramp for old docs).
+  const inRamp = Math.max(1, Math.round(((t as any).fadeInSec ?? RAMP_SEC) * fps));
+  const outRamp = Math.max(1, Math.round(((t as any).fadeOutSec ?? RAMP_SEC) * fps));
   const inEnd = Math.round(t.inSec * fps);
-  const inStart = Math.max(0, inEnd - ramp);
+  const inStart = Math.max(0, inEnd - inRamp);
 
   const hasOut = t.outSec != null;
   const outStart = hasOut ? Math.round((t.outSec as number) * fps) : totalFrames + 100;
-  const outEnd = outStart + ramp;
+  const outEnd = outStart + outRamp;
 
   // ── Opacity: enter mask × exit mask ──
   const enterMask =

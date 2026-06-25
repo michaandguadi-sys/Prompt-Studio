@@ -16,7 +16,7 @@ import { evalTiming, timingTransform } from "./timing";
 import type {
   Composition, CameraPose, Layer, CameraLayer, HighlightLayer, LabelLayer,
   FlagLayer, TitleLayer, ChartLayer, ImageLayer, RouteLayer, MarkerLayer,
-  AnnotationLayer, ConnectionsLayer, SpotlightLayer, TrackLayer, ChoroplethLayer, BubbleLayer, Theme, Look,
+  AnnotationLayer, ConnectionsLayer, SpotlightLayer, TrackLayer, ChoroplethLayer, BubbleLayer, FlowLayer, HeatmapLayer, Theme, Look,
 } from "../doc/schema";
 import { fontStack, WEBFONTS_CSS_URL } from "../doc/themes";
 
@@ -106,6 +106,15 @@ function poseAt(cam: CameraLayer, p: number): CameraPose {
 }
 
 const clampN = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+/** The camera zoom for the frame currently being rendered. Map-pinned overlays
+ *  read this (via tfStyle) so they can optionally scale WITH the map instead of
+ *  holding a fixed on-screen size. Set once per frame from the live pose. */
+let LIVE_ZOOM = 8;
+/** Current frame + total frames for the frame being rendered — lets overlays
+ *  interpolate their transform keyframes (see tfStyle / interpKf). */
+let LIVE_FRAME = 0;
+let LIVE_TOTAL = 1;
 const finiteOr = (v: number, d: number) => (Number.isFinite(v) ? v : d);
 
 /** Clamp a pose into a valid Mapbox camera envelope (no NaN/Infinity, no
@@ -491,6 +500,9 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean }
   // "failed to invert matrix" and crash the preview. Clamp everything to a valid
   // camera envelope so the map can never receive a singular transform.
   pose = sanitizePose(pose);
+  LIVE_ZOOM = pose.zoom;
+  LIVE_FRAME = frame;
+  LIVE_TOTAL = totalFrames;
 
   // Force the live Mapbox transform to EXACTLY this frame's pose *before* any
   // overlay projects lon/lat → screen. Without this, react-map-gl applies the
@@ -522,6 +534,10 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean }
   // 3D-buildings world (the closest faithful 3D look) instead of a flat map.
   const photorealExportFallback = !!(comp.basemap as any).photoreal3d && isRendering;
   const effStyleUrl = photorealExportFallback ? "mapbox://styles/mapbox/satellite-streets-v12" : comp.basemap.styleUrl;
+  // Stable per-style reference — recomputing inline styles every render made
+  // react-map-gl thrash / miss the change (the "switch doesn't show until you
+  // toggle" bug). Now the style object changes ONLY when the chosen style does.
+  const mapStyleResolved = React.useMemo(() => resolveMapStyle(effStyleUrl), [effStyleUrl]);
   const release = useCallback(() => {
     if (released.current || tilesHandle === null) return;
     released.current = true;
@@ -779,7 +795,13 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean }
     };
     apply();
     map.on?.("styledata", apply);
-    return () => { map.off?.("styledata", apply); };
+    map.on?.("idle", apply);
+    // A style switch reloads the base style ASYNC, so the immediate apply() above
+    // bails (style not loaded yet). Retry until it's ready so the new look +
+    // recolour/terrain appear right after clicking — no toggle off/on needed.
+    let tries = 0;
+    const retry = setInterval(() => { if (map.isStyleLoaded?.()) { apply(); clearInterval(retry); } else if (++tries > 50) clearInterval(retry); }, 80);
+    return () => { map.off?.("styledata", apply); map.off?.("idle", apply); clearInterval(retry); };
   }, [bm.showStreets, bm.showLabels, (bm as any).labelDetail, bm.terrain, bm.buildings3d, bm.styleUrl, (bm as any).terrainStrength, (bm as any).landColor, (bm as any).waterColor, (bm as any).buildingColor, (bm as any).buildingOpacity, (bm as any).buildingHeightMult, (bm as any).buildingGradient, (bm as any).boundaryGlow, (bm as any).photoreal3d, photoreal3d, photorealExportFallback]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── OpenHistoricalMap: show the world AS OF `ohmYear` (animated or static) ──
@@ -870,7 +892,7 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean }
     <AbsoluteFill style={{ background: isTransparent ? "transparent" : (comp.look?.bgColor ?? "#05060e") }}>
       <Map
         ref={mapRef}
-        mapStyle={resolveMapStyle(effStyleUrl) as any}
+        mapStyle={mapStyleResolved as any}
         // Camera is driven imperatively via jumpTo each frame (above) — a single
         // transform update per frame, and guaranteed in sync with overlays.
         initialViewState={{ longitude: pose.lon, latitude: pose.lat, zoom: pose.zoom, pitch: pose.pitch, bearing: pose.bearing }}
@@ -912,6 +934,10 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean }
             return <TrackSource key={`${l.id}-${ri}`} layer={l} frame={frame} fps={fps} totalFrames={totalFrames} />;
           if (l.type === "choropleth" && (l as ChoroplethLayer).data?.length)
             return <ChoroplethSource key={`${l.id}-${ri}`} layer={l as ChoroplethLayer} frame={frame} fps={fps} totalFrames={totalFrames} />;
+          if (l.type === "flow" && (l as FlowLayer).data?.length)
+            return <FlowSource key={`${l.id}-${ri}`} layer={l as FlowLayer} frame={frame} fps={fps} totalFrames={totalFrames} />;
+          if (l.type === "heatmap" && (l as HeatmapLayer).data?.length)
+            return <HeatmapSource key={`${l.id}-${ri}`} layer={l as HeatmapLayer} frame={frame} fps={fps} totalFrames={totalFrames} />;
           return null;
         })}
       </Map>
@@ -943,6 +969,8 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean }
           case "spotlight": return <SpotlightView key={l.id} layer={l} frame={frame} fps={fps} totalFrames={totalFrames} project={project} />;
           case "choropleth": return <ChoroplethLegend key={l.id} layer={l as ChoroplethLayer} frame={frame} fps={fps} totalFrames={totalFrames} />;
           case "bubble": return <BubbleView key={l.id} layer={l as BubbleLayer} frame={frame} fps={fps} totalFrames={totalFrames} project={project} />;
+          case "flow": return <FlowLegend key={l.id} layer={l as FlowLayer} frame={frame} fps={fps} totalFrames={totalFrames} />;
+          case "heatmap": return <HeatmapLegend key={l.id} layer={l as HeatmapLayer} frame={frame} fps={fps} totalFrames={totalFrames} />;
           case "highlight": return (
             <HighlightLabel key={`${l.id}-hl`} layer={l} frame={frame} fps={fps} totalFrames={totalFrames} project={project} />
           );
@@ -1149,14 +1177,47 @@ function outlineStyle(on: boolean | undefined, size: number): React.CSSPropertie
   return on ? { WebkitTextStroke: `${Math.max(1.5, size * 0.018).toFixed(1)}px rgba(0,0,0,0.92)`, paintOrder: "stroke" } : {};
 }
 
+/** Interpolate transform keyframes at scene progress p (0..1). */
+function interpKf(kf: any[], p: number) {
+  const ks = [...kf].sort((a, b) => (a.t ?? 0) - (b.t ?? 0));
+  if (p <= (ks[0].t ?? 0)) return ks[0];
+  const last = ks[ks.length - 1];
+  if (p >= (last.t ?? 1)) return last;
+  let a = ks[0], b = last;
+  for (let i = 0; i < ks.length - 1; i++) { if (p >= (ks[i].t ?? 0) && p <= (ks[i + 1].t ?? 1)) { a = ks[i]; b = ks[i + 1]; break; } }
+  const span = ((b.t ?? 1) - (a.t ?? 0)) || 1;
+  const f = (p - (a.t ?? 0)) / span;
+  const L = (x: number, y: number) => x + (y - x) * f;
+  return { offsetXPct: L(a.offsetXPct ?? 0, b.offsetXPct ?? 0), offsetYPct: L(a.offsetYPct ?? 0, b.offsetYPct ?? 0), scale: L(a.scale ?? 1, b.scale ?? 1), rotation: L(a.rotation ?? 0, b.rotation ?? 0), opacity: L(a.opacity ?? 1, b.opacity ?? 1) };
+}
+
+/** Keyframed opacity multiplier for the current frame (1 when no keyframes). */
+function kfOpacityMul(l: any): number {
+  const kf = l?.kf;
+  if (!kf || kf.length < 2) return 1;
+  const p = LIVE_TOTAL > 0 ? clampN(LIVE_FRAME / LIVE_TOTAL, 0, 1) : 0;
+  return clampN(interpKf(kf, p).opacity ?? 1, 0, 1);
+}
+
 function tfStyle(l: any, w: number, h: number): string {
-  const t = l?.transform;
-  if (!t) return "";
-  const dx = ((t.offsetXPct ?? 0) / 100) * w;
-  const dy = ((t.offsetYPct ?? 0) / 100) * h;
-  const s = t.scale ?? 1, r = t.rotation ?? 0;
+  const t = l?.transform ?? {};
+  let ox = t.offsetXPct ?? 0, oy = t.offsetYPct ?? 0, s = t.scale ?? 1, r = t.rotation ?? 0;
+  // ≥2 keyframes → animate position/scale/rotation along the scene.
+  const kf = l?.kf;
+  if (kf && kf.length >= 2) {
+    const p = LIVE_TOTAL > 0 ? clampN(LIVE_FRAME / LIVE_TOTAL, 0, 1) : 0;
+    const k = interpKf(kf, p);
+    ox = k.offsetXPct; oy = k.offsetYPct; s = k.scale; r = k.rotation;
+  }
+  // Track the map: grow/shrink with zoom relative to the anchor zoom (softened
+  // ground-lock — 2^Δ is physically exact but visually extreme). Applies on top.
+  if (t.scaleWithZoom) {
+    const ref = t.anchorZoom || LIVE_ZOOM;
+    s *= clampN(Math.pow(2, (LIVE_ZOOM - ref) * 0.8), 0.12, 12);
+  }
+  const dx = (ox / 100) * w, dy = (oy / 100) * h;
   if (!dx && !dy && s === 1 && r === 0) return "";
-  return ` translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px) scale(${s}) rotate(${r}deg)`;
+  return ` translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px) scale(${s.toFixed(4)}) rotate(${r}deg)`;
 }
 
 /** Convex N-gon approximating a circle at (cx,cy); rx/ry let us keep it round in
@@ -1232,6 +1293,7 @@ function ringsCenter(geo: any): [number, number] {
 
 const HighlightSource: React.FC<LV<HighlightLayer> & { terrain?: boolean }> = ({ layer: l, frame, fps, totalFrames, terrain }) => {
   const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
   const a = tr.opacity; // 0→1 enter / 1→0 exit from the unified timing engine
   // Clean once per geojson (mainland + nearby islands, simplified) — keeps the
   // Mapbox source light and the flag clip fast even for legacy full-detail docs.
@@ -1434,6 +1496,7 @@ const ROUTE_EMOJI: Record<string, string> = { car: "🚗", plane: "✈️", boat
 const RouteEndpoints: React.FC<LV<RouteLayer>> = ({ layer: l, frame, fps, totalFrames, project }) => {
   const theme = useTheme();
   const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
   if (tr.opacity < 0.01 || !project) return null;
   const coords = l.coordinates;
   const ends: { c: [number, number]; name?: string; label: string }[] = [
@@ -1464,6 +1527,7 @@ const RouteIconView: React.FC<LV<RouteLayer>> = ({ layer: l, frame, fps, totalFr
   // Hooks first (before any early return) — rules of hooks.
   const coords = useMemo(() => finalRouteCoords(l), [l.coordinates, l.direction, (l as any).smoothness]); // eslint-disable-line react-hooks/exhaustive-deps
   const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
   if (tr.opacity < 0.01 || !project) return null;
   // SAME geometry + progress as the line + follow camera → the vehicle rides the head.
   const travel = routeTravel(l, frame, fps, totalFrames);
@@ -1515,6 +1579,7 @@ function trimLineCoords(coords: number[][], frac: number): number[][] {
 
 const RouteSource: React.FC<LV<RouteLayer>> = ({ layer: l, frame, fps, totalFrames }) => {
   const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
   // Memoise the geometry so Mapbox doesn't re-parse it every frame (only the
   // trim animates). Smoothing (Chaikin) is applied here too.
   const coords = useMemo(() => finalRouteCoords(l), [l.coordinates, l.direction, (l as any).smoothness]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1567,6 +1632,7 @@ function trackWindow(l: TrackLayer): [number, number] {
 
 const TrackSource: React.FC<LV<TrackLayer>> = ({ layer: l, frame, fps, totalFrames }) => {
   const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
   const [i0, i1] = trackWindow(l);
   const t = trackTravel(l, frame, fps, totalFrames);
   const headIdx = Math.min(i1, i0 + Math.round(t * (i1 - i0)));
@@ -1660,6 +1726,7 @@ const TrackElevationProfile: React.FC<{ l: TrackLayer; i0: number; i1: number; h
 const TrackOverlay: React.FC<LV<TrackLayer>> = ({ layer: l, frame, fps, totalFrames, project }) => {
   const theme = useTheme();
   const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
   if (tr.opacity < 0.01 || !project) return null;
   const [i0, i1] = trackWindow(l);
   const t = trackTravel(l, frame, fps, totalFrames);
@@ -1704,6 +1771,7 @@ const LabelView: React.FC<LV<LabelLayer>> = ({ layer: l, frame, fps, totalFrames
   const theme = useTheme();
   const { width: vw, height: vh } = useVideoConfig();
   const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
   if (tr.opacity < 0.01) return null;
   const font = displayFont(theme, l.fontFamily);
   const a = anchorXY(l.anchor, project);
@@ -1766,6 +1834,7 @@ const HighlightLabel: React.FC<LV<HighlightLayer>> = ({ layer: l, frame, fps, to
   const text = (l as any).labelText || l.place;
   if (!text || !l.geojson) return null;
   const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
   if (tr.opacity < 0.01) return null;
   const c = centroidOf(l.geojson);
   const p = project?.(c[0], c[1]) ?? { x: 0, y: 0 };
@@ -1779,6 +1848,7 @@ const HighlightLabel: React.FC<LV<HighlightLayer>> = ({ layer: l, frame, fps, to
 const FlagView: React.FC<LV<FlagLayer>> = ({ layer: l, frame, fps, totalFrames, project }) => {
   const { width: vw, height: vh } = useVideoConfig();
   const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
   if (tr.opacity < 0.01) return null;
   const p = project?.(l.anchor.lon, l.anchor.lat) ?? { x: 0, y: 0 };
   const iso = l.iso.toLowerCase();
@@ -1806,6 +1876,7 @@ const MarkerView: React.FC<LV<MarkerLayer>> = ({ layer: l, frame, fps, totalFram
   const theme = useTheme();
   const { width: vw, height: vh } = useVideoConfig();
   const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
   if (tr.opacity < 0.01 || !project) return null;
   const p = project(l.anchor.lon, l.anchor.lat);
   const glyph = l.emoji || MARKER_GLYPH[l.icon] || "📍";
@@ -1864,6 +1935,7 @@ function hexA(hex: string, a: number): string {
  *  build time (`entry.color`), so the renderer is pure presentation — no re-scale. */
 const ChoroplethSource: React.FC<LV<ChoroplethLayer>> = ({ layer: l, frame, fps, totalFrames }) => {
   const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
   if (tr.opacity < 0.01) return null;
   const entries = (l.data ?? []).filter((e: any) => e.geojson);
   if (!entries.length) return null;
@@ -1893,6 +1965,7 @@ const ChoroplethSource: React.FC<LV<ChoroplethLayer>> = ({ layer: l, frame, fps,
 /** DOM overlay: frosted-glass legend bar in the bottom-left corner. */
 const ChoroplethLegend: React.FC<LV<ChoroplethLayer>> = ({ layer: l, frame, fps, totalFrames }) => {
   const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
   if (tr.opacity < 0.01 || !l.showLegend) return null;
   const entries = l.data ?? [];
   if (!entries.length) return null;
@@ -1915,12 +1988,115 @@ const ChoroplethLegend: React.FC<LV<ChoroplethLayer>> = ({ layer: l, frame, fps,
   );
 };
 
+/* ── Flow arcs (weighted: trade / migration / spread — width = magnitude) ────── */
+
+/** Quadratic-bezier arc from→to with a perpendicular bow (curve 0 = straight). */
+function arcPoints(from: [number, number], to: [number, number], curve: number, n = 56): [number, number][] {
+  const dx = to[0] - from[0], dy = to[1] - from[1];
+  const len = Math.hypot(dx, dy) || 1e-6;
+  const ox = -dy / len, oy = dx / len;                              // unit perpendicular → bow direction
+  const cx = (from[0] + to[0]) / 2 + ox * curve * len * 0.5;
+  const cy = (from[1] + to[1]) / 2 + oy * curve * len * 0.5;
+  const pts: [number, number][] = [];
+  for (let i = 0; i <= n; i++) { const t = i / n, u = 1 - t; pts.push([u * u * from[0] + 2 * u * t * cx + t * t * to[0], u * u * from[1] + 2 * u * t * cy + t * t * to[1]]); }
+  return pts;
+}
+
+/** Canvas: one bezier arc per flow, width = magnitude. Draws in over the scene. */
+const FlowSource: React.FC<LV<FlowLayer>> = ({ layer: l, frame, fps, totalFrames }) => {
+  const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
+  const fc = useMemo(() => {
+    const data = (l.data ?? []).filter((e: any) => (e.fromLon || e.fromLat) && (e.toLon || e.toLat));
+    const inF = Math.round(l.timing.inSec * fps);
+    const dur = Math.max(1, Math.round(totalFrames * 0.55));
+    const drawP = l.animate === "none" ? 1 : clampN((frame - inF) / dur, 0, 1);
+    const eased = 1 - Math.pow(1 - drawP, 3);
+    const features = data.map((e: any) => {
+      const pts = arcPoints([e.fromLon, e.fromLat], [e.toLon, e.toLat], l.curve ?? 0.3);
+      const keep = Math.max(2, Math.round(pts.length * eased));
+      return { type: "Feature" as const, properties: { w: e.widthPx ?? 2, c: e.color ?? l.color }, geometry: { type: "LineString" as const, coordinates: pts.slice(0, keep) } };
+    });
+    return { type: "FeatureCollection" as const, features };
+  }, [l.data, l.curve, l.color, l.animate, l.timing.inSec, frame, fps, totalFrames]);
+  if (tr.opacity < 0.01 || !fc.features.length) return null;
+  const sid = `flow-${l.id}`;
+  return (
+    <Source id={sid} type="geojson" data={fc as any}>
+      <MapLayer id={`${sid}-glow`} type="line" source={sid} paint={{ "line-color": ["get", "c"], "line-width": ["*", ["get", "w"], 2.4], "line-blur": 6, "line-opacity": tr.opacity * 0.3 } as any} layout={{ "line-cap": "round", "line-join": "round" }} />
+      <MapLayer id={`${sid}-main`} type="line" source={sid} paint={{ "line-color": ["get", "c"], "line-width": ["get", "w"], "line-opacity": tr.opacity } as any} layout={{ "line-cap": "round", "line-join": "round" }} />
+    </Source>
+  );
+};
+
+/** DOM: thin→thick legend chip for the flow magnitude. */
+const FlowLegend: React.FC<LV<FlowLayer>> = ({ layer: l, frame, fps, totalFrames }) => {
+  const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
+  if (tr.opacity < 0.01 || !l.showLegend || !(l.data ?? []).length) return null;
+  return (
+    <AbsoluteFill style={{ justifyContent: "flex-end", alignItems: "flex-start", padding: "3.5% 4%", pointerEvents: "none" }}>
+      <div style={{ opacity: tr.opacity, transform: timingTransform(tr), background: "rgba(6,8,15,0.82)", backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,0.13)", borderRadius: "1vh", padding: "1.2vh 1.6vh" }}>
+        {l.metric && <div style={{ fontSize: "1.3vh", fontWeight: 700, color: "#fff", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "0.8vh", opacity: 0.9 }}>{l.metric}{l.unit ? ` (${l.unit})` : ""}</div>}
+        <div style={{ display: "flex", alignItems: "center", gap: "0.8vh" }}>
+          <span style={{ fontSize: "1.1vh", color: "rgba(255,255,255,0.6)" }}>less</span>
+          <div style={{ width: "3vh", height: "0.35vh", background: l.color, borderRadius: 3 }} />
+          <div style={{ width: "3vh", height: "1.2vh", background: l.color, borderRadius: 3 }} />
+          <span style={{ fontSize: "1.1vh", color: "rgba(255,255,255,0.6)" }}>more</span>
+        </div>
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+/* ── Heatmap (density — data-imported, MapLibre native heatmap) ──────────────── */
+
+const HeatmapSource: React.FC<LV<HeatmapLayer>> = ({ layer: l, frame, fps, totalFrames }) => {
+  const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
+  const { fc, maxW } = useMemo(() => {
+    const data = (l.data ?? []).filter((e: any) => e.lon !== 0 || e.lat !== 0);
+    const mx = Math.max(...data.map((e: any) => Math.abs(e.value) || 0), 1);
+    return { fc: { type: "FeatureCollection" as const, features: data.map((e: any) => ({ type: "Feature" as const, properties: { w: Math.abs(e.value) || 1 }, geometry: { type: "Point" as const, coordinates: [e.lon, e.lat] } })) }, maxW: mx };
+  }, [l.data]);
+  if (tr.opacity < 0.01 || !fc.features.length) return null;
+  const sid = `heat-${l.id}`;
+  return (
+    <Source id={sid} type="geojson" data={fc as any}>
+      <MapLayer id={`${sid}-h`} type="heatmap" source={sid} paint={{
+        "heatmap-weight": ["interpolate", ["linear"], ["get", "w"], 0, 0, maxW, 1],
+        "heatmap-intensity": l.intensity ?? 1,
+        "heatmap-radius": l.radius ?? 40,
+        "heatmap-opacity": tr.opacity,
+        "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"], 0, "rgba(0,0,0,0)", 0.12, l.colorLow ?? "#1a237e", 0.55, l.colorLow ?? "#1a237e", 1, l.colorHigh ?? "#ff3d00"],
+      } as any} />
+    </Source>
+  );
+};
+
+const HeatmapLegend: React.FC<LV<HeatmapLayer>> = ({ layer: l, frame, fps, totalFrames }) => {
+  const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
+  if (tr.opacity < 0.01 || !l.showLegend || !(l.data ?? []).length) return null;
+  const grad = `linear-gradient(to right, ${l.colorLow ?? "#1a237e"}, ${l.colorHigh ?? "#ff3d00"})`;
+  return (
+    <AbsoluteFill style={{ justifyContent: "flex-end", alignItems: "flex-start", padding: "3.5% 4%", pointerEvents: "none" }}>
+      <div style={{ opacity: tr.opacity, transform: timingTransform(tr), background: "rgba(6,8,15,0.82)", backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,0.13)", borderRadius: "1vh", padding: "1.2vh 1.6vh", minWidth: "16vh" }}>
+        {l.metric && <div style={{ fontSize: "1.3vh", fontWeight: 700, color: "#fff", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "0.8vh", opacity: 0.9 }}>{l.metric}{l.unit ? ` (${l.unit})` : ""}</div>}
+        <div style={{ height: "0.9vh", borderRadius: "0.45vh", background: grad, marginBottom: "0.5vh" }} />
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "1.1vh", color: "rgba(255,255,255,0.6)", fontWeight: 600 }}><span>low</span><span>high</span></div>
+      </div>
+    </AbsoluteFill>
+  );
+};
+
 /** Editorial leader-line callout: a dot ON the map point, a line out to a text
  *  box. The line "draws" in and the box fades up — pointing at an exact spot. */
 const AnnotationView: React.FC<LV<AnnotationLayer>> = ({ layer: l, frame, fps, totalFrames, project }) => {
   const theme = useTheme();
   const { width: vw, height: vh } = useVideoConfig();
   const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
   if (tr.opacity < 0.01 || !project) return null;
   const p = project(l.anchor.lon, l.anchor.lat);
   const font = displayFont(theme, l.fontFamily);
@@ -1989,6 +2165,7 @@ const BubbleView: React.FC<LV<BubbleLayer>> = ({ layer: l, frame, fps, totalFram
   const theme = useTheme();
   const { width: vw, height: vh } = useVideoConfig();
   const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
   if (tr.opacity < 0.01 || !project) return null;
   const entries = (l.data ?? []).filter((e: any) => e.lon !== 0 || e.lat !== 0);
   if (!entries.length) return null;
@@ -2048,6 +2225,7 @@ const BubbleView: React.FC<LV<BubbleLayer>> = ({ layer: l, frame, fps, totalFram
 const ConnectionsView: React.FC<LV<ConnectionsLayer>> = ({ layer: l, frame, fps, totalFrames, project }) => {
   const theme = useTheme();
   const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
   if (tr.opacity < 0.01 || !project) return null;
   const pts = l.points.map((pt) => ({ ...project(pt.lon, pt.lat), name: pt.name }));
   if (pts.length < 1) return null;
@@ -2129,6 +2307,7 @@ const ConnectionsView: React.FC<LV<ConnectionsLayer>> = ({ layer: l, frame, fps,
 const SpotlightView: React.FC<LV<SpotlightLayer>> = ({ layer: l, frame, fps, totalFrames, project }) => {
   const { height: vh } = useVideoConfig();
   const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
   if (tr.opacity < 0.01 || !project) return null;
   const p = project(l.anchor.lon, l.anchor.lat);
   const pulse = l.pulse ? 1 + 0.05 * Math.sin(frame / 7) : 1;
@@ -2150,6 +2329,7 @@ const TitleView: React.FC<LV<TitleLayer>> = ({ layer: l, frame, fps, totalFrames
   const theme = useTheme();
   const { width: vw, height: vh } = useVideoConfig();
   const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
   if (tr.opacity < 0.01) return null;
   const vAlign = l.position === "top" ? "flex-start" : l.position === "bottom" ? "flex-end" : "center";
   const hAlign = l.align === "left" ? "flex-start" : l.align === "right" ? "flex-end" : "center";
@@ -2175,6 +2355,21 @@ const TitleView: React.FC<LV<TitleLayer>> = ({ layer: l, frame, fps, totalFrames
             {l.sub && <div style={{ fontSize: 38, fontWeight: 600, letterSpacing: 4, textTransform: "uppercase", color: l.accent, marginTop: 14, textShadow: ts }}>{l.sub}</div>}
           </div>
         </div>
+      ) : tpl === "boxed" ? (
+        <div data-layer-id={l.id} style={{ opacity: tr.opacity, transform: `${timingTransform(tr)}${tfStyle(l, vw, vh)}`, textAlign: l.align, fontFamily: displayFont(theme, (l as any).fontFamily) }}>
+          <div style={{ display: "inline-block", padding: "30px 48px", background: "rgba(6,8,15,0.72)", backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)", border: `2px solid ${l.accent}`, borderRadius: 20, boxShadow: `0 24px 80px -30px ${l.accent}88` }}>
+            {sub}
+            {headline}
+          </div>
+        </div>
+      ) : tpl === "lowerthird" ? (
+        <div data-layer-id={l.id} style={{ opacity: tr.opacity, transform: `${timingTransform(tr)}${tfStyle(l, vw, vh)}`, display: "flex", alignItems: "stretch", gap: 22, textAlign: "left", fontFamily: displayFont(theme, (l as any).fontFamily) }}>
+          <div style={{ width: 10, background: l.accent, borderRadius: 5, boxShadow: `0 0 24px ${l.accent}aa` }} />
+          <div style={{ background: "linear-gradient(90deg, rgba(6,8,15,0.85), rgba(6,8,15,0.12))", padding: "18px 64px 18px 28px", borderRadius: 8 }}>
+            <div style={{ fontSize: 92, fontWeight: 800, color: l.color, lineHeight: 1.04, letterSpacing: -1, textShadow: ts, ...outlineStyle((l as any).outline, 92) }}>{l.text}</div>
+            {l.sub && <div style={{ fontSize: 38, fontWeight: 600, letterSpacing: 4, textTransform: "uppercase", color: l.accent, marginTop: 8, textShadow: ts }}>{l.sub}</div>}
+          </div>
+        </div>
       ) : (
         <div data-layer-id={l.id} style={{ opacity: tr.opacity, transform: `${timingTransform(tr)}${tfStyle(l, vw, vh)}`, textAlign: l.align, fontFamily: displayFont(theme, (l as any).fontFamily) }}>
           {tpl === "classic" && bar(70, 3)}
@@ -2192,6 +2387,7 @@ const ChartView: React.FC<LV<ChartLayer>> = ({ layer: l, frame, fps, totalFrames
   const theme = useTheme();
   const { width: vw, height: vh } = useVideoConfig();
   const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
   if (tr.opacity < 0.01) return null;
   // Adjustable count speed + easing (the value tweens over `countSec`).
   const CE: Record<string, (t: number) => number> = {
@@ -2252,6 +2448,7 @@ const ChartView: React.FC<LV<ChartLayer>> = ({ layer: l, frame, fps, totalFrames
 const ImageView: React.FC<LV<ImageLayer>> = ({ layer: l, frame, fps, totalFrames, project }) => {
   const { width: vw, height: vh } = useVideoConfig();
   const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
   if (tr.opacity < 0.01 || !l.url) return null;
   const a = anchorXY(l.anchor as any, project);
   const w = l.sizePx;

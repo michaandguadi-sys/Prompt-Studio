@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { MapPin, Upload, Sparkles } from "lucide-react";
+import { MapPin, Upload, Sparkles, Boxes } from "lucide-react";
+import { MAP3D_STYLES } from "@/lib/presets/map3dStyles";
 import { Field, Input, NumberInput, Select, Section, Slider, Toggle } from "./controls";
 import { ColorInput } from "@/components/ui/ColorInput";
 import { ColorWheel } from "./ColorWheel";
@@ -14,6 +15,7 @@ import { VARIANT_PRESETS, STYLE_PRESETS } from "@/v2/track/presets";
 import type { TrackLayer, TrackVariant, TrackStyle } from "@/v2/doc/schema";
 import { loadBrandKits, saveBrandKits, type BrandKit } from "@/lib/brandKits";
 import { loadAddons, removeAddon as removeAddonStore, type Addon } from "@/lib/addons";
+import { useTier } from "@/hooks/useTier";
 import { TimingControls } from "./TimingControls";
 import { ThemePanel } from "./ThemePanel";
 import { FONT_CHOICES } from "../doc/themes";
@@ -80,9 +82,11 @@ const PriorityControl: React.FC<{ layerId: string; type: "camera" | "route" | "h
 const IDENTITY_TF = { offsetXPct: 0, offsetYPct: 0, scale: 1, rotation: 0 };
 
 /** Numeric position / scale / rotation — mirrors the preview drag handles. */
-const TransformControls: React.FC<{ t: any; onChange: (tf: any) => void }> = ({ t, onChange }) => {
+const TransformControls: React.FC<{ t: any; onChange: (tf: any) => void; kf?: any[]; onKf?: (k: any[]) => void }> = ({ t, onChange, kf, onKf }) => {
   const v = { ...IDENTITY_TF, ...(t ?? {}) };
   const touched = v.offsetXPct !== 0 || v.offsetYPct !== 0 || v.scale !== 1 || v.rotation !== 0;
+  // The final framing's zoom — used as the reference so "scale with zoom" reads 1:1 there.
+  const camZoom = useEditor((s) => { const c = s.project.composition.layers.find((l) => l.type === "camera") as any; return c?.end?.zoom ?? 8; });
   return (
     <div className="space-y-1.5 pt-0.5">
       <div className="flex items-center justify-between">
@@ -95,6 +99,38 @@ const TransformControls: React.FC<{ t: any; onChange: (tf: any) => void }> = ({ 
         <Field label="Scale"><NumberInput value={Math.round(v.scale * 100)} step={5} min={10} max={500} unit="%" onChange={(s) => onChange({ ...v, scale: s / 100 })} /></Field>
         <Field label="Rotation"><NumberInput value={Math.round(v.rotation)} step={5} min={-180} max={180} unit="°" onChange={(r) => onChange({ ...v, rotation: r })} /></Field>
       </div>
+      <label className="flex items-center justify-between gap-2 rounded-md bg-paper-50 px-2 py-1.5 text-[11px] text-graphite/75">
+        <span>Scale with map zoom <span className="text-graphite/40">· grows/shrinks with the map</span></span>
+        <input type="checkbox" checked={!!v.scaleWithZoom}
+          onChange={(e) => onChange({ ...v, scaleWithZoom: e.target.checked, anchorZoom: e.target.checked ? camZoom : 0 })}
+          className="accent-iris" />
+      </label>
+      {onKf && (
+        <div className="space-y-1.5 border-t border-line pt-2">
+          <span className="text-[10px] uppercase tracking-wider text-graphite/45">Motion keyframes <span className="font-normal normal-case text-graphite/35">· animate position / scale / rotation</span></span>
+          {(kf ?? []).map((k, i) => (
+            <div key={i} className="space-y-1.5 rounded-lg border border-line bg-paper-50 p-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase tracking-wider text-graphite/40">Key {i + 1}</span>
+                <button onClick={() => onKf((kf ?? []).filter((_, j) => j !== i))} className="px-1 text-xs text-graphite/45 hover:text-red-400">✕</button>
+              </div>
+              <Slider label="Time" value={k.t ?? 0} min={0} max={1} step={0.02} onChange={(val) => { const next = [...(kf ?? [])]; next[i] = { ...k, t: val }; onKf(next); }} format={(val) => `${Math.round(val * 100)}%`} />
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="X offset"><NumberInput value={Math.round(k.offsetXPct ?? 0)} step={1} min={-100} max={100} unit="%" onChange={(val) => { const next = [...(kf ?? [])]; next[i] = { ...k, offsetXPct: val }; onKf(next); }} /></Field>
+                <Field label="Y offset"><NumberInput value={Math.round(k.offsetYPct ?? 0)} step={1} min={-100} max={100} unit="%" onChange={(val) => { const next = [...(kf ?? [])]; next[i] = { ...k, offsetYPct: val }; onKf(next); }} /></Field>
+                <Field label="Scale"><NumberInput value={Math.round((k.scale ?? 1) * 100)} step={5} min={10} max={500} unit="%" onChange={(val) => { const next = [...(kf ?? [])]; next[i] = { ...k, scale: val / 100 }; onKf(next); }} /></Field>
+                <Field label="Rotation"><NumberInput value={Math.round(k.rotation ?? 0)} step={5} min={-180} max={180} unit="°" onChange={(val) => { const next = [...(kf ?? [])]; next[i] = { ...k, rotation: val }; onKf(next); }} /></Field>
+              </div>
+              <Slider label="Opacity" value={k.opacity ?? 1} min={0} max={1} step={0.05} onChange={(val) => { const next = [...(kf ?? [])]; next[i] = { ...k, opacity: val }; onKf(next); }} format={(val) => `${Math.round(val * 100)}%`} />
+            </div>
+          ))}
+          <button onClick={() => { const cur = kf ?? []; const t0 = cur.length ? Math.min(1, (cur[cur.length - 1].t ?? 0) + 0.25) : 0; onKf([...cur, { t: t0, offsetXPct: v.offsetXPct, offsetYPct: v.offsetYPct, scale: v.scale, rotation: v.rotation, opacity: 1 }]); }}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-line py-1.5 text-[11px] uppercase tracking-wider text-graphite/50 hover:border-iris hover:text-iris transition">
+            + Add keyframe
+          </button>
+          {(kf ?? []).length === 1 && <div className="text-[10px] text-graphite/40">Add a 2nd keyframe to animate between them.</div>}
+        </div>
+      )}
       <div className="text-[10px] text-graphite/40">Tip: drag it directly in the preview to move, scale & rotate.</div>
     </div>
   );
@@ -181,6 +217,28 @@ const FrameOnMap: React.FC<{
     </>
   );
 };
+
+/**
+ * One full camera POSE editor — location (place search + frame-on-map) plus
+ * zoom, tilt and rotation. Reused IDENTICALLY for the Start shot, every Stop and
+ * the End shot, so all three read the same (consistent order + naming) and every
+ * value is directly editable with no hidden style-coupling.
+ */
+const PoseEditor: React.FC<{ label: string; hint?: string; pose: any; onChange: (p: any) => void; onRemove?: () => void }> = ({ label, hint, pose, onChange, onRemove }) => (
+  <div className="space-y-2 rounded-lg border border-line bg-paper-50 p-2.5">
+    <div className="flex items-center justify-between">
+      <span className="text-[11px] font-medium text-graphite">{label}{hint ? <span className="ml-1 font-normal text-graphite/45">· {hint}</span> : null}</span>
+      {onRemove && <button onClick={onRemove} className="px-1 text-xs text-graphite/45 hover:text-red-400">✕</button>}
+    </div>
+    <PlaceSearch size="sm" placeholder={pose.lon || pose.lat ? `${pose.lat.toFixed(2)}, ${pose.lon.toFixed(2)} — search to move` : "Search a place…"} onPick={(p) => onChange({ ...pose, lon: p.lon, lat: p.lat, zoom: p.zoom })} />
+    <FrameOnMap lon={pose.lon} lat={pose.lat} zoom={pose.zoom} pitch={pose.pitch} bearing={pose.bearing} onPick={(v) => onChange({ ...pose, lon: v.lon, lat: v.lat, zoom: v.zoom, pitch: v.pitch, bearing: v.bearing })} />
+    <Slider label="Zoom" hint="how close" value={pose.zoom} min={1} max={20} step={0.2} onChange={(v) => onChange({ ...pose, zoom: v })} format={(v) => v.toFixed(1)} />
+    <div className="grid grid-cols-2 gap-2">
+      <Slider label="Tilt" value={pose.pitch ?? 0} min={0} max={85} step={1} onChange={(v) => onChange({ ...pose, pitch: v })} format={(v) => `${Math.round(v)}°`} />
+      <Slider label="Rotation" value={pose.bearing ?? 0} min={-180} max={180} step={5} onChange={(v) => onChange({ ...pose, bearing: v })} format={(v) => `${Math.round(v)}°`} />
+    </div>
+  </div>
+);
 
 /**
  * Draw a highlight region directly on a full interactive map — a circle (click +
@@ -484,39 +542,85 @@ const BrandKitPanel: React.FC = () => {
 
 /** The selectable basemaps — a VISUAL picker (thumbnail swatch + name) so the
  *  map style is the first, most obvious choice. Swatches approximate each look. */
-const MAP_STYLES: { url: string; name: string; hint: string; swatch: React.CSSProperties }[] = [
-  { url: "mapbox://styles/mapbox/dark-v11", name: "Dark", hint: "cinematic default", swatch: { background: "linear-gradient(135deg,#0a0e1a,#121830 60%,#1b2547)" } },
-  { url: "mapbox://styles/mapbox/satellite-streets-v12", name: "Satellite", hint: "real imagery", swatch: { background: "linear-gradient(135deg,#243a1c,#3b5a2a 45%,#7a6b3e 75%,#274b63)" } },
-  { url: "mapbox://styles/mapbox/light-v11", name: "Light", hint: "clean & bright", swatch: { background: "linear-gradient(135deg,#f4f5f8,#e7ebf2 60%,#d6deea)" } },
-  { url: "mapbox://styles/mapbox/outdoors-v12", name: "Terrain", hint: "topographic", swatch: { background: "linear-gradient(135deg,#cfe3b8,#a9cf8e 55%,#8bbf7a)" } },
-  { url: "mapbox://styles/mapbox/streets-v12", name: "Streets", hint: "roads & places", swatch: { background: "linear-gradient(135deg,#fbfbf9,#eef0ec 55%,#e3e7df)" } },
-  { url: "mapbox://styles/mapbox/navigation-night-v1", name: "Night", hint: "nav, neon roads", swatch: { background: "linear-gradient(135deg,#070b18,#0d1430 55%,#16306b)" } },
-  { url: "grid", name: "Grid", hint: "blueprint graticule", swatch: { background: "#0b1c38", backgroundImage: "linear-gradient(rgba(96,170,255,0.5) 1px,transparent 1px),linear-gradient(90deg,rgba(96,170,255,0.5) 1px,transparent 1px)", backgroundSize: "8px 8px" } },
-  { url: "https://www.openhistoricalmap.org/map-styles/main/main.json", name: "Historical", hint: "borders by year", swatch: { background: "linear-gradient(135deg,#efe3c4,#dcc89a 55%,#c2a878)" } },
+type CuratedStyle = { id: string; name: string; hint: string; kind: "flat" | "photoreal" | "3d"; url?: string; preset3dId?: string; swatch: React.CSSProperties };
+/** ONE curated set of distinct looks — flat bases + the standout 3D worlds +
+ *  real-building Photoreal, so the picker is clear (not 19 cramped swatches). */
+const CURATED_STYLES: CuratedStyle[] = [
+  { id: "satellite", name: "Satellite", hint: "real imagery", kind: "flat", url: "mapbox://styles/mapbox/satellite-streets-v12", swatch: { background: "linear-gradient(135deg,#243a1c,#3b5a2a 45%,#7a6b3e 75%,#274b63)" } },
+  { id: "dark", name: "Dark", hint: "cinematic default", kind: "flat", url: "mapbox://styles/mapbox/dark-v11", swatch: { background: "linear-gradient(135deg,#0a0e1a,#121830 60%,#1b2547)" } },
+  { id: "minimal", name: "Minimal", hint: "clean & light", kind: "flat", url: "mapbox://styles/mapbox/light-v11", swatch: { background: "linear-gradient(135deg,#f4f5f8,#e7ebf2 60%,#d6deea)" } },
+  { id: "terrain", name: "Terrain", hint: "topographic relief", kind: "flat", url: "mapbox://styles/mapbox/outdoors-v12", swatch: { background: "linear-gradient(135deg,#cfe3b8,#a9cf8e 55%,#8bbf7a)" } },
+  { id: "photoreal", name: "Photoreal 3D", hint: "real buildings · like Google Earth", kind: "photoreal", swatch: { background: "linear-gradient(135deg,#3a4a2c,#6b7a4a 45%,#9a8a5a 70%,#2a4b63)" } },
+  { id: "papercraft", name: "Paper-craft", hint: "folded-paper 3D", kind: "3d", preset3dId: "papercraft", swatch: { background: "linear-gradient(135deg,#efe7d6,#d8cdb6 60%,#b9a98a)" } },
+  { id: "holographic", name: "Holographic", hint: "cyan hologram 3D", kind: "3d", preset3dId: "holographic", swatch: { background: "linear-gradient(135deg,#06121f,#0b3a4a 45%,#2FE0FF)" } },
+];
+/** Niche bases kept available as a small text row (not in the visual grid). */
+const MORE_STYLES: { url: string; name: string }[] = [
+  { url: "grid", name: "Grid" },
+  { url: "https://www.openhistoricalmap.org/map-styles/main/main.json", name: "Historical" },
 ];
 
 /** Map style — the PRIORITY choice: which basemap. Visual thumbnail picker plus
  *  the per-style options (terrain, labels, land/water, historical year). */
 const MapStylePanel: React.FC = () => {
   const basemap = useEditor((s) => s.project.composition.basemap);
+  const look = useEditor((s) => s.project.composition.look);
+  const layers = useEditor((s) => s.project.composition.layers);
   const patchComposition = useEditor((s) => s.patchComposition);
+  const patchLayer = useEditor((s) => s.patchLayer);
+  const style3d = (basemap as any).style3d || "";
+  const photoreal = !!(basemap as any).photoreal3d;
+  // Apply a creative 3D world: merge its basemap + look + tilt the camera (same as the old modal).
+  const apply3d = (st: (typeof MAP3D_STYLES)[number]) => {
+    patchComposition({ basemap: { ...basemap, ...(st.basemap as any), style3d: st.id, photoreal3d: false } as any, look: { ...look, ...(st.look as any) } as any });
+    const cam = layers.find((l) => l.type === "camera") as any;
+    if (cam && typeof st.pitch === "number") patchLayer(cam.id, { end: { ...cam.end, pitch: st.pitch } } as any);
+  };
+  // Photoreal 3D — Google's real-building tiles (live preview needs a Maps key; exports as 3D satellite).
+  const applyPhotoreal = () => {
+    patchComposition({ basemap: { ...basemap, photoreal3d: true, style3d: "", terrain: true, buildings3d: true } as any });
+    const cam = layers.find((l) => l.type === "camera") as any;
+    if (cam) patchLayer(cam.id, { end: { ...cam.end, pitch: Math.max(cam.end?.pitch ?? 0, 55) } } as any);
+  };
+  const clear3d = () => patchComposition({ basemap: { ...basemap, style3d: "", photoreal3d: false, buildings3d: false, landColor: "", waterColor: "", buildingColor: "", boundaryGlow: "" } as any });
+  const applyCurated = (c: CuratedStyle) => {
+    if (c.kind === "photoreal") return applyPhotoreal();
+    if (c.kind === "3d") { const st = MAP3D_STYLES.find((s) => s.id === c.preset3dId); if (st) apply3d(st); return; }
+    patchComposition({ basemap: { ...basemap, styleUrl: c.url!, style3d: "", photoreal3d: false } as any });
+  };
+  const curatedActive = (c: CuratedStyle) =>
+    c.kind === "photoreal" ? photoreal
+      : c.kind === "3d" ? (!photoreal && style3d === c.preset3dId)
+        : (!style3d && !photoreal && basemap.styleUrl === c.url);
   return (
     <Section title="Map style">
       {/* Visual basemap chooser — the first thing you pick. */}
+      {/* ONE curated picker — distinct flat bases + standout 3D + real Photoreal. */}
       <div className="grid grid-cols-4 gap-1.5">
-        {MAP_STYLES.map((s) => {
-          const active = basemap.styleUrl === s.url;
+        {CURATED_STYLES.map((c) => {
+          const active = curatedActive(c);
           return (
-            <button key={s.url} onClick={() => patchComposition({ basemap: { ...basemap, styleUrl: s.url } })} title={`${s.name} — ${s.hint}`}
+            <button key={c.id} onClick={() => applyCurated(c)} title={`${c.name} — ${c.hint}`}
               className="group text-center transition-transform hover:-translate-y-0.5">
-              <div className={`relative h-11 w-full overflow-hidden rounded-md border ${active ? "border-iris ring-2 ring-iris/40" : "border-black/10"}`} style={s.swatch}>
+              <div className={`relative flex h-11 w-full items-center justify-center overflow-hidden rounded-md border ${active ? "border-iris ring-2 ring-iris/40" : "border-black/10"}`} style={c.swatch}>
+                {c.kind === "photoreal" && <Boxes size={14} className="text-white/90" />}
                 {active && <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-iris shadow-glow-iris" />}
               </div>
-              <div className={`mt-0.5 truncate text-[9px] font-medium ${active ? "text-iris" : "text-graphite/55 group-hover:text-iris"}`}>{s.name}</div>
+              <div className={`mt-0.5 truncate text-[9px] font-medium ${active ? "text-iris" : "text-graphite/55 group-hover:text-iris"}`}>{c.name}</div>
             </button>
           );
         })}
       </div>
+      <div className="flex items-center gap-2.5 text-[10px] text-graphite/45">
+        <span className="uppercase tracking-wider text-graphite/35">More</span>
+        {MORE_STYLES.map((m) => {
+          const active = !style3d && !photoreal && basemap.styleUrl === m.url;
+          return <button key={m.url} onClick={() => patchComposition({ basemap: { ...basemap, styleUrl: m.url, style3d: "", photoreal3d: false } as any })} className={`transition-colors hover:text-iris ${active ? "font-semibold text-iris" : ""}`}>{m.name}</button>;
+        })}
+        {(style3d || photoreal) && <button onClick={clear3d} className="ml-auto transition-colors hover:text-iris">↺ flat</button>}
+      </div>
+      {photoreal && <p className="text-[10px] leading-snug text-graphite/40">Photoreal 3D streams Google&apos;s real-building tiles — add a Google Maps key in Settings for the live preview (without one it still exports as a 3D-satellite world).</p>}
+
         {/^https?:.*openhistorical/i.test(basemap.styleUrl) && (() => {
           const labelYr = (y: number) => (y < 0 ? `${Math.abs(y)} BC` : `${y}`);
           const yr = parseInt(String(basemap.mapYear || ""), 10);
@@ -770,37 +874,22 @@ const LayerFields: React.FC<{ layer: Layer; set: (p: Record<string, unknown>) =>
       return (
         <Section title="Camera move">
           <PriorityControl layerId={layer.id} type="camera" />
-          <Field label="Fly to (end shot)" hint="the final framing — search a place or frame it on the map">
-            <div className="space-y-1.5">
-              <PlaceSearch size="sm" placeholder="Search a place…" onPick={(p) => set({
-                end: { lon: p.lon, lat: p.lat, zoom: p.zoom, pitch: 45, bearing: -12 },
-                start: { lon: p.lon, lat: p.lat, zoom: Math.max(1.8, p.zoom - 6), pitch: 0, bearing: 0 },
-              })} />
-              <FrameOnMap
-                lon={layer.end.lon} lat={layer.end.lat} zoom={layer.end.zoom} pitch={layer.end.pitch} bearing={layer.end.bearing}
-                onPick={(v) => set({
-                  end: { lon: v.lon, lat: v.lat, zoom: v.zoom, pitch: v.pitch, bearing: v.bearing },
-                  start: { lon: v.lon, lat: v.lat, zoom: Math.max(1.8, v.zoom - 6), pitch: 0, bearing: 0 },
-                })}
-              />
-            </div>
-          </Field>
-          {/* Explicit START framing — set the opening shot directly (where the
-              move BEGINS). Picking a move auto-derives a sensible start, but this
-              lets you override both ends of the move precisely. */}
-          <Field label="Start framing" hint="the opening shot — where the move begins">
-            <FrameOnMap
-              lon={layer.start.lon} lat={layer.start.lat} zoom={layer.start.zoom} pitch={layer.start.pitch} bearing={layer.start.bearing}
-              onPick={(v) => set({ start: { lon: v.lon, lat: v.lat, zoom: v.zoom, pitch: v.pitch, bearing: v.bearing } })}
-            />
-          </Field>
-          <Field label="Move" hint="Pick a cinematic move — start is auto-set, then tweak above">
+          {/* Quick move — ONE tap sets a sensible Start + End from the End location.
+              Every value then stays directly editable in the pose cards below
+              (no hidden style-coupling that silently rewrites your zoom). */}
+          <Field label="Quick move" hint="one tap, then fine-tune each shot below">
             <div className="grid grid-cols-3 gap-1.5">
               {CAMERA_MOVES.map((m) => (
                 <button key={m.v} onClick={() => {
-                  const delta = Math.max(1.5, Math.abs(layer.end.zoom - layer.start.zoom));
-                  const startZoom = m.v === "zoom-out" ? layer.end.zoom + delta : Math.max(1.4, layer.end.zoom - delta);
-                  set({ style: m.v, end: { ...layer.end, pitch: m.pitch }, start: { ...layer.start, zoom: m.v === "hold" ? layer.end.zoom : startZoom, pitch: 0, bearing: 0 }, ...(m.v === "hold" ? { moveFraction: 0.2 } : {}) });
+                  const e = layer.end;
+                  const delta = Math.max(1.5, Math.abs(e.zoom - layer.start.zoom)) || 6;
+                  const startZoom = m.v === "zoom-out" ? Math.min(20, e.zoom + delta) : m.v === "hold" ? e.zoom : Math.max(1.4, e.zoom - delta);
+                  set({
+                    style: m.v,
+                    end: { ...e, pitch: m.pitch },
+                    start: { lon: e.lon, lat: e.lat, zoom: startZoom, pitch: m.v === "hold" ? m.pitch : Math.max(0, m.pitch - 18), bearing: m.v === "orbit" ? e.bearing - 60 : 0 },
+                    ...(m.v === "hold" ? { moveFraction: 0.2 } : {}),
+                  });
                 }}
                   className={`rounded-lg border px-2 py-1.5 text-[11px] font-medium transition-colors ${layer.style === m.v ? "border-iris bg-iris/10 text-iris" : "border-line text-graphite/65 hover:border-iris/40"}`}>
                   {m.label}
@@ -808,54 +897,31 @@ const LayerFields: React.FC<{ layer: Layer; set: (p: Record<string, unknown>) =>
               ))}
             </div>
           </Field>
-          {/* Always-on zoom — the most common framing fix. */}
-          <Slider label="Zoom level" hint="how close the final shot sits" value={layer.end.zoom} min={1} max={16} step={0.2}
-            onChange={(v) => { const moveSize = Math.abs(layer.end.zoom - layer.start.zoom); const startZoom = layer.style === "zoom-out" ? v + moveSize : Math.max(1.2, v - moveSize); set({ end: { ...layer.end, zoom: v }, start: { ...layer.start, zoom: layer.style === "hold" ? v : startZoom } }); }}
-            format={(v) => `${v.toFixed(1)}`} />
-          {layer.style !== "hold" && (
-            <Slider label="Move size" value={Math.abs(layer.end.zoom - layer.start.zoom)} min={0} max={8} step={0.2}
-              onChange={(v) => { const startZoom = layer.style === "zoom-out" ? layer.end.zoom + v : Math.max(1.4, layer.end.zoom - v); set({ start: { ...layer.start, zoom: startZoom } }); }}
-              format={(v) => (v < 0.3 ? "none" : v < 2 ? "subtle" : v < 4.5 ? "medium" : "big")} />
-          )}
+
+          {/* Start → (stops) → End — three identical pose editors, each fully
+              editable: location (search + frame), zoom, tilt and rotation. */}
+          <PoseEditor label="Start shot" hint="where it begins" pose={layer.start} onChange={(p) => set({ start: p })} />
+          {layer.waypoints.map((wp, wi) => (
+            <PoseEditor key={wi} label={`Stop ${wi + 1}`} hint="fly through" pose={wp}
+              onChange={(p) => { const wps = [...layer.waypoints]; wps[wi] = p; set({ waypoints: wps }); }}
+              onRemove={() => set({ waypoints: layer.waypoints.filter((_, i) => i !== wi) })} />
+          ))}
+          <button
+            onClick={() => {
+              const s = layer.start, e = layer.end;
+              const mid = { lon: (s.lon + e.lon) / 2, lat: (s.lat + e.lat) / 2, zoom: (s.zoom + e.zoom) / 2, pitch: Math.round((s.pitch + e.pitch) / 2), bearing: Math.round((s.bearing + e.bearing) / 2) };
+              set({ waypoints: [...layer.waypoints, mid], smoothPath: true });
+            }}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-line py-1.5 text-[11px] uppercase tracking-wider text-graphite/50 hover:border-iris hover:text-iris transition">
+            + Add stop
+          </button>
+          <PoseEditor label="End shot" hint="the final framing" pose={layer.end} onChange={(p) => set({ end: p })} />
+
+          {/* Motion feel */}
           <div className="grid grid-cols-2 gap-2">
-            <Slider label="Tilt" value={layer.end.pitch} min={0} max={80} step={1} onChange={(v) => set({ end: { ...layer.end, pitch: v } })} format={(v) => `${Math.round(v)}°`} />
-            <Slider label="Rotation" value={layer.end.bearing} min={-180} max={180} step={5} onChange={(v) => set({ end: { ...layer.end, bearing: v } })} format={(v) => `${Math.round(v)}°`} />
-            <Slider label="Move vs hold" value={layer.moveFraction} min={0.1} max={1} step={0.05} onChange={(v) => set({ moveFraction: v })} format={(v) => `${Math.round(v * 100)}%`} />
+            <Slider label="Move vs hold" hint="how much of the scene is moving" value={layer.moveFraction} min={0.1} max={1} step={0.05} onChange={(v) => set({ moveFraction: v })} format={(v) => `${Math.round(v * 100)}%`} />
             <Field label="Ease"><Select value={layer.easing} onChange={(e) => set({ easing: e.target.value })}><option value="easeInOut">Smooth</option><option value="easeOut">Ease out</option><option value="easeIn">Ease in</option><option value="linear">Linear</option><option value="spring">Spring</option></Select></Field>
           </div>
-
-          {/* Optional multi-stop path (only meaningful for travel motions). */}
-          {(layer.style === "fly-in" || layer.style === "zoom-out" || layer.style === "push-in") && (
-            <div className="space-y-1.5 pt-1">
-              <div className="text-[11px] font-medium text-graphite-muted">
-                Camera stops <span className="text-graphite/50">· optional — fly through places</span>
-              </div>
-              {layer.waypoints.map((wp, wi) => (
-                <div key={wi} className="rounded-lg border border-line bg-paper-50 p-2 space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] uppercase tracking-wider text-graphite/40">Stop {wi + 1}</span>
-                    <button onClick={() => set({ waypoints: layer.waypoints.filter((_, i) => i !== wi) })} className="text-graphite/45 hover:text-red-400 text-xs px-1">✕</button>
-                  </div>
-                  <PlaceSearch size="sm" placeholder={wp.lon || wp.lat ? `${wp.lat.toFixed(1)}, ${wp.lon.toFixed(1)}` : "Search a place…"}
-                    onPick={(p) => { const wps = [...layer.waypoints]; wps[wi] = { ...wp, lon: p.lon, lat: p.lat, zoom: p.zoom }; set({ waypoints: wps }); }} />
-                  <Field label="Zoom at stop">
-                    <NumberInput value={Math.round(wp.zoom * 10) / 10} step={0.5} min={1} max={22}
-                      onChange={(v) => { const wps = [...layer.waypoints]; wps[wi] = { ...wp, zoom: v }; set({ waypoints: wps }); }} />
-                  </Field>
-                </div>
-              ))}
-              <button
-                onClick={() => {
-                  const s = layer.start, e = layer.end;
-                  const mid = { lon: (s.lon + e.lon) / 2, lat: (s.lat + e.lat) / 2, zoom: (s.zoom + e.zoom) / 2, pitch: Math.round(e.pitch / 2), bearing: 0 };
-                  set({ waypoints: [...layer.waypoints, mid], smoothPath: true });
-                }}
-                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-line py-1.5 text-[11px] uppercase tracking-wider text-graphite/50 hover:border-iris hover:text-iris transition"
-              >
-                + Add stop
-              </button>
-            </div>
-          )}
         </Section>
       );
 
@@ -889,7 +955,7 @@ const LayerFields: React.FC<{ layer: Layer; set: (p: Record<string, unknown>) =>
             </Field>
           )}
           <div className="grid grid-cols-2 gap-2">
-            <Field label="Color"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
+            <Field label="Colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
             <Field label="Accent"><ColorInput value={layer.accent} onChange={(v) => set({ accent: v })} /></Field>
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -898,7 +964,7 @@ const LayerFields: React.FC<{ layer: Layer; set: (p: Record<string, unknown>) =>
           </div>
           <Slider label="Text shadow" value={(layer as any).shadow ?? 0.55} onChange={(v) => set({ shadow: v })} format={(v) => v <= 0 ? "off" : `${Math.round(v * 100)}%`} />
           <Toggle label="Text outline" checked={(layer as any).outline ?? false} onChange={(v) => set({ outline: v })} />
-          <TransformControls t={(layer as any).transform} onChange={(tf) => set({ transform: tf })} />
+          <TransformControls t={(layer as any).transform} onChange={(tf) => set({ transform: tf })} kf={(layer as any).kf} onKf={(k) => set({ kf: k })} />
         </Section>
       );
 
@@ -930,7 +996,7 @@ const LayerFields: React.FC<{ layer: Layer; set: (p: Record<string, unknown>) =>
           <Field label="Title"><Input value={layer.text} onChange={(e) => set({ text: e.target.value })} /></Field>
           <Field label="Kicker / sub"><Input value={layer.sub} onChange={(e) => set({ sub: e.target.value })} /></Field>
           <div className="grid grid-cols-2 gap-2">
-            <Field label="Template"><Select value={layer.template} onChange={(e) => set({ template: e.target.value })}><option value="impact">Impact</option><option value="classic">Classic</option><option value="kicker">Kicker</option><option value="split">Split</option></Select></Field>
+            <Field label="Template"><Select value={layer.template} onChange={(e) => set({ template: e.target.value })}><option value="impact">Impact</option><option value="classic">Classic</option><option value="kicker">Kicker</option><option value="split">Split</option><option value="lowerthird">Lower third</option><option value="boxed">Boxed</option></Select></Field>
             <Field label="Position"><Select value={layer.position} onChange={(e) => set({ position: e.target.value })}><option value="center">Center</option><option value="top">Top</option><option value="bottom">Bottom</option></Select></Field>
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -940,7 +1006,7 @@ const LayerFields: React.FC<{ layer: Layer; set: (p: Record<string, unknown>) =>
           <FontField value={layer.fontFamily} onChange={(v) => set({ fontFamily: v })} />
           <Slider label="Text shadow" value={(layer as any).shadow ?? 0.55} onChange={(v) => set({ shadow: v })} format={(v) => v <= 0 ? "off" : `${Math.round(v * 100)}%`} />
           <Toggle label="Text outline" checked={(layer as any).outline ?? false} onChange={(v) => set({ outline: v })} />
-          <TransformControls t={(layer as any).transform} onChange={(tf) => set({ transform: tf })} />
+          <TransformControls t={(layer as any).transform} onChange={(tf) => set({ transform: tf })} kf={(layer as any).kf} onKf={(k) => set({ kf: k })} />
         </Section>
       );
 
@@ -1023,9 +1089,241 @@ const LayerFields: React.FC<{ layer: Layer; set: (p: Record<string, unknown>) =>
     case "track":
       return <TrackFields layer={layer} set={set} />;
 
+    case "choropleth":
+      return <DataFields layer={layer as any} set={set} kind="choropleth" />;
+
+    case "bubble":
+      return <DataFields layer={layer as any} set={set} kind="bubble" />;
+
+    case "flow":
+      return <DataFields layer={layer as any} set={set} kind="flow" />;
+
+    case "heatmap":
+      return <DataFields layer={layer as any} set={set} kind="heatmap" />;
+
     default:
       return null;
   }
+};
+
+/* ── Data layers (choropleth · bubble) — import REAL data, AI-cleaned, Pro-only ── */
+
+const PRO_DATA_TIERS = new Set(["teams", "custom", "agency"]); // Pro · Studio · Enterprise
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Lerp two #rrggbb hex colours → the choropleth value ramp. */
+function mixHex(a: string, b: string, t: number): string {
+  const p = (h: string) => { const n = parseInt(h.replace("#", ""), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+  try {
+    const [r1, g1, b1] = p(a), [r2, g2, b2] = p(b);
+    const m = (x: number, y: number) => Math.round(x + (y - x) * Math.max(0, Math.min(1, t)));
+    return `#${[m(r1, r2), m(g1, g2), m(b1, b2)].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+  } catch { return b; }
+}
+
+/** Fetch the best polygon for a place/country via the existing search proxy. */
+async function fetchPolygon(q: string): Promise<any | null> {
+  try {
+    const res = await fetch(`/api/highlight-search?q=${encodeURIComponent(q)}`);
+    if (!res.ok) return null;
+    const j = await res.json();
+    const hit = (j?.results ?? []).find((r: any) => r.geojson) ?? j?.results?.[0];
+    return hit?.geojson ?? null;
+  } catch { return null; }
+}
+
+const DATA_NOUN: Record<string, string> = { choropleth: "choropleth fills", bubble: "proportional bubbles", flow: "weighted flow arcs", heatmap: "a density heatmap" };
+const DATA_TITLE: Record<string, string> = { choropleth: "Choropleth data", bubble: "Bubble data", flow: "Flow data", heatmap: "Heatmap data" };
+
+const DataFields: React.FC<{ layer: any; set: (p: Record<string, unknown>) => void; kind: "choropleth" | "bubble" | "flow" | "heatmap" }> = ({ layer, set, kind }) => {
+  const { tier, loading: tierLoading } = useTier();
+  const isPro = PRO_DATA_TIERS.has(tier ?? "");
+  const [mode, setMode] = useState<"describe" | "paste">("describe");
+  const [prompt, setPrompt] = useState("");
+  const [raw, setRaw] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const rows: any[] = layer.data ?? [];
+
+  const run = async () => {
+    if (busy) return;
+    setErr(null); setBusy(true); setStatus("Reading your data…");
+    const apiKind = kind === "heatmap" ? "bubble" : kind; // heatmap = weighted points → reuse bubble geocoding
+    try {
+      const res = await fetch("/api/v2/data", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: apiKind, prompt: mode === "describe" ? prompt : "", raw: mode === "paste" ? raw : "" }),
+      });
+      const j = await res.json();
+      if (!res.ok) { setErr(j?.error ?? "Couldn't build the data — try rephrasing."); setBusy(false); setStatus(null); return; }
+      const data: any[] = j.rows ?? [];
+      if (!data.length) { setErr("No usable rows came back."); setBusy(false); setStatus(null); return; }
+
+      if (kind === "bubble") {
+        // Area-proportional radius (sqrt) so circle AREA encodes value honestly.
+        const maxV = Math.max(...data.map((r) => Math.abs(r.value) || 0), 1);
+        const maxPx = layer.maxSizePx ?? 140;
+        const withSize = data.map((r) => ({
+          place: r.place, value: r.value, label: r.label, lon: r.lon, lat: r.lat,
+          sizePx: Math.max(16, Math.sqrt(Math.abs(r.value) / maxV) * maxPx), color: layer.color ?? "#2fe0ff",
+        }));
+        set({ data: withSize, metric: j.metric || layer.metric, unit: j.unit || layer.unit });
+        setStatus(`${withSize.length} points ready`);
+      } else if (kind === "heatmap") {
+        const pts = data.map((r) => ({ place: r.place, value: Math.abs(r.value) || 1, lon: r.lon, lat: r.lat }));
+        set({ data: pts, metric: j.metric || layer.metric, unit: j.unit || layer.unit });
+        setStatus(`${pts.length} points ready`);
+      } else if (kind === "flow") {
+        // Width ∝ √magnitude so the THICKNESS encodes the flow size.
+        const maxV = Math.max(...data.map((r) => Math.abs(r.value) || 0), 1);
+        const maxW = layer.maxWidthPx ?? 14;
+        const flows = data.map((r) => ({
+          from: r.from, to: r.to, value: r.value, fromLon: r.fromLon, fromLat: r.fromLat, toLon: r.toLon, toLat: r.toLat,
+          widthPx: Math.max(1.5, Math.sqrt(Math.abs(r.value) / maxV) * maxW), color: layer.color ?? "#2fe0ff",
+        }));
+        set({ data: flows, metric: j.metric || layer.metric, unit: j.unit || layer.unit });
+        setStatus(`${flows.length} flows ready`);
+      } else {
+        // Choropleth: resolve one polygon per row (throttled for Nominatim) + ramp colour.
+        const lo = layer.colorLow ?? "#e3f2fd", hi = layer.colorHigh ?? "#0d47a1";
+        const vals = data.map((r) => r.value).filter(Number.isFinite);
+        const vMin = Math.min(...vals), vMax = Math.max(...vals);
+        const capped = data.slice(0, 24); // keep resolution time sane
+        const out: any[] = [];
+        for (let i = 0; i < capped.length; i++) {
+          const r = capped[i];
+          setStatus(`Resolving map shapes… ${i + 1}/${capped.length}`);
+          const geo = await fetchPolygon(r.place || r.iso);
+          const t = vMax > vMin ? (r.value - vMin) / (vMax - vMin) : 0.5;
+          out.push({ place: r.place, value: r.value, label: r.label, iso: r.iso, color: mixHex(lo, hi, t), geojson: geo ? cleanCountryGeo(geo) : undefined });
+          if (i < capped.length - 1) await sleep(1100); // Nominatim: ≤1 req/s
+        }
+        const ok = out.filter((r) => r.geojson).length;
+        set({ data: out, metric: j.metric || layer.metric, unit: j.unit || layer.unit, colorLow: lo, colorHigh: hi });
+        setStatus(`${ok}/${out.length} regions mapped${ok < out.length ? " (some shapes not found)" : ""}`);
+      }
+    } catch { setErr("Something went wrong — try again."); }
+    setBusy(false);
+  };
+
+  if (!tierLoading && !isPro) {
+    return (
+      <Section title="Data layer">
+        <div className="rounded-lg border border-iris/30 bg-iris/5 p-3.5 text-center">
+          <Sparkles size={18} className="mx-auto mb-1.5 text-iris" />
+          <div className="text-xs font-semibold text-graphite">Real-data maps are a Pro feature</div>
+          <div className="mt-1 text-[11px] leading-snug text-graphite/55">Import or describe data to drive {DATA_NOUN[kind]} — available on Pro and up.</div>
+          <a href="/dashboard" className="mt-2.5 inline-block rounded-md bg-iris px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-iris/90 transition">Upgrade to Pro</a>
+        </div>
+      </Section>
+    );
+  }
+
+  const describePlaceholder = kind === "bubble" ? "e.g. Population of the 15 largest cities in Japan"
+    : kind === "flow" ? "e.g. Top trade flows between the US, China and the EU"
+    : kind === "heatmap" ? "e.g. Earthquake epicentres in Japan since 2000"
+    : "e.g. GDP per capita of every EU country";
+  const pastePlaceholder = kind === "flow" ? "Paste flows — from, to, value. e.g.\nChina, USA, 480\nGermany, France, 210"
+    : "Paste rows — CSV, TSV, or a list. e.g.\nFrance, 38\nGermany, 46\nSpain, 30";
+  const countNoun = kind === "flow" ? "flows" : kind === "choropleth" ? "regions" : "points";
+
+  return (
+    <Section title={DATA_TITLE[kind]}>
+      {/* Describe ↔ Paste */}
+      <div className="flex gap-1 rounded-lg bg-paper-50 p-1">
+        {(["describe", "paste"] as const).map((m) => (
+          <button key={m} onClick={() => setMode(m)} className={`flex-1 rounded-md py-1.5 text-[11px] font-medium capitalize transition ${mode === m ? "bg-iris text-white" : "text-graphite/55 hover:text-graphite"}`}>{m === "describe" ? "Describe" : "Paste data"}</button>
+        ))}
+      </div>
+      {mode === "describe" ? (
+        <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} placeholder={describePlaceholder}
+          className="w-full resize-none rounded-lg border border-line bg-paper-50 px-3 py-2 text-xs text-graphite placeholder:text-graphite/35 focus:border-iris focus:outline-none" />
+      ) : (
+        <textarea value={raw} onChange={(e) => setRaw(e.target.value)} rows={5} placeholder={pastePlaceholder}
+          className="w-full resize-none rounded-lg border border-line bg-paper-50 px-3 py-2 font-mono text-[11px] text-graphite placeholder:text-graphite/35 focus:border-iris focus:outline-none" />
+      )}
+      <button onClick={run} disabled={busy || (mode === "describe" ? !prompt.trim() : !raw.trim())}
+        className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-iris py-2 text-xs font-semibold text-white transition hover:bg-iris/90 disabled:cursor-not-allowed disabled:opacity-40">
+        <Sparkles size={13} />{busy ? "Working…" : rows.length ? "Rebuild data" : "Build data"}
+      </button>
+      {status && <div className="text-center text-[11px] text-graphite/55">{status}</div>}
+      {err && <div className="rounded-md bg-red-500/10 px-2.5 py-1.5 text-center text-[11px] text-red-400">{err}</div>}
+      {rows.length > 0 && (
+        <div className="rounded-lg border border-line bg-paper-50/60 px-2.5 py-2">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-[10px] uppercase tracking-wider text-graphite/45">{rows.length} {countNoun}</span>
+            <button onClick={() => set({ data: [] })} className="text-[10px] text-graphite/45 hover:text-red-400">clear</button>
+          </div>
+          <div className="max-h-24 space-y-0.5 overflow-y-auto">
+            {rows.slice(0, 12).map((r, i) => (
+              <div key={i} className="flex items-center justify-between text-[11px] text-graphite/70">
+                <span className="truncate pr-2">{kind === "flow" ? `${r.from} → ${r.to}` : r.place}{kind === "choropleth" && !r.geojson ? " ⚠" : ""}</span>
+                <span className="shrink-0 tabular-nums text-graphite/50">{typeof r.value === "number" ? r.value.toLocaleString() : r.value}</span>
+              </div>
+            ))}
+            {rows.length > 12 && <div className="text-[10px] text-graphite/40">+{rows.length - 12} more</div>}
+          </div>
+        </div>
+      )}
+
+      {/* Presentation */}
+      <div className="grid grid-cols-2 gap-2 pt-1">
+        <Field label="Metric"><Input value={layer.metric ?? ""} placeholder="Legend label" onChange={(e) => set({ metric: e.target.value })} /></Field>
+        <Field label="Unit"><Input value={layer.unit ?? ""} placeholder="%, M, …" onChange={(e) => set({ unit: e.target.value })} /></Field>
+      </div>
+      {kind === "choropleth" ? (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Low colour"><ColorInput value={layer.colorLow ?? "#e3f2fd"} onChange={(v) => set({ colorLow: v })} /></Field>
+            <Field label="High colour"><ColorInput value={layer.colorHigh ?? "#0d47a1"} onChange={(v) => set({ colorHigh: v })} /></Field>
+          </div>
+          <Toggle label="Show legend" checked={layer.showLegend ?? true} onChange={(v) => set({ showLegend: v })} />
+        </>
+      ) : kind === "bubble" ? (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Colour"><ColorInput value={layer.color ?? "#2fe0ff"} onChange={(v) => set({ color: v })} /></Field>
+            <Field label="Max size"><NumberInput value={layer.maxSizePx ?? 140} step={10} min={40} max={300} unit="px" onChange={(v) => set({ maxSizePx: v })} /></Field>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Toggle label="Labels" checked={layer.showLabels ?? true} onChange={(v) => set({ showLabels: v })} />
+            <Toggle label="Legend" checked={layer.showLegend ?? false} onChange={(v) => set({ showLegend: v })} />
+          </div>
+        </>
+      ) : kind === "flow" ? (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Colour"><ColorInput value={layer.color ?? "#2fe0ff"} onChange={(v) => set({ color: v })} /></Field>
+            <Field label="Max width"><NumberInput value={layer.maxWidthPx ?? 14} step={1} min={1} max={48} unit="px" onChange={(v) => set({ maxWidthPx: v })} /></Field>
+          </div>
+          <Slider label="Arc curve" value={layer.curve ?? 0.3} onChange={(v) => set({ curve: v })} />
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Animate">
+              <Select value={layer.animate ?? "draw"} onChange={(e) => set({ animate: e.target.value })}>
+                <option value="draw">Draw in</option>
+                <option value="flow">Flow</option>
+                <option value="none">Static</option>
+              </Select>
+            </Field>
+            <Toggle label="Legend" checked={layer.showLegend ?? false} onChange={(v) => set({ showLegend: v })} />
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Low colour"><ColorInput value={layer.colorLow ?? "#1a237e"} onChange={(v) => set({ colorLow: v })} /></Field>
+            <Field label="High colour"><ColorInput value={layer.colorHigh ?? "#ff3d00"} onChange={(v) => set({ colorHigh: v })} /></Field>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Radius"><NumberInput value={layer.radius ?? 40} step={4} min={4} max={160} unit="px" onChange={(v) => set({ radius: v })} /></Field>
+            <Field label="Intensity"><NumberInput value={layer.intensity ?? 1} step={0.1} min={0.1} max={6} onChange={(v) => set({ intensity: v })} /></Field>
+          </div>
+          <Toggle label="Show legend" checked={layer.showLegend ?? false} onChange={(v) => set({ showLegend: v })} />
+        </>
+      )}
+    </Section>
+  );
 };
 
 /* ── Track (imported GPS flythrough) — slider-first, no editing knowledge needed ── */
@@ -1184,7 +1482,7 @@ const MarkerFields: React.FC<{ layer: Extract<Layer, { type: "marker" }>; set: (
       <Toggle label="Locator ring" checked={layer.ring} onChange={(v) => set({ ring: v })} />
       <Field label="Label colour"><ColorInput value={layer.labelColor} onChange={(v) => set({ labelColor: v })} /></Field>
     </div>
-    <TransformControls t={(layer as any).transform} onChange={(tf) => set({ transform: tf })} />
+    <TransformControls t={(layer as any).transform} onChange={(tf) => set({ transform: tf })} kf={(layer as any).kf} onKf={(k) => set({ kf: k })} />
   </Section>
 );
 
@@ -1212,7 +1510,7 @@ const AnnotationFields: React.FC<{ layer: Extract<Layer, { type: "annotation" }>
       <Toggle label="Draw line in" checked={layer.draw} onChange={(v) => set({ draw: v })} />
     </div>
     <FontField value={layer.fontFamily} onChange={(v) => set({ fontFamily: v })} />
-    <TransformControls t={(layer as any).transform} onChange={(tf) => set({ transform: tf })} />
+    <TransformControls t={(layer as any).transform} onChange={(tf) => set({ transform: tf })} kf={(layer as any).kf} onKf={(k) => set({ kf: k })} />
   </Section>
 );
 
@@ -1445,7 +1743,7 @@ const RouteFields: React.FC<{ layer: Extract<Layer, { type: "route" }>; set: (p:
         </Select>
       </Field>
       <div className="grid grid-cols-2 gap-2">
-        <Field label="Color"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
+        <Field label="Colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
         <Field label="Width"><NumberInput value={layer.width} step={1} min={1} max={40} onChange={(v) => set({ width: v })} /></Field>
       </div>
       <div className="space-y-2 rounded-lg border border-line bg-paper-50 p-2.5">
@@ -1606,11 +1904,11 @@ const HighlightFields: React.FC<{ layer: Extract<Layer, { type: "highlight" }>; 
         </div>
       )}
       <div className="grid grid-cols-2 gap-2">
-        <Field label="Fill color"><ColorInput value={layer.fillColor} onChange={(v) => set({ fillColor: v })} /></Field>
+        <Field label="Fill colour"><ColorInput value={layer.fillColor} onChange={(v) => set({ fillColor: v })} /></Field>
         <Field label="Border"><ColorInput value={layer.borderColor} onChange={(v) => set({ borderColor: v })} /></Field>
       </div>
       <div className="grid grid-cols-2 gap-2">
-        <Field label="Glow color"><ColorInput value={layer.glowColor} onChange={(v) => set({ glowColor: v })} /></Field>
+        <Field label="Glow colour"><ColorInput value={layer.glowColor} onChange={(v) => set({ glowColor: v })} /></Field>
         <Field label="Glow size"><NumberInput value={layer.glowWidth} step={1} min={0} max={60} onChange={(v) => set({ glowWidth: v })} /></Field>
       </div>
 
@@ -1629,7 +1927,7 @@ const HighlightFields: React.FC<{ layer: Extract<Layer, { type: "highlight" }>; 
         </Field>
         <div className="grid grid-cols-2 gap-2">
           <Field label="Text size"><NumberInput value={(layer as any).labelSize ?? 46} step={2} min={10} max={240} unit="px" onChange={(v) => set({ labelSize: v })} /></Field>
-          <Field label="Text color"><ColorInput value={(layer as any).labelColor ?? "#ffffff"} onChange={(v) => set({ labelColor: v })} /></Field>
+          <Field label="Text colour"><ColorInput value={(layer as any).labelColor ?? "#ffffff"} onChange={(v) => set({ labelColor: v })} /></Field>
         </div>
       </div>
     </Section>

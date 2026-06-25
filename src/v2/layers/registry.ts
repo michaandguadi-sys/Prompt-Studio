@@ -84,6 +84,14 @@ export const LAYER_REGISTRY: Record<LayerType, LayerMeta> = {
     type: "bubble", label: "Bubble map", icon: "CircleDot", surface: "map",
     hint: "Proportional circles on map locations — size encodes value (Gapminder style).",
   },
+  flow: {
+    type: "flow", label: "Flow arcs", icon: "Spline", surface: "map",
+    hint: "Weighted arcs for trade, migration or spread — thickness encodes magnitude.",
+  },
+  heatmap: {
+    type: "heatmap", label: "Heatmap", icon: "Flame", surface: "map",
+    hint: "Density of points as a heat surface — driven by imported data.",
+  },
 };
 
 /** Layers offered in the "Add" menu, in a sensible order (camera excluded —
@@ -101,5 +109,7 @@ export const ADDABLE_LAYERS: LayerMeta[] = [
   LAYER_REGISTRY.chart,
   LAYER_REGISTRY.choropleth,
   LAYER_REGISTRY.bubble,
+  LAYER_REGISTRY.flow,
+  LAYER_REGISTRY.heatmap,
   LAYER_REGISTRY.image,
 ];

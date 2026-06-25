@@ -47,6 +47,8 @@ export function createLayer(type: LayerType, overrides: Record<string, unknown> 
     chart: { type: "chart", name: "Chart", timing, accent: DEFAULT_ACCENT },
     choropleth: { type: "choropleth", name: "Choropleth", timing, data: [], metric: "", unit: "", colorLow: "#e3f2fd", colorHigh: "#0d47a1", showLegend: true },
     bubble: { type: "bubble", name: "Bubble map", timing, data: [], metric: "", unit: "", maxSizePx: 140, showLabels: true, showLegend: true, animate: "grow" },
+    flow: { type: "flow", name: "Flow arcs", timing, data: [], metric: "", unit: "", color: "#2fe0ff", maxWidthPx: 14, curve: 0.3, animate: "draw", showLegend: false },
+    heatmap: { type: "heatmap", name: "Heatmap", timing, data: [], metric: "", unit: "", radius: 40, intensity: 1, colorLow: "#1a237e", colorHigh: "#ff3d00", showLegend: false },
     image: { type: "image", name: "Image", timing, url: "", anchor: { kind: "coord", lon: 0, lat: 20 } },
     marker: { type: "marker", name: "Marker", timing, anchor: { lon: 0, lat: 20 }, icon: "pin", color: "#ff5a44" },
     annotation: { type: "annotation", name: "Annotation", timing, anchor: { lon: 0, lat: 20 }, text: "Annotation", accent: DEFAULT_ACCENT },

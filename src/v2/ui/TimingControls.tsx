@@ -19,23 +19,30 @@ export const TimingControls: React.FC<{
   return (
     <Section title="Animation">
       <div className="grid grid-cols-2 gap-2">
-        <Field label="In at" hint="When it has finished entering">
+        <Field label="In at" hint="when it has finished entering">
           <NumberInput
             value={Math.round(timing.inSec * 100) / 100}
             step={0.1} min={0} max={durationSec} unit="s"
             onChange={(v) => onChange({ inSec: v })}
           />
         </Field>
-        <Field label="Enter">
-          <Select value={timing.enter} onChange={(e) => onChange({ enter: e.target.value as Timing["enter"] })}>
-            <option value="fade">Fade</option>
-            <option value="slide-up">Slide up</option>
-            <option value="slide-down">Slide down</option>
-            <option value="scale">Scale</option>
-            <option value="none">None (cut)</option>
-          </Select>
+        <Field label="Fade in" hint="how long the enter takes">
+          <NumberInput
+            value={Math.round((timing.fadeInSec ?? 0.35) * 100) / 100}
+            step={0.05} min={0} max={6} unit="s"
+            onChange={(v) => onChange({ fadeInSec: v })}
+          />
         </Field>
       </div>
+      <Field label="Enter">
+        <Select value={timing.enter} onChange={(e) => onChange({ enter: e.target.value as Timing["enter"] })}>
+          <option value="fade">Fade</option>
+          <option value="slide-up">Slide up</option>
+          <option value="slide-down">Slide down</option>
+          <option value="scale">Scale</option>
+          <option value="none">None (cut)</option>
+        </Select>
+      </Field>
 
       {/* Fade out / none */}
       <Field label="Exit" hint="Turn off to keep it on screen to the end">
@@ -51,14 +58,23 @@ export const TimingControls: React.FC<{
       </Field>
 
       {hasOut && (
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Out at" hint="When it begins leaving">
-            <NumberInput
-              value={Math.round((timing.outSec as number) * 100) / 100}
-              step={0.1} min={0} max={durationSec} unit="s"
-              onChange={(v) => onChange({ outSec: v })}
-            />
-          </Field>
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Out at" hint="when it begins leaving">
+              <NumberInput
+                value={Math.round((timing.outSec as number) * 100) / 100}
+                step={0.1} min={0} max={durationSec} unit="s"
+                onChange={(v) => onChange({ outSec: v })}
+              />
+            </Field>
+            <Field label="Fade out" hint="how long the exit takes">
+              <NumberInput
+                value={Math.round((timing.fadeOutSec ?? 0.35) * 100) / 100}
+                step={0.05} min={0} max={6} unit="s"
+                onChange={(v) => onChange({ fadeOutSec: v })}
+              />
+            </Field>
+          </div>
           <Field label="Exit style">
             <Select value={timing.exit} onChange={(e) => onChange({ exit: e.target.value as Timing["exit"] })}>
               <option value="fade">Fade</option>
@@ -67,7 +83,7 @@ export const TimingControls: React.FC<{
               <option value="none">None (cut)</option>
             </Select>
           </Field>
-        </div>
+        </>
       )}
 
       <Field label="Easing">

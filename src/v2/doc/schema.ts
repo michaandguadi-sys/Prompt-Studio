@@ -49,6 +49,10 @@ export const Timing = z.object({
   enter: z.enum(["fade", "slide-up", "slide-down", "scale", "none"]).default("fade"),
   exit: z.enum(["fade", "slide-down", "scale", "none"]).default("fade"),
   easing: Easing.default("easeInOut"),
+  /** Fade/transition DURATION in seconds (how long the enter ramp takes). */
+  fadeInSec: z.number().min(0).max(6).default(0.35),
+  /** Fade/transition DURATION in seconds for the exit ramp. */
+  fadeOutSec: z.number().min(0).max(6).default(0.35),
 });
 export type Timing = z.infer<typeof Timing>;
 
@@ -62,13 +66,32 @@ export const Transform = z.object({
   offsetYPct: z.number().default(0),
   scale: z.number().min(0.05).max(8).default(1),
   rotation: z.number().default(0), // degrees
+  /** When true the element scales WITH the map zoom (grows/shrinks as the camera
+   *  zooms) instead of staying a fixed on-screen size — "pinned to the ground". */
+  scaleWithZoom: z.boolean().default(false),
+  /** Reference zoom at which scale = 1 (captured when scaleWithZoom is turned on). */
+  anchorZoom: z.number().default(0),
 });
 export type Transform = z.infer<typeof Transform>;
+
+/** A transform keyframe — animate an overlay's position / scale / rotation across
+ *  the scene. `t` is 0..1 of the timeline. ≥2 keyframes = animated motion. */
+export const Keyframe = z.object({
+  t: z.number().min(0).max(1).default(0),
+  offsetXPct: z.number().default(0),
+  offsetYPct: z.number().default(0),
+  scale: z.number().min(0.05).max(8).default(1),
+  rotation: z.number().default(0),
+  opacity: z.number().min(0).max(1).default(1),
+});
+export type Keyframe = z.infer<typeof Keyframe>;
 
 const layerBase = {
   id: z.string(),
   name: z.string().default(""),
   enabled: z.boolean().default(true),
+  /** Optional transform keyframes (position/scale/rotation along the scene). */
+  kf: z.array(Keyframe).default([]),
 };
 
 // ── Layer: Camera (the base move — exactly one per composition) ──────────────
@@ -241,7 +264,7 @@ export const TitleLayer = z.object({
   timing: Timing,
   text: z.string().default("TITLE"),
   sub: z.string().default(""),
-  template: z.enum(["classic", "impact", "kicker", "split"]).default("impact"),
+  template: z.enum(["classic", "impact", "kicker", "split", "lowerthird", "boxed"]).default("impact"),
   align: z.enum(["left", "center", "right"]).default("center"),
   position: z.enum(["top", "center", "bottom"]).default("center"),
   color: z.string().default("#ffffff"),
@@ -335,6 +358,66 @@ export const BubbleLayer = z.object({
   showLabels: z.boolean().default(true),
   showLegend: z.boolean().default(true),
   animate: z.enum(["grow", "pulse", "fade", "none"]).default("grow"),
+  transform: Transform.default({}),
+});
+
+// ── Layer: Flow (weighted arcs — trade / migration / spread; width = magnitude) ──
+
+/** One directed flow: a from→to pair with a magnitude. Coords + width pre-computed. */
+export const FlowEntry = z.object({
+  from: z.string(),
+  to: z.string(),
+  value: z.number(),
+  fromLon: z.number().default(0),
+  fromLat: z.number().default(0),
+  toLon: z.number().default(0),
+  toLat: z.number().default(0),
+  /** Pre-computed stroke width in px (scaled by value). Set by the data pipeline. */
+  widthPx: z.number().default(2),
+  color: z.string().default("#2fe0ff"),
+});
+
+export const FlowLayer = z.object({
+  ...layerBase,
+  type: z.literal("flow"),
+  timing: Timing,
+  data: z.array(FlowEntry).default([]),
+  metric: z.string().default(""),
+  unit: z.string().default(""),
+  color: z.string().default("#2fe0ff"),
+  /** Maximum arc width in px (the largest flow). */
+  maxWidthPx: z.number().min(1).max(48).default(14),
+  /** Arc bow height, 0 = straight, 1 = high curve. */
+  curve: z.number().min(0).max(1).default(0.3),
+  animate: z.enum(["draw", "flow", "none"]).default("draw"),
+  showLegend: z.boolean().default(false),
+  transform: Transform.default({}),
+});
+
+// ── Layer: Heatmap (density — also data-imported) ────────────────────────────
+
+/** One weighted point feeding the density heatmap. */
+export const HeatEntry = z.object({
+  place: z.string().default(""),
+  value: z.number().default(1),
+  lon: z.number().default(0),
+  lat: z.number().default(0),
+});
+
+export const HeatmapLayer = z.object({
+  ...layerBase,
+  type: z.literal("heatmap"),
+  timing: Timing,
+  data: z.array(HeatEntry).default([]),
+  metric: z.string().default(""),
+  unit: z.string().default(""),
+  /** Point radius in px at the reference zoom. */
+  radius: z.number().min(4).max(160).default(40),
+  /** Overall intensity multiplier. */
+  intensity: z.number().min(0.1).max(6).default(1),
+  colorLow: z.string().default("#1a237e"),
+  colorHigh: z.string().default("#ff3d00"),
+  showLegend: z.boolean().default(false),
   transform: Transform.default({}),
 });
 
@@ -534,6 +617,8 @@ export const Layer = z.discriminatedUnion("type", [
   ChartLayer,
   ChoroplethLayer,
   BubbleLayer,
+  FlowLayer,
+  HeatmapLayer,
   ImageLayer,
   MarkerLayer,
   AnnotationLayer,
@@ -554,6 +639,10 @@ export type ChartLayer = z.infer<typeof ChartLayer>;
 export type ChoroplethLayer = z.infer<typeof ChoroplethLayer>;
 export type BubbleLayer = z.infer<typeof BubbleLayer>;
 export type BubbleEntry = z.infer<typeof BubbleEntry>;
+export type FlowLayer = z.infer<typeof FlowLayer>;
+export type FlowEntry = z.infer<typeof FlowEntry>;
+export type HeatmapLayer = z.infer<typeof HeatmapLayer>;
+export type HeatEntry = z.infer<typeof HeatEntry>;
 export type ImageLayer = z.infer<typeof ImageLayer>;
 export type MarkerLayer = z.infer<typeof MarkerLayer>;
 export type AnnotationLayer = z.infer<typeof AnnotationLayer>;

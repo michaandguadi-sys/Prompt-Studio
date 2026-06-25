@@ -4,7 +4,7 @@ import React, { useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Video, Globe2, Plane, MapPin, Flag, Type, BarChart3, Image as ImageIcon,
-  Swords, MessageSquare, Share2, Sun, Eye, EyeOff, ChevronUp, ChevronDown, Trash2, Plus, Copy, Route, Loader2, CircleDot, X,
+  Swords, MessageSquare, Share2, Sun, Eye, EyeOff, ChevronUp, ChevronDown, Trash2, Plus, Copy, Route, Loader2, CircleDot, X, Spline, Flame,
 } from "lucide-react";
 import { useEditor } from "../store/editor";
 import { LAYER_REGISTRY } from "../layers/registry";
@@ -17,15 +17,15 @@ const ICONS: Record<string, React.ReactNode> = {
   MapPin: <MapPin size={14} />, Flag: <Flag size={14} />, Type: <Type size={14} />,
   BarChart3: <BarChart3 size={14} />, Image: <ImageIcon size={14} />, Swords: <Swords size={14} />,
   MessageSquare: <MessageSquare size={14} />, Share2: <Share2 size={14} />, Sun: <Sun size={14} />,
-  Route: <Route size={14} />, CircleDot: <CircleDot size={14} />,
+  Route: <Route size={14} />, CircleDot: <CircleDot size={14} />, Spline: <Spline size={14} />, Flame: <Flame size={14} />,
 };
 const iconFor = (t: LayerType) => ICONS[LAYER_REGISTRY[t].icon] ?? <MapPin size={14} />;
 
 /** Add-layer palette, grouped so every overlay (incl. Highlight) is easy to find. */
 const ADD_CATEGORIES: { label: string; types: LayerType[] }[] = [
   { label: "Places & pins", types: ["label", "marker", "flag", "annotation", "spotlight"] },
-  { label: "Regions & data", types: ["highlight", "choropleth", "bubble", "chart"] },
-  { label: "Routes & networks", types: ["route", "connections"] },
+  { label: "Regions & data", types: ["highlight", "choropleth", "bubble", "heatmap", "chart"] },
+  { label: "Routes & networks", types: ["route", "connections", "flow"] },
   { label: "Titles & media", types: ["title", "image"] },
 ];
 

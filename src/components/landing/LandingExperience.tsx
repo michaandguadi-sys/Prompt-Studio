@@ -4,8 +4,8 @@ import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import {
-  Sparkles, ArrowRight, Wand2, Route, Film, Share2, Check, ChevronDown,
-  Globe2, Zap, MountainSnow, MousePointer2, ShieldCheck,
+  ArrowRight, Route, Film, Share2, Check, ChevronDown,
+  Globe2, MountainSnow, MousePointer2, ShieldCheck,
 } from "lucide-react";
 
 const SERIF = "Newsreader, 'Playfair Display', Georgia, serif";
@@ -18,7 +18,7 @@ const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const FlyThroughMapLazy = dynamic(() => import("./FlyThroughMap").then((m) => m.FlyThroughMap), {
   ssr: false,
   loading: () => (
-    <section id="how" className="relative" style={{ height: "460vh" }}>
+    <section id="how" className="relative" style={{ height: "400vh" }}>
       <div className="sticky top-0 flex h-screen items-center justify-center bg-[#05060e]">
         <div className="h-6 w-6 rounded-full border-2 border-white/15 border-t-iris animate-spin" />
       </div>
@@ -91,20 +91,6 @@ function useCountUp(target: number, run: boolean, dur = 1400) {
   return n;
 }
 
-const PHRASES = ["the fall of the Berlin Wall, 1989", "my 14-day trek across Patagonia", "how the Roman Empire expanded", "a night flight from Tokyo to Reykjavík"];
-function useTyped(speed = 52, pause = 1500) {
-  const [text, setText] = useState(""); const [i, setI] = useState(0); const [del, setDel] = useState(false);
-  useEffect(() => {
-    const cur = PHRASES[i % PHRASES.length];
-    let t: ReturnType<typeof setTimeout>;
-    if (!del && text === cur) t = setTimeout(() => setDel(true), pause);
-    else if (del && text === "") { setDel(false); setI((v) => v + 1); return; }
-    else t = setTimeout(() => setText(cur.slice(0, text.length + (del ? -1 : 1))), del ? 26 : speed);
-    return () => clearTimeout(t);
-  }, [text, del, i, speed, pause]);
-  return text;
-}
-
 const Reveal: React.FC<{ children: React.ReactNode; delay?: number; y?: number; className?: string }> = ({ children, delay = 0, y = 30, className = "" }) => {
   const ref = useRef<HTMLDivElement>(null);
   const seen = useInView(ref, 0.16);
@@ -161,7 +147,6 @@ export const LandingExperience: React.FC = () => {
   const [done, setDone] = useState(false);
   useEffect(() => { const t = setTimeout(() => setDone(true), 2100); return () => clearTimeout(t); }, []);
   const y = useScrollY();
-  const typed = useTyped();
   const navSolid = y > 40;
 
   return (
@@ -194,41 +179,7 @@ export const LandingExperience: React.FC = () => {
       {/* ── Fly-through OPENER — real satellite + 3-D terrain; every visitor scrolls it first ── */}
       <FlyThroughMapLazy />
 
-      {/* ── Hero — the product statement ── */}
-      <section className="relative flex min-h-screen flex-col items-center justify-center px-6 text-center">
-        <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
-          <div className="absolute left-1/2 top-1/2 h-[120vmin] w-[120vmin] rounded-full opacity-60" style={{ background: "radial-gradient(circle, rgba(110,123,255,0.18), transparent 62%)", transform: "translate(-50%,-58%)" }} />
-          <div className="absolute inset-0" style={{ backgroundImage: "linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)", backgroundSize: "60px 60px", maskImage: "radial-gradient(80% 60% at 50% 40%, #000 20%, transparent 75%)", WebkitMaskImage: "radial-gradient(80% 60% at 50% 40%, #000 20%, transparent 75%)" }} />
-          {[["12%", "22%", "2.6s"], ["82%", "30%", "3.1s"], ["20%", "70%", "2.2s"], ["74%", "66%", "3.6s"], ["50%", "16%", "2.9s"]].map(([l, t, d], i) => (
-            <span key={i} className="absolute h-1 w-1 rounded-full bg-cyan" style={{ left: l, top: t, boxShadow: "0 0 8px #2fe0ff", animation: `breathe ${d} ease-in-out ${i * 0.3}s infinite` }} />
-          ))}
-        </div>
-
-        <div className="relative">
-          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.04] px-3.5 py-1.5 text-[11px] font-medium text-white/70 backdrop-blur" style={{ animation: "fade-up .8s .2s both" }}>
-            <Sparkles size={12} className="text-iris" /> The AI story-map studio
-          </div>
-          <h1 className="mx-auto max-w-4xl text-[clamp(2.6rem,7vw,5.2rem)] font-medium leading-[1.02] tracking-[-0.02em]" style={{ fontFamily: SERIF, animation: "fade-up .9s .3s both" }}>
-            From a sentence to a<br /><span style={{ background: GRAD, WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>cinematic 4K map</span>
-          </h1>
-          <p className="mx-auto mt-6 max-w-xl text-[16px] leading-relaxed text-white/55" style={{ animation: "fade-up .9s .45s both" }}>
-            Describe a story or drop a GPS track. A director researches it, composes the shot, and renders a broadcast-ready animation — you fine-tune by asking.
-          </p>
-
-          <div className="mx-auto mt-8 flex max-w-xl items-center gap-3 rounded-2xl border border-white/12 bg-white/[0.05] px-4 py-3 text-left backdrop-blur-xl" style={{ animation: "fade-up .9s .6s both", boxShadow: "0 20px 60px -20px rgba(0,0,0,0.6)" }}>
-            <Wand2 size={16} className="shrink-0 text-iris" />
-            <span className="flex-1 truncate text-[15px] text-white/85">{typed}<span className="ml-0.5 inline-block h-4 w-px translate-y-0.5 animate-pulse bg-iris" /></span>
-            <Link href="/sign-up" className="hidden shrink-0 items-center gap-1 rounded-lg bg-white/10 px-3 py-1.5 text-[12px] font-semibold text-white transition-colors hover:bg-white/20 sm:inline-flex">Try it <ArrowRight size={12} /></Link>
-          </div>
-
-          <div className="mt-7 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[12px] text-white/45" style={{ animation: "fade-up .9s .75s both" }}>
-            <span className="inline-flex items-center gap-1.5"><Film size={13} className="text-iris" /> True 4K · 24fps</span>
-            <span className="inline-flex items-center gap-1.5"><Zap size={13} className="text-iris" /> Unlimited renders</span>
-            <span className="inline-flex items-center gap-1.5"><MousePointer2 size={13} className="text-iris" /> No design skills</span>
-          </div>
-        </div>
-
-      </section>
+      {/* (Text hero removed — the flythrough opener IS the hero, ending on "Tell your story with a MAP".) */}
 
       {/* ── Credibility line (honest — a style, not a false endorsement) ── */}
       <section className="border-y border-white/5 bg-white/[0.01] py-8">

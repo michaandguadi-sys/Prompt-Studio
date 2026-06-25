@@ -145,23 +145,36 @@ export const TemplatesGrid: React.FC = () => {
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-      {TEMPLATES.map((t) => (
-        <button
-          key={t.id}
-          onClick={() => open(t)}
-          disabled={!!busy}
-          className="group relative flex flex-col gap-3 overflow-hidden rounded-2xl card-light p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-floaty disabled:opacity-60"
-        >
-          <div className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity bg-brand-soft" />
-          <div className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-black/10 bg-black/[0.04] text-iris group-hover:scale-105 transition-transform">
-            {busy === t.id ? <Loader2 size={16} className="animate-spin" /> : t.icon}
-          </div>
-          <div className="relative">
-            <div className="text-sm font-medium text-graphite">{t.label}</div>
-            <div className="text-[11px] text-graphite/35">{t.sub}</div>
-          </div>
-        </button>
-      ))}
+      {TEMPLATES.map((t) => {
+        // A preview thumbnail of the ACTUAL look — gradient built from the plan's
+        // palette + its lead accent, so the grid reads like a gallery of styles.
+        const lk = (t.plan as any).look ?? {};
+        const accent = (t.plan as any).layers?.find((l: any) => l?.style)?.style?.glowColor
+          || (t.plan as any).layers?.find((l: any) => l?.style)?.style?.accent || "#6E7BFF";
+        const bg = lk.bgColor || "#0a0e1a";
+        const tint = lk.tintColor || accent;
+        return (
+          <button
+            key={t.id}
+            onClick={() => open(t)}
+            disabled={!!busy}
+            className="group relative flex flex-col gap-2.5 overflow-hidden rounded-2xl card-light p-3 text-left transition-all hover:-translate-y-1 hover:shadow-floaty disabled:opacity-60"
+          >
+            <div className="relative h-16 w-full overflow-hidden rounded-xl border border-black/10" style={{ background: `linear-gradient(135deg, ${bg}, ${tint} 55%, ${accent})` }}>
+              {/* faint texture/grain hint + glow on hover */}
+              <div className="pointer-events-none absolute inset-0 opacity-30" style={{ backgroundImage: "radial-gradient(rgba(255,255,255,0.18) 0.5px, transparent 0.5px)", backgroundSize: "5px 5px" }} />
+              <div className="absolute inset-0 flex items-center justify-center text-white transition-transform group-hover:scale-110" style={{ filter: "drop-shadow(0 2px 6px rgba(0,0,0,0.55))" }}>
+                {busy === t.id ? <Loader2 size={20} className="animate-spin" /> : t.icon}
+              </div>
+              <div className="pointer-events-none absolute inset-0 opacity-0 transition-opacity group-hover:opacity-100" style={{ boxShadow: `inset 0 0 34px ${accent}77` }} />
+            </div>
+            <div>
+              <div className="text-sm font-medium text-graphite">{t.label}</div>
+              <div className="text-[11px] text-graphite/35">{t.sub}</div>
+            </div>
+          </button>
+        );
+      })}
     </div>
   );
 };
