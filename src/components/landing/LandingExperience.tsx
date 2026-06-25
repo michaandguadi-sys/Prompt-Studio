@@ -188,17 +188,20 @@ export const LandingExperience: React.FC = () => {
         </div>
       </header>
 
-      {/* ── Hero — high above the glowing world ── */}
+      {/* ── Fly-through OPENER — real satellite + 3-D terrain; every visitor scrolls it first ── */}
+      <FlyThroughMapLazy />
+
+      {/* ── Hero — the product statement ── */}
       <section className="relative flex min-h-screen flex-col items-center justify-center px-6 text-center">
         <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
-          <div className="absolute left-1/2 top-1/2 h-[120vmin] w-[120vmin] rounded-full opacity-60" style={{ background: "radial-gradient(circle, rgba(110,123,255,0.18), transparent 62%)", transform: `translate(-50%,-58%) translateY(${y * 0.15}px)` }} />
-          <div className="absolute inset-0" style={{ transform: `translateY(${y * 0.25}px)`, backgroundImage: "linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)", backgroundSize: "60px 60px", maskImage: "radial-gradient(80% 60% at 50% 40%, #000 20%, transparent 75%)", WebkitMaskImage: "radial-gradient(80% 60% at 50% 40%, #000 20%, transparent 75%)" }} />
+          <div className="absolute left-1/2 top-1/2 h-[120vmin] w-[120vmin] rounded-full opacity-60" style={{ background: "radial-gradient(circle, rgba(110,123,255,0.18), transparent 62%)", transform: "translate(-50%,-58%)" }} />
+          <div className="absolute inset-0" style={{ backgroundImage: "linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)", backgroundSize: "60px 60px", maskImage: "radial-gradient(80% 60% at 50% 40%, #000 20%, transparent 75%)", WebkitMaskImage: "radial-gradient(80% 60% at 50% 40%, #000 20%, transparent 75%)" }} />
           {[["12%", "22%", "2.6s"], ["82%", "30%", "3.1s"], ["20%", "70%", "2.2s"], ["74%", "66%", "3.6s"], ["50%", "16%", "2.9s"]].map(([l, t, d], i) => (
             <span key={i} className="absolute h-1 w-1 rounded-full bg-cyan" style={{ left: l, top: t, boxShadow: "0 0 8px #2fe0ff", animation: `breathe ${d} ease-in-out ${i * 0.3}s infinite` }} />
           ))}
         </div>
 
-        <div className="relative" style={{ transform: `translateY(${y * -0.08}px)`, opacity: Math.max(0, 1 - y / 600) }}>
+        <div className="relative">
           <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/[0.04] px-3.5 py-1.5 text-[11px] font-medium text-white/70 backdrop-blur" style={{ animation: "fade-up .8s .2s both" }}>
             <Sparkles size={12} className="text-iris" /> The AI story-map studio
           </div>
@@ -222,10 +225,6 @@ export const LandingExperience: React.FC = () => {
           </div>
         </div>
 
-        <div className="absolute bottom-8 flex flex-col items-center gap-1.5 text-white/35" style={{ opacity: Math.max(0, 1 - y / 300) }}>
-          <span className="text-[10px] uppercase tracking-[0.3em]">Descend</span>
-          <ChevronDown size={18} className="animate-bounce" />
-        </div>
       </section>
 
       {/* ── Credibility line (honest — a style, not a false endorsement) ── */}
@@ -234,9 +233,6 @@ export const LandingExperience: React.FC = () => {
           The cartographic-storytelling style behind modern explainer videos — the moving maps, the cinematic push-ins, the graded looks — now from a single sentence.
         </p>
       </section>
-
-      {/* ── Fly-through: REAL satellite + 3-D terrain, scroll-driven ── */}
-      <FlyThroughMapLazy />
 
       {/* ── Features — tilt cards ── */}
       <section id="features" className="relative mx-auto max-w-6xl px-6 py-24">
