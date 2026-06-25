@@ -120,6 +120,13 @@
   70%  { opacity: 0; }
   100% { transform: translate(-50%, 11px); opacity: 0; }
 }
+/* Flythrough atmosphere — slow drifting motes for depth. */
+@keyframes drift {
+  0%   { transform: translate(0, 0); opacity: 0; }
+  16%  { opacity: 0.6; }
+  84%  { opacity: 0.6; }
+  100% { transform: translate(12px, 52px); opacity: 0; }
+}
 
 /* ── Base reset ─────────────────────────────────────────────────────────── */
 html, body {
