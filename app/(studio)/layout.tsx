@@ -7,7 +7,7 @@ export default function StudioLayout({ children }: { children: React.ReactNode }
   return (
     <ToastProvider>
       <HistoryControls />
-      <div className="flex h-screen w-screen overflow-hidden bg-paper-100">
+      <div className="studio-dark flex h-screen w-screen overflow-hidden bg-paper-50 text-graphite">
         <StudioSidebar />
         <main className="flex-1 overflow-hidden">{children}</main>
         <RenderQueueWidget />
