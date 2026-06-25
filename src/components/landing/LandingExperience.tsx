@@ -168,8 +168,11 @@ export const LandingExperience: React.FC = () => {
     <div className="relative min-h-screen overflow-x-clip bg-[#05060e] text-white antialiased">
       <MapLoader done={done} />
 
+      {/* Persistent top scrim — guarantees nav contrast over the flythrough from frame 0. */}
+      <div className="pointer-events-none fixed inset-x-0 top-0 z-40 h-24" aria-hidden style={{ background: "linear-gradient(to bottom, rgba(5,6,14,0.88), rgba(5,6,14,0.42) 45%, transparent)" }} />
+
       {/* ── Nav ── */}
-      <header className={`fixed inset-x-0 top-0 z-50 transition-all duration-500 ${navSolid ? "border-b border-white/10 bg-[#05060e]/80 backdrop-blur-xl" : "border-b border-transparent"}`}>
+      <header className={`fixed inset-x-0 top-0 z-50 transition-all duration-500 ${navSolid ? "border-b border-white/10 bg-[#05060e]/70 backdrop-blur-xl" : "border-b border-transparent"}`}>
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
           <div className="flex items-center gap-2.5">
             <span className="flex h-8 w-8 items-center justify-center rounded-xl text-white" style={{ background: "linear-gradient(135deg,#6E7BFF,#4F59E0)", boxShadow: "0 6px 20px -6px rgba(110,123,255,0.8)" }}><span className="text-[14px] font-black">M</span></span>
