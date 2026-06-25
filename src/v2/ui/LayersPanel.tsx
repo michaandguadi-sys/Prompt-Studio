@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Video, Globe2, Plane, MapPin, Flag, Type, BarChart3, Image as ImageIcon,
-  Swords, MessageSquare, Share2, Sun, Eye, EyeOff, ChevronUp, ChevronDown, Trash2, Plus, Copy, Route, Loader2, CircleDot,
+  Swords, MessageSquare, Share2, Sun, Eye, EyeOff, ChevronUp, ChevronDown, Trash2, Plus, Copy, Route, Loader2, CircleDot, X,
 } from "lucide-react";
 import { useEditor } from "../store/editor";
 import { LAYER_REGISTRY } from "../layers/registry";
@@ -100,33 +101,41 @@ export const LayersPanel: React.FC = () => {
           >
             <Plus size={12} /> Add
           </button>
-          {addOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setAddOpen(false)} />
-              <div className="absolute right-0 z-20 mt-1 max-h-[62vh] w-72 overflow-y-auto rounded-xl glass-light p-1.5">
-                {ADD_CATEGORIES.map((cat) => (
-                  <div key={cat.label} className="mb-1 last:mb-0">
-                    <div className="px-2 pb-1 pt-1.5 text-[9px] font-semibold uppercase tracking-[0.18em] text-graphite/40">{cat.label}</div>
-                    {cat.types.map((t) => {
-                      const m = LAYER_REGISTRY[t];
-                      return (
-                        <button
-                          key={t}
-                          onClick={() => { addLayer(t); setAddOpen(false); }}
-                          className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-black/5 transition-colors"
-                        >
-                          <span className="mt-0.5 text-iris">{iconFor(t)}</span>
-                          <span className="min-w-0">
-                            <span className="block text-xs font-medium text-graphite">{m.label}</span>
-                            <span className="block text-[10px] leading-tight text-graphite/40">{m.hint}</span>
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ))}
+          {addOpen && typeof document !== "undefined" && createPortal(
+            <div className="editor-pro fixed inset-0 z-[200] flex items-start justify-center bg-black/55 p-6 pt-[12vh] backdrop-blur-sm" onClick={() => setAddOpen(false)}>
+              <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg overflow-hidden rounded-2xl border border-line bg-paper-200 shadow-[0_40px_100px_-20px_rgba(0,0,0,0.85)]" style={{ animation: "scale-in 0.18s cubic-bezier(0.16,1,0.3,1) both" }}>
+                <div className="flex items-center justify-between border-b border-line px-4 py-3">
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.2em] text-graphite-muted">Add to the map</span>
+                  <button onClick={() => setAddOpen(false)} className="rounded-md p-1 text-graphite-muted transition-colors hover:bg-graphite/[0.08] hover:text-graphite"><X size={15} /></button>
+                </div>
+                <div className="max-h-[58vh] overflow-y-auto p-3">
+                  {ADD_CATEGORIES.map((cat) => (
+                    <div key={cat.label} className="mb-3 last:mb-0">
+                      <div className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-iris/80">{cat.label}</div>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {cat.types.map((t) => {
+                          const m = LAYER_REGISTRY[t];
+                          return (
+                            <button
+                              key={t}
+                              onClick={() => { addLayer(t); setAddOpen(false); }}
+                              className="group flex items-start gap-2.5 rounded-lg border border-line/60 bg-paper/50 p-2.5 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-iris/45 hover:bg-iris/10"
+                            >
+                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-graphite/[0.08] text-iris transition-colors group-hover:bg-iris/20">{iconFor(t)}</span>
+                              <span className="min-w-0">
+                                <span className="block text-[13px] font-medium text-graphite">{m.label}</span>
+                                <span className="block text-[10px] leading-tight text-graphite-muted/80">{m.hint}</span>
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </>
+            </div>,
+            document.body,
           )}
         </div>
       </div>
