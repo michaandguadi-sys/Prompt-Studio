@@ -99,5 +99,7 @@ export const ADDABLE_LAYERS: LayerMeta[] = [
   LAYER_REGISTRY.flag,
   LAYER_REGISTRY.title,
   LAYER_REGISTRY.chart,
+  LAYER_REGISTRY.choropleth,
+  LAYER_REGISTRY.bubble,
   LAYER_REGISTRY.image,
 ];
