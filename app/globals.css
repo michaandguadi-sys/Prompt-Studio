@@ -114,6 +114,12 @@
   from { transform: translateX(0); }
   to   { transform: translateX(-50%); }
 }
+/* Flythrough scroll-cue: the wheel-dot drifting down inside the mouse. */
+@keyframes scrollDot {
+  0%   { transform: translate(-50%, 0); opacity: 1; }
+  70%  { opacity: 0; }
+  100% { transform: translate(-50%, 11px); opacity: 0; }
+}
 
 /* ── Base reset ─────────────────────────────────────────────────────────── */
 html, body {
