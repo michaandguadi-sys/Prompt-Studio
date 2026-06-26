@@ -6,6 +6,7 @@ import { MapboxOverlay } from "@deck.gl/mapbox";
 import { Tile3DLayer } from "@deck.gl/geo-layers";
 import { Tiles3DLoader } from "@loaders.gl/3d-tiles";
 import { LightingEffect, AmbientLight, _SunLight as SunLight } from "@deck.gl/core";
+import { delayRender, continueRender, getRemotionEnvironment } from "remotion";
 
 /**
  * PHOTOREAL 3D (Google Earth) — overlays Google's Photorealistic 3D Tiles on the

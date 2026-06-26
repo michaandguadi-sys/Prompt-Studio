@@ -437,7 +437,7 @@ export function findDirector(layers: Layer[]): Layer | undefined {
 
 /* ── The composition ──────────────────────────────────────────────────────── */
 
-export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean }> = ({ comp, watermark }) => {
+export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; googleApiKey?: string }> = ({ comp, watermark, googleApiKey }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const totalFrames = Math.max(1, Math.round(comp.durationSec * fps));
@@ -526,13 +526,17 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean }
   const released = useRef(false);
 
   // Photoreal 3D (Google Earth) — preview-only, gated on a BYO Google Maps key.
-  const googleKey = useMemo(() => readGoogleKey(), []);
-  const photoreal3d = !!(comp.basemap as any).photoreal3d && !!googleKey && !isRendering;
+  // Key from Settings (browser) OR, in the headless render, from a render prop
+  // (passed in the render request — never written to a file or the project JSON).
+  const googleKey = useMemo(() => readGoogleKey() || (googleApiKey ?? ""), [googleApiKey]);
+  // Photoreal renders in the editor preview, AND in the headless export WHEN a key
+  // was supplied to the render (otherwise export falls back to 3-D satellite).
+  const photoreal3d = !!(comp.basemap as any).photoreal3d && !!googleKey && (!isRendering || !!googleApiKey);
   const [googleCredit, setGoogleCredit] = useState("");
   // EXPORT FALLBACK: the headless render can't stream Google's 3D tiles frame-by-
   // frame, so a photoreal scene EXPORTS as a rich satellite + 3D-terrain +
   // 3D-buildings world (the closest faithful 3D look) instead of a flat map.
-  const photorealExportFallback = !!(comp.basemap as any).photoreal3d && isRendering;
+  const photorealExportFallback = !!(comp.basemap as any).photoreal3d && isRendering && !googleApiKey;
   const effStyleUrl = photorealExportFallback ? "mapbox://styles/mapbox/satellite-streets-v12" : comp.basemap.styleUrl;
   // Stable per-style reference — recomputing inline styles every render made
   // react-map-gl thrash / miss the change (the "switch doesn't show until you
