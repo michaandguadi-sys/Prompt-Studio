@@ -1,0 +1,93 @@
+{
+  "kind": "map",
+  "name": "Scene-Untitled",
+  "durationSec": 5.5,
+  "fps": 24,
+  "width": 3840,
+  "height": 2160,
+  "style": {
+    "name": "VOX Default",
+    "palette": {
+      "name": "Warm Amber (Historical)",
+      "tone": "historical",
+      "borderColor": "#f4b942",
+      "glowColor": "#ffc266",
+      "fillColor": "#f4b942",
+      "countryStroke": "#3a5878",
+      "dotColor": "#ffffff",
+      "ringColor": "#f4b942"
+    },
+    "fonts": {
+      "primary": {
+        "family": "Helvetica Neue",
+        "weight": 200,
+        "src": null
+      },
+      "secondary": {
+        "family": "Helvetica Neue",
+        "weight": 300,
+        "src": null
+      }
+    },
+    "labelTypography": {
+      "titleSize": 92,
+      "titleWeight": 300,
+      "titleSpacing": 22,
+      "subSize": 28,
+      "subSpacing": 14
+    },
+    "vignetteOpacity": 0.78,
+    "letterboxHeight": 80
+  },
+  "scene": {
+    "start": {
+      "lon": 8.839956,
+      "lat": 48.302303,
+      "zoom": 11
+    },
+    "mid": {
+      "lon": 8.839956,
+      "lat": 48.302303,
+      "zoom": 11
+    },
+    "end": {
+      "lon": 8.839956,
+      "lat": 48.302303,
+      "zoom": 11,
+      "pitch": 0,
+      "bearing": 0
+    },
+    "beats": {
+      "open": 0,
+      "approach": 24,
+      "hold": 30,
+      "breathe": 46,
+      "push": 24,
+      "arrive": 56
+    },
+    "countryISO": "CN",
+    "highlightGeoJsonPath": null,
+    "labels": [
+      {
+        "primary": "SHENZHEN",
+        "secondary": "GUANGDONG · CHINA",
+        "primaryInFrame": 18,
+        "primaryOutFrame": 44,
+        "secondaryInFrame": 18,
+        "layout": "city-projected",
+        "projectLon": 114.066,
+        "projectLat": 22.5431
+      },
+      {
+        "primary": "NANSHAN DISTRICT",
+        "secondary": "南山区 · 113.93° E   22.53° N",
+        "primaryInFrame": 44,
+        "primaryOutFrame": 72,
+        "secondaryInFrame": 44,
+        "layout": "bottom-banner"
+      }
+    ],
+    "mapStyleUrl": "mapbox://styles/michaandguadi/cmn4j924f000201sp8yalcf35",
+    "hideRoads": true
+  }
+}

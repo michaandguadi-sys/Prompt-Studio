@@ -1,0 +1,34 @@
+{
+  "name": "My Brand",
+  "palette": {
+    "name": "Warm Amber",
+    "tone": "historical",
+    "borderColor": "#f4b942",
+    "glowColor": "#ffc266",
+    "fillColor": "#f4b942",
+    "countryStroke": "#3a5878",
+    "dotColor": "#ffffff",
+    "ringColor": "#f4b942"
+  },
+  "fonts": {
+    "primary": {
+      "family": "Inter",
+      "weight": 300,
+      "src": null
+    },
+    "secondary": {
+      "family": "Inter",
+      "weight": 400,
+      "src": null
+    }
+  },
+  "labelTypography": {
+    "titleSize": 92,
+    "titleWeight": 300,
+    "titleSpacing": 22,
+    "subSize": 28,
+    "subSpacing": 14
+  },
+  "vignetteOpacity": 0.78,
+  "letterboxHeight": 80
+}

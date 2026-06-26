@@ -1,0 +1,79 @@
+{
+  "kind": "map",
+  "name": "Scene-Untitled",
+  "durationSec": 3,
+  "fps": 24,
+  "width": 3840,
+  "height": 2160,
+  "style": {
+    "name": "VOX Default",
+    "palette": {
+      "name": "Warm Amber (Historical)",
+      "tone": "historical",
+      "borderColor": "#f4b942",
+      "glowColor": "#ffc266",
+      "fillColor": "#f4b942",
+      "countryStroke": "#3a5878",
+      "dotColor": "#ffffff",
+      "ringColor": "#f4b942"
+    },
+    "fonts": {
+      "primary": {
+        "family": "Helvetica Neue",
+        "weight": 200,
+        "src": null
+      },
+      "secondary": {
+        "family": "Helvetica Neue",
+        "weight": 300,
+        "src": null
+      }
+    },
+    "labelTypography": {
+      "titleSize": 92,
+      "titleWeight": 300,
+      "titleSpacing": 22,
+      "subSize": 28,
+      "subSpacing": 14
+    },
+    "letterboxHeight": 80
+  },
+  "scene": {
+    "start": {
+      "lon": 11.404086,
+      "lat": 47.268234,
+      "zoom": 16.3,
+      "pitch": 101,
+      "bearing": 0
+    },
+    "end": {
+      "lon": 10.331264417887553,
+      "lat": 43.829452350844576,
+      "zoom": 10.87987322368219,
+      "pitch": 19.999999999999996,
+      "bearing": 0
+    },
+    "beats": {
+      "hold": 0.417,
+      "breathe": 0.639,
+      "arrive": 0.778
+    },
+    "easing": {
+      "phase1": "easeInOut",
+      "phase2": "smooth"
+    },
+    "highlight": null,
+    "transparentBg": false,
+    "showStreets": false,
+    "showLabels": false,
+    "route": null,
+    "labels": [],
+    "mapStyleUrl": "mapbox://styles/mapbox/outdoors-v12",
+    "extraWaypoints": [],
+    "show3dBuildings": false,
+    "terrain": {
+      "enabled": false,
+      "exaggeration": 1
+    }
+  }
+}

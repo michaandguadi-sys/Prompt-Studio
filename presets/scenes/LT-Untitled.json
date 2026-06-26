@@ -1,0 +1,53 @@
+{
+  "kind": "lowerthird",
+  "name": "LT-Untitled",
+  "durationSec": 4,
+  "fps": 24,
+  "width": 3840,
+  "height": 2160,
+  "style": {
+    "name": "VOX Default",
+    "palette": {
+      "name": "Warm Amber (Historical)",
+      "tone": "historical",
+      "borderColor": "#f4b942",
+      "glowColor": "#ffc266",
+      "fillColor": "#f4b942",
+      "countryStroke": "#3a5878",
+      "dotColor": "#ffffff",
+      "ringColor": "#f4b942"
+    },
+    "fonts": {
+      "primary": {
+        "family": "Gazpacho",
+        "weight": 200,
+        "src": null
+      },
+      "secondary": {
+        "family": "Helvetica Neue",
+        "weight": 300,
+        "src": null
+      }
+    },
+    "labelTypography": {
+      "titleSize": 136,
+      "titleWeight": 300,
+      "titleSpacing": 22,
+      "subSize": 28,
+      "subSpacing": 14
+    },
+    "vignetteOpacity": 0.78,
+    "letterboxHeight": 80
+  },
+  "scene": {
+    "position": "left",
+    "name": "GUADA",
+    "role": "HOST · TRAVEL JOURNALIST",
+    "accentBar": false,
+    "reveal": {
+      "inFrame": 6,
+      "holdFrame": 36,
+      "outFrame": 96
+    }
+  }
+}

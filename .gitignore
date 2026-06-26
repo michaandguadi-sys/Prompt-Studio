@@ -2,7 +2,7 @@ node_modules/
 .next/
 out/
 .env.local
-presets/
+
 .dev-data/
 *.tsbuildinfo
 .DS_Store
