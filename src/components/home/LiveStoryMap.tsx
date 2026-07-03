@@ -3,8 +3,39 @@
 import React, { useEffect, useMemo, useRef } from "react";
 import MapGL, { type MapRef } from "react-map-gl/maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { ML_STYLES } from "@/lib/maplibre";
 import type { GeoStop } from "./worldCoords";
+
+/**
+ * GRADED SATELLITE base — real Earth texture (ESRI World Imagery through our
+ * cached /api/sat proxy) pulled down into a dark cinematic grade: desaturated,
+ * crushed blacks, gentle warmth. Terrain reads as texture, never as noise.
+ */
+const satelliteNightStyle = (origin: string): Record<string, unknown> => ({
+  version: 8,
+  sources: {
+    sat: {
+      type: "raster",
+      tiles: [`${origin}/api/sat/{z}/{x}/{y}`],
+      tileSize: 256,
+      maxzoom: 19,
+      attribution: "© Esri, Maxar, Earthstar Geographics",
+    },
+  },
+  layers: [
+    { id: "bg", type: "background", paint: { "background-color": "#04060f" } },
+    {
+      id: "sat", type: "raster", source: "sat",
+      paint: {
+        "raster-saturation": -0.45,
+        "raster-contrast": 0.22,
+        "raster-brightness-max": 0.6,
+        "raster-brightness-min": 0.015,
+        "raster-hue-rotate": 8,
+        "raster-fade-duration": 0,
+      },
+    },
+  ],
+});
 
 /**
  * The living map — the Generate page's entire background is a real MapLibre
@@ -48,6 +79,10 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 const eio = (t: number) => (t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t);
 
 export const LiveStoryMap: React.FC<Props> = ({ stops, hoverStops, generating }) => {
+  const mapStyle = useMemo(
+    () => satelliteNightStyle(typeof window !== "undefined" ? window.location.origin : ""),
+    [],
+  );
   const mapRef = useRef<MapRef>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -295,54 +330,24 @@ export const LiveStoryMap: React.FC<Props> = ({ stops, hoverStops, generating })
         <MapGL
           ref={mapRef}
           initialViewState={{ longitude: 12, latitude: 26, zoom: 1.65 }}
-          mapStyle={ML_STYLES.dark as any}
+          mapStyle={mapStyle as any}
           interactive={false}
           attributionControl={false}
           onLoad={(e) => {
             loadedRef.current = true;
-            const m = e.target as any;
-            try { m.setMaxParallelImageRequests?.(32); } catch {}
-            // MIDNIGHT ATLAS — restyle the base into something epic but quiet:
-            // ink-black ocean, deep indigo land, faint iris borders, and every
-            // label hushed so nothing competes with the prompt ("SOUTH AMERICA"
-            // must never shout). Per-layer try/catch: cosmetics only.
-            try {
-              for (const layer of m.getStyle()?.layers ?? []) {
-                const id: string = layer.id ?? "";
-                try {
-                  if (layer.type === "symbol") {
-                    m.setPaintProperty(id, "text-opacity", 0.14);
-                    m.setPaintProperty(id, "icon-opacity", 0.14);
-                  } else if (layer.type === "background") {
-                    m.setPaintProperty(id, "background-color", "#04060f");
-                  } else if (layer.type === "fill") {
-                    if (/water|ocean|sea/i.test(id)) m.setPaintProperty(id, "fill-color", "#04060f");
-                    else m.setPaintProperty(id, "fill-color", /park|green|wood/i.test(id) ? "#0d1224" : "#101731");
-                  } else if (layer.type === "line") {
-                    if (/admin|boundary|border/i.test(id)) {
-                      m.setPaintProperty(id, "line-color", "#39406e");
-                      m.setPaintProperty(id, "line-opacity", 0.65);
-                    } else if (/water|river/i.test(id)) {
-                      m.setPaintProperty(id, "line-color", "#0a0f22");
-                    } else {
-                      m.setPaintProperty(id, "line-opacity", 0.12);
-                    }
-                  }
-                } catch { /* property not on this layer — skip */ }
-              }
-            } catch { /* style variations — cosmetic only */ }
+            try { (e.target as any).setMaxParallelImageRequests?.(48); } catch {}
           }}
           style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
         />
         <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
       </div>
 
-      {/* Cinematic grade — the map must RECEDE: a global scrim first, then
-          horizon glow, readability fades and a firm vignette. */}
-      <div className="pointer-events-none absolute inset-0" style={{ background: "rgba(4,6,16,0.52)" }} />
+      {/* Cinematic grade — the satellite already carries the texture; these
+          keep it a BACKDROP: cool tint wash, readability fades, firm vignette. */}
+      <div className="pointer-events-none absolute inset-0" style={{ background: "rgba(6,9,22,0.38)" }} />
       <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(75% 55% at 50% 0%, rgba(110,123,255,0.10), transparent 62%)" }} />
-      <div className="pointer-events-none absolute inset-0" style={{ background: "linear-gradient(to bottom, rgba(4,6,16,0.6) 0%, transparent 26%, transparent 58%, rgba(4,6,16,0.8) 100%)" }} />
-      <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(120% 90% at 50% 46%, transparent 38%, rgba(4,6,16,0.55) 100%)" }} />
+      <div className="pointer-events-none absolute inset-0" style={{ background: "linear-gradient(to bottom, rgba(4,6,16,0.62) 0%, transparent 28%, transparent 58%, rgba(4,6,16,0.82) 100%)" }} />
+      <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(120% 90% at 50% 46%, transparent 40%, rgba(4,6,16,0.5) 100%)" }} />
     </div>
   );
 };

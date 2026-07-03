@@ -6,7 +6,6 @@ import { useEditor } from "@/v2/store/editor";
 import { Sparkles, Loader2, ArrowRight, KeyRound, Plus, X, Wand2, Film, Check } from "lucide-react";
 import { SettingsModal, loadAISettings } from "@/v2/ui/SettingsModal";
 import { SIGNATURE_STYLES } from "@/lib/presets/signatureStyles";
-import { fontStack } from "@/v2/doc/themes";
 import { STYLE_KEY } from "@/components/home/OnboardingModal";
 import { StoryboardReview, type ReviewData } from "./StoryboardReview";
 import { GeneratingOverlay } from "./GeneratingOverlay";
@@ -43,17 +42,6 @@ function detectInputType(text: string): "voiceover" | "brief" | "idea" | null {
   if (sentences.length >= 2 && voiceoverMarkers.test(t) && sentences.every((s) => s.length > 12)) return "voiceover";
   if (t.includes("\n\n") || sentences.length >= 4) return "brief";
   return "idea";
-}
-
-/** Tiny CSS texture hint layered over a style card's gradient. */
-function cardTexture(id: string): React.CSSProperties | undefined {
-  switch (id) {
-    case "noir-dossier": return { backgroundImage: "repeating-linear-gradient(0deg, rgba(0,0,0,0.45) 0 1px, transparent 1px 3px)" };
-    case "neo-atlas":    return { backgroundImage: "linear-gradient(rgba(255,255,255,0.14) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.14) 1px,transparent 1px)", backgroundSize: "9px 9px" };
-    case "war-room":     return { backgroundImage: "radial-gradient(ellipse at center, transparent 30%, rgba(0,0,0,0.55) 100%)" };
-    case "expedition-1900": return { backgroundImage: "radial-gradient(ellipse at center, rgba(243,230,200,0.18) 0%, transparent 60%), radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.4) 110%)" };
-    default: return { backgroundImage: "radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,0.35) 115%)" };
-  }
 }
 
 type IVQ = { id: string; question: string; options: { label: string; value: string; recommended?: boolean }[] };
@@ -281,20 +269,6 @@ export const AiIdeaBox: React.FC<{
     ? "text-white/90 placeholder:text-white/22"
     : "text-graphite placeholder:text-graphite/30";
 
-  const mutedCls = dm ? "text-white/30" : "text-graphite/40";
-  const labelCls = dm ? "text-white/28" : "text-graphite/35";
-  const borderCls = dm ? "border-white/[0.09]" : "border-black/5";
-
-  const refColor = (id: string) => ({
-    "war-room": "#ff5a44", "expedition-1900": "#c9a35c", "editorial": "#6E7BFF",
-    "neo-atlas": "#4ab8ff", "noir-dossier": "#999", "terra-verde": "#2ec4b6",
-  } as Record<string, string>)[id] ?? "#888";
-
-  const refLabel = (id: string) => ({
-    "war-room": "Al Jazeera · Reuters", "expedition-1900": "Nat Geo · PBS",
-    "editorial": "NYT · Vox · BBC", "neo-atlas": "FiveThirtyEight · WIRED",
-    "noir-dossier": "Investigative · Film", "terra-verde": "Travel · Nature",
-  } as Record<string, string>)[id] ?? "";
 
   // ─────────────────────────────────────────────────────────────────────────────
   // RENDER
@@ -518,73 +492,9 @@ export const AiIdeaBox: React.FC<{
           </div>
         </div>
 
-        {/* ── STYLE PICKER ──────────────────────────────────────────────────── */}
-        <div className={`border-t ${borderCls} ${dm ? "px-4 pb-4 pt-3" : "mt-1 px-2 pb-2 pt-2.5"}`}>
-          <div className="mb-2 flex items-center justify-between">
-            <span className={`text-[10px] font-semibold uppercase tracking-[0.22em] ${labelCls}`}>Visual style</span>
-            <span className={`truncate pl-2 text-[10px] ${mutedCls}`}>
-              {styleId === "auto" ? "AI director picks the look" : SIGNATURE_STYLES.find((s) => s.id === styleId)?.tagline}
-            </span>
-          </div>
-          <div className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {/* Director's choice */}
-            <button
-              onClick={() => setStyleId("auto")}
-              title="AI director picks the best look for your story"
-              className={`group w-[102px] shrink-0 text-left transition-all hover:-translate-y-0.5 ${styleId === "auto" ? "" : "opacity-75 hover:opacity-100"}`}
-            >
-              <div
-                className={`relative flex h-[58px] items-center justify-center overflow-hidden rounded-xl border ${styleId === "auto" ? "border-iris ring-2 ring-iris/35" : dm ? "border-white/[0.11] hover:border-iris/30" : "border-black/10 hover:border-iris/30"}`}
-                style={{ background: "conic-gradient(from 210deg at 60% 40%,#0a0303,#161009,#02060c,#05060e,#03100c,#0a0303)" }}
-              >
-                <Wand2 size={16} className="text-white/85 drop-shadow" />
-                {styleId === "auto" && (
-                  <div className="absolute right-1.5 top-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-iris">
-                    <Check size={8} color="white" strokeWidth={3} />
-                  </div>
-                )}
-              </div>
-              <div className={`mt-1 truncate text-[10.5px] font-semibold ${styleId === "auto" ? "text-iris" : dm ? "text-white/48" : "text-graphite/55"}`}>
-                Director&apos;s choice
-              </div>
-              <div className={`truncate text-[9.5px] ${dm ? "text-white/28" : "text-graphite/35"}`}>AI picks the look</div>
-            </button>
-
-            {/* Signature style cards */}
-            {SIGNATURE_STYLES.map((s) => {
-              const active = styleId === s.id;
-              return (
-                <button
-                  key={s.id}
-                  onClick={() => setStyleId(s.id)}
-                  title={`${s.name} — ${s.tagline}`}
-                  className={`group w-[102px] shrink-0 text-left transition-all hover:-translate-y-0.5 ${active ? "" : "opacity-75 hover:opacity-100"}`}
-                >
-                  <div
-                    className={`relative h-[58px] overflow-hidden rounded-xl border ${active ? "border-iris ring-2 ring-iris/35" : dm ? "border-white/[0.11] hover:border-iris/30" : "border-black/10 hover:border-iris/30"}`}
-                    style={{ background: `linear-gradient(140deg,${s.swatches[0]} 0%,${s.swatches[0]} 52%,${s.swatches[1]} 52%,${s.swatches[1]} 78%,${s.swatches[2]} 78%)` }}
-                  >
-                    <div className="absolute inset-0" style={cardTexture(s.id)} />
-                    <span
-                      className="absolute bottom-1 left-1.5 text-[17px] font-bold leading-none text-white drop-shadow"
-                      style={{ fontFamily: fontStack(s.fontDisplay), textShadow: "0 1px 6px rgba(0,0,0,0.7)" }}
-                    >
-                      Aa
-                    </span>
-                    <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full" style={{ background: s.swatches[2], boxShadow: `0 0 8px ${s.swatches[2]}` }} />
-                    {active && (
-                      <div className="absolute right-1.5 top-1.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-iris">
-                        <Check size={8} color="white" strokeWidth={3} />
-                      </div>
-                    )}
-                  </div>
-                  <div className={`mt-1 truncate text-[10.5px] font-semibold ${active ? "text-iris" : dm ? "text-white/48" : "text-graphite/65"}`}>{s.name}</div>
-                  <div className="truncate text-[9.5px]" style={{ color: refColor(s.id), opacity: 0.8 }}>{refLabel(s.id)}</div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        {/* Style selection removed — the AI director picks the look from the
+            prompt itself ("vintage atlas", "documentary style" read as words).
+            The persisted styleId still applies when set elsewhere (onboarding). */}
 
         {/* ── ENGINE TOGGLE (light mode only — dark mode has it in the bar) ─── */}
         {!dm && (
@@ -610,8 +520,9 @@ export const AiIdeaBox: React.FC<{
         )}
       </div>
 
-      {/* ── EXAMPLE CHIPS ───────────────────────────────────────────────────── */}
-      {!multi && (
+      {/* ── EXAMPLE CHIPS (light mode only — the dark hero has the inspiration
+             rail, so extra chips here would just add noise) ──────────────────── */}
+      {!multi && !dm && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <span className={`text-[11px] ${dm ? "text-white/25" : "text-graphite/30"}`}>Try:</span>
           {EXAMPLES.map((ex) => (

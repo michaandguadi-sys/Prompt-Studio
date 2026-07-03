@@ -4,9 +4,12 @@ Allow: /pricing
 
 # Keep authenticated studio routes private
 Disallow: /studio/
+Disallow: /studio2
+Disallow: /home
 Disallow: /dashboard
 Disallow: /brand
 Disallow: /styles
+Disallow: /projects
 Disallow: /api/
 
-Sitemap: https://promptstudio.app/sitemap.xml
+Sitemap: https://mapanisy.com/sitemap.xml

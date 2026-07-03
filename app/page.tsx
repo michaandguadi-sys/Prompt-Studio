@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { auth } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
 import { LandingExperience } from "@/components/landing/LandingExperience";
 
 export const metadata: Metadata = {
@@ -32,14 +31,14 @@ export const metadata: Metadata = {
     title: "Prompt Studio — Make Vox-style Map Animations. No After Effects.",
     description:
       "Animate routes, fly to cities, highlight countries. Export 4K MP4 in minutes. The map animation tool built for documentary YouTubers and travel creators.",
-    images: [{ url: "/og-image.png", width: 1200, height: 630, alt: "Prompt Studio — Map Animation Tool for YouTubers" }],
+    images: [{ url: "/og-image.jpg", width: 1200, height: 630, alt: "Prompt Studio — Map Animation Tool for YouTubers" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "Prompt Studio — Map Animation Without After Effects",
     description:
       "Make Johnny Harris-style map animations for YouTube in minutes. Animate routes, zoom to cities, export 4K. Free to start.",
-    images: ["/og-image.png"],
+    images: ["/og-image.jpg"],
   },
   alternates: { canonical: "https://mapanisy.com" },
 };
@@ -95,7 +94,7 @@ const JSON_LD = {
           "description": "One-time payment, unlimited cloud renders, all features forever",
         },
       ],
-      "screenshot": "https://mapanisy.com/og-image.png",
+      "screenshot": "https://mapanisy.com/og-image.jpg",
       "creator": {
         "@type": "Organization",
         "name": "Prompt Studio",
