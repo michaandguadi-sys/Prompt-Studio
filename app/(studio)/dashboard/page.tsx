@@ -291,10 +291,16 @@ export default function DashboardPage() {
         )}
 
         {!loading && !quota && (
-          <div className="rounded-xl border border-red-500/25 bg-red-500/5 p-6 text-sm text-red-400/80">
-            Could not load quota. Set{" "}
-            <code className="font-mono text-red-300">DATABASE_URL</code>
-            {" "}in .env.local and run the Clerk webhook to create your user record.
+          <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-6 text-sm text-amber-400/80">
+            {process.env.NODE_ENV === "development" ? (
+              <>
+                Could not load quota. Set{" "}
+                <code className="font-mono text-amber-300">DATABASE_URL</code>
+                {" "}in .env.local and run the Clerk webhook to create your user record.
+              </>
+            ) : (
+              <>Your usage info is taking a moment to load — refresh in a few seconds. Everything else works normally.</>
+            )}
           </div>
         )}
 

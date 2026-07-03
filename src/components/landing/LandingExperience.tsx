@@ -125,13 +125,14 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
     try { if (demo.trim()) localStorage.setItem("mapanisy-seed-prompt", demo.trim()); } catch { /* private mode */ }
   };
 
+  /* Mirrors src/lib/tiers.ts — the wired billing ladder. Keep in sync. */
   const plans = [
-    { name: "Free", price: "€0", suffix: "forever", tagline: "Every feature, small watermark", featured: false, cta: "Start free",
-      features: ["Full AI Director & editor", "All 17 pro map styles", "GPX / KML / FIT import", "MP4 export with watermark", "Public share links"] },
-    { name: "Pay as you go", price: "€0.10", suffix: "/render minute", tagline: "No watermark, zero commitment", featured: false, cta: "Start free",
-      features: ["Everything in Free", "No watermark", "Cloud 4K rendering", "Pay only when you export", "Priority render queue"] },
-    { name: "Pro", price: "€149", suffix: "once", tagline: "Pay once. Use forever.", featured: true, cta: "Go Pro",
-      features: ["Everything unlocked, forever", "Unlimited cloud 4K renders", "No watermark, ever", "Voiceover & data-map tools", "Early access to new styles"] },
+    { name: "Free", price: "$0", suffix: "forever", tagline: "Try the whole studio", featured: false, cta: "Start free",
+      features: ["3 animations / month", "Full AI Director & editor", "All scene types", "1080p export, small watermark", "GPX / KML / FIT import"] },
+    { name: "Creator", price: "$19", suffix: "/month", tagline: "Unlimited 4K, no watermark", featured: true, cta: "Get Creator",
+      features: ["Unlimited 4K renders", "No watermark", "All 17 pro styles + looks", "GPS track flythroughs", "Public share links"] },
+    { name: "Pro", price: "$39", suffix: "/month", tagline: "For serious storytellers", featured: false, cta: "Get Pro",
+      features: ["Everything in Creator", "AI Director (premium model)", "Story arcs — multi-scene films", "Brand kits + FCPXML export", "Priority render queue"] },
   ];
 
   return (
@@ -408,6 +409,10 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
 
       {/* ── Pricing · FAQ · Final CTA ── */}
       <Pricing serifFont={SERIF} plans={plans} />
+      <p className="-mt-14 pb-8 text-center text-[12px] text-white/35">
+        Teams, white-label or enterprise?{" "}
+        <Link href="/pricing" className="text-[#aab4ff] underline-offset-2 hover:underline">See the full pricing →</Link>
+      </p>
       <FAQ serifFont={SERIF} />
       <FinalCTA serifFont={SERIF} />
 
