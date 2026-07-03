@@ -25,12 +25,12 @@ export const Pricing: React.FC<PricingProps> = ({ serifFont, plans }) => {
     <section id="pricing" className="relative mx-auto max-w-6xl px-6 py-24">
       <Reveal>
         <h2 className="text-center text-[clamp(1.8rem,4vw,2.8rem)] font-medium tracking-tight text-white" style={{ fontFamily: serifFont }}>
-          Unlimited 4K renders. Seriously.
+          Start free. <span className="text-white/40">Pay when it matters.</span>
         </h2>
       </Reveal>
       <Reveal delay={80}>
         <p className="mx-auto mt-3 max-w-lg text-center text-[15px] text-white/50">
-          Renders run on your machine, so paid plans never meter them. Start free.
+          Every feature is free forever with a small watermark. Upgrade only when your story deserves the full frame.
         </p>
       </Reveal>
       <div className="mt-14 grid grid-cols-1 gap-5 md:grid-cols-3">

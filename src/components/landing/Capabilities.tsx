@@ -39,7 +39,7 @@ export const Capabilities: React.FC<CapabilitiesProps> = ({ serifFont, images })
                 <div className="absolute inset-x-10 bottom-0 top-10 overflow-hidden rounded-t-[12cqw] border-x-[3cqw] border-t-[3cqw] border-white/10 bg-black shadow-2xl">
                    <Image 
                     src={images.editor} 
-                    alt="Prompt Studio Editor" 
+                    alt="Mapanisy Editor" 
                     fill 
                     className="object-cover object-top"
                   />
