@@ -252,6 +252,9 @@ export const SettingsModal: React.FC<{ open: boolean; onClose: () => void }> = (
       localStorage.setItem(RESTYLE_KEY, JSON.stringify(rs));
       localStorage.setItem(GOOGLE_KEY, JSON.stringify({ apiKey: googleKey.trim() }));
       localStorage.setItem(VOICEOVER_KEY, JSON.stringify(vo));
+      // Live consumers (the preview's Photoreal 3D) re-read keys on this event —
+      // no reload needed after pasting a key.
+      window.dispatchEvent(new Event("mapanisy-google-key"));
     } catch {}
     setSaved(true); setTimeout(() => { setSaved(false); onClose(); }, 700);
   };

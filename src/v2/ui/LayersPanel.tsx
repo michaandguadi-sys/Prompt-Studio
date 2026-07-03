@@ -35,10 +35,9 @@ const ADD_CATEGORIES: { label: string; types: LayerType[] }[] = [
 
 export const LayersPanel: React.FC = () => {
   const allLayers = useEditor((s) => s.project.composition.layers);
-  const proMode = useEditor((s) => s.proMode);
-  const setProMode = useEditor((s) => s.setProMode);
-  // Simple mode hides the camera layer — it's auto-managed and confuses beginners.
-  const layers = proMode ? allLayers : allLayers.filter((l) => l.type !== "camera");
+  // The camera is a first-class layer in EVERY project — always visible.
+  // (The old Simple/Pro switch that hid it is gone: one mental model.)
+  const layers = allLayers;
   const selectedId = useEditor((s) => s.selectedId);
   const select = useEditor((s) => s.select);
   const patchLayer = useEditor((s) => s.patchLayer);
@@ -86,16 +85,9 @@ export const LayersPanel: React.FC = () => {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between px-3 py-2 border-b border-line/60">
-        <div className="flex items-center gap-2">
-          {/* Simple ↔ Pro — Pro reveals the camera + advanced fine-tuning. */}
-          <button
-            onClick={() => setProMode(!proMode)}
-            title={proMode ? "Pro mode: camera + all controls shown. Click for Simple." : "Simple mode: camera auto-managed, panels clean. Click for Pro."}
-            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider transition-colors ${proMode ? "border-iris bg-iris/10 text-iris" : "border-line text-graphite/45 hover:text-graphite/70"}`}
-          >
-            {proMode ? "Pro" : "Simple"}
-          </button>
-        </div>
+        <span className="text-[9px] font-semibold uppercase tracking-wider text-graphite/45">
+          {layers.length} layer{layers.length === 1 ? "" : "s"}
+        </span>
         <div className="relative flex items-center gap-1.5">
           <button
             onClick={() => fileRef.current?.click()}

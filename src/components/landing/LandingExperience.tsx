@@ -21,7 +21,7 @@ import {
   MapPin, Sparkles, ArrowRight, Wand2, Globe2, Route as RouteIcon,
   BarChart3, Mic2, Film, Check, ChevronDown, Mountain, Play,
 } from "lucide-react";
-import { LiveStoryMap, type MapGrade } from "@/components/home/LiveStoryMap";
+import { LiveStoryMap, flavorForPrompt, type MapGrade, type PreviewFlavor } from "@/components/home/LiveStoryMap";
 import { interpret } from "@/lib/parse";
 import { coordsFor, isLikelyPlaceName, type GeoStop } from "@/components/home/worldCoords";
 import { PRO_MAP_STYLES } from "@/lib/presets/proMapStyles";
@@ -40,6 +40,15 @@ const DEMO_IDEAS = [
   "A road trip from Chicago to Los Angeles, vintage atlas style",
   "Sailing from Barcelona to Athens at golden hour",
   "Highlight every country I've visited: France, Italy, Japan, Brazil",
+];
+
+/** Tappable idea chips — one per PREVIEW FLAVOR, so visitors instantly see
+ *  routes, glowing highlights AND heat scatters without typing a word. */
+const IDEA_CHIPS: { emoji: string; label: string; prompt: string }[] = [
+  { emoji: "🚁", label: "Route", prompt: "Fly from New York to Iceland with smooth camera moves" },
+  { emoji: "⛵", label: "Sea journey", prompt: "Sailing from Barcelona to Athens across the Mediterranean" },
+  { emoji: "🌍", label: "Highlights", prompt: "Highlight every country I've visited: France, Italy, Japan, Brazil" },
+  { emoji: "🔥", label: "Heat map", prompt: "Earthquake hotspots across Japan, Chile and Turkey this decade" },
 ];
 
 const MARQUEE_USES = [
@@ -89,28 +98,41 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
   const grade = useMemo<MapGrade | null>(() => {
     const s = PRO_MAP_STYLES.find((x) => x.id === styleId);
     if (!s) return null;
-    return {
-      tint: s.swatches[1],
-      accents: [s.swatches[2], s.swatches[1], s.swatches[2]],
-      // light styles brighten the satellite; dark ones crush it further
-      brightness: /^#[c-f]/i.test(s.swatches[0]) ? 0.85 : 0.5,
-      saturation: -0.55,
-    };
+    const isLight = /^#[c-f]/i.test(s.swatches[0]);
+    const isSatelliteLook = /satellite/i.test(String((s.basemap as any)?.styleUrl ?? ""));
+    return isSatelliteLook
+      ? {
+          // Satellite-native looks: keep the imagery, shift its temperature.
+          tint: s.swatches[2], tintStrength: 0.3,
+          accents: [s.swatches[2], s.swatches[1], s.swatches[2]],
+          saturation: -0.15, brightness: 0.7, contrast: 0.3, hueRotate: 0,
+        }
+      : {
+          // Designed looks: a REAL duotone — desaturate hard, tint with the
+          // style's body colour, punch contrast. Unmistakable on tap.
+          tint: s.swatches[1], tintStrength: 0.75,
+          accents: [s.swatches[2], s.swatches[1], s.swatches[2]],
+          saturation: -0.95,
+          brightness: isLight ? 0.95 : 0.45,
+          contrast: isLight ? 0.15 : 0.4,
+          hueRotate: 0,
+        };
   }, [styleId]);
 
   /* Live understanding — the same engine the app runs, right on the sales page.
      Offline coords only (no geocoder): instant, and never a wrong pin. */
-  const stops = useMemo<GeoStop[]>(() => {
+  const { stops, flavor } = useMemo<{ stops: GeoStop[]; flavor: PreviewFlavor }>(() => {
     const t = demo.trim();
-    if (t.length < 2) return [];
+    if (t.length < 2) return { stops: [], flavor: "route" };
     try {
       const it = interpret(t);
       const names = it.route ? [it.route.from, ...it.route.via, it.route.to] : it.locations.slice(0, 6);
-      return names
+      const stops = names
         .filter((n) => coordsFor(n) || isLikelyPlaceName(n, demo))
         .map((n) => coordsFor(n))
         .filter(Boolean) as GeoStop[];
-    } catch { return []; }
+      return { stops, flavor: flavorForPrompt(demo, it.action) };
+    } catch { return { stops: [], flavor: "route" }; }
   }, [demo]);
 
   /* Cycling placeholder */
@@ -173,7 +195,7 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
             <span className="text-[9px] font-bold uppercase tracking-[0.24em] text-white/35">Studio</span>
           </Link>
           <nav className="flex items-center gap-6">
-            {[["Features", "#features"], ["Styles", "#styles"], ["Pricing", "#pricing"], ["FAQ", "#faq"]].map(([l, h]) => (
+            {[["Features", "#features"], ["Pricing", "#pricing"], ["FAQ", "#faq"]].map(([l, h]) => (
               <a key={l} href={h} className="hidden text-[12.5px] text-white/45 transition-colors hover:text-white sm:block">{l}</a>
             ))}
             {signedIn ? (
@@ -194,7 +216,7 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
 
       {/* ── HERO — the product, live, before a single click ── */}
       <section className="relative overflow-hidden" style={{ minHeight: "100svh" }}>
-        <LiveStoryMap stops={stops} grade={grade} />
+        <LiveStoryMap stops={stops} grade={grade} flavor={flavor} />
         <div ref={glowRef} className="pointer-events-none absolute inset-0 z-[5]" aria-hidden />
 
         <div className="relative z-10 mx-auto flex max-w-3xl flex-col items-center justify-center px-6 text-center" style={{ minHeight: "100svh", paddingTop: 86, paddingBottom: 120 }}>
@@ -264,7 +286,7 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
               <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5" style={{ animation: "landRise 0.4s ease both" }}>
                 {stops.slice(0, 5).map((s, i) => (
                   <span key={`${s.label}-${i}`} className="inline-flex items-center gap-1.5">
-                    {i > 0 && <ArrowRight size={11} className="text-iris/60" />}
+                    {i > 0 && flavor === "route" && <ArrowRight size={11} className="text-iris/60" />}
                     <span className="inline-flex items-center gap-1 rounded-full border border-iris/35 bg-iris/15 px-2.5 py-1 text-[11px] font-medium text-[#c3caff] backdrop-blur">
                       <MapPin size={10} /> {s.label}
                     </span>
@@ -272,6 +294,20 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
                 ))}
               </div>
             )}
+
+            {/* Idea chips — tap to preview a route, a highlight, a heat map */}
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5" style={{ animation: "landRise 0.9s ease 320ms both" }}>
+              {IDEA_CHIPS.map((c) => (
+                <button
+                  key={c.label}
+                  onClick={() => setDemo(demo === c.prompt ? "" : c.prompt)}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-medium backdrop-blur transition-all hover:-translate-y-0.5 ${demo === c.prompt ? "border-iris/60 bg-iris/20 text-white" : "border-white/[0.1] bg-white/[0.04] text-white/50 hover:border-iris/40 hover:text-white/85"}`}
+                  title={c.prompt}
+                >
+                  <span aria-hidden>{c.emoji}</span> {c.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="mt-7 flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 text-[11px] text-white/35" style={{ animation: "landRise 0.9s ease 360ms both" }}>
@@ -283,9 +319,9 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
 
           {/* Tap-a-look strip — regrades the whole world behind, live */}
           <div className="mt-5 flex flex-col items-center gap-2" style={{ animation: "landRise 0.9s ease 440ms both" }}>
-            <span className="text-[9.5px] font-bold uppercase tracking-[0.28em] text-white/28">Tap a look — the world changes</span>
+            <span className="text-[9.5px] font-bold uppercase tracking-[0.28em] text-white/28">Tap a look — the world changes · +{PRO_MAP_STYLES.length - 12} more in the studio</span>
             <div className="flex flex-wrap items-center justify-center gap-1.5">
-              {PRO_MAP_STYLES.slice(0, 9).map((s) => (
+              {PRO_MAP_STYLES.slice(0, 12).map((s) => (
                 <button
                   key={s.id}
                   onClick={() => setStyleId(styleId === s.id ? null : s.id)}
@@ -373,49 +409,6 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
         </div>
       </section>
 
-      {/* ── Style showcase marquee ── */}
-      <section id="styles" className="py-20">
-        <Reveal>
-          <div className="mx-auto max-w-6xl px-6 text-center">
-            <p className="text-[11px] font-bold uppercase tracking-[0.3em] text-iris">The looks</p>
-            <h2 className="mt-3 text-[clamp(1.9rem,4vw,3rem)] font-medium tracking-tight" style={{ fontFamily: SERIF }}>
-              {PRO_MAP_STYLES.length} professional map styles. <span className="text-white/40">One click each.</span>
-            </h2>
-            <p className="mx-auto mt-3 max-w-md text-[14px] text-white/45">
-              Earth Documentary to Vintage Atlas — balanced palettes, cinematic grades, broadcast-safe.
-            </p>
-          </div>
-        </Reveal>
-        <div className="mq-pause relative mt-10 overflow-hidden">
-          <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-28" style={{ background: "linear-gradient(to right,#04060f,transparent)" }} />
-          <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-28" style={{ background: "linear-gradient(to left,#04060f,transparent)" }} />
-          <div className="mq-r flex w-max gap-3 py-1">
-            {[...PRO_MAP_STYLES, ...PRO_MAP_STYLES].map((s, i) => (
-              <div
-                key={`${s.id}-${i}`}
-                role="button"
-                tabIndex={0}
-                onClick={() => { setStyleId(s.id); window.scrollTo({ top: 0, behavior: "smooth" }); }}
-                onKeyDown={(e) => { if (e.key === "Enter") { setStyleId(s.id); window.scrollTo({ top: 0, behavior: "smooth" }); } }}
-                title={`Tap to preview ${s.name} on the world above`}
-                className={`w-[172px] shrink-0 cursor-pointer overflow-hidden rounded-xl border bg-white/[0.03] transition-all hover:-translate-y-1 ${styleId === s.id ? "border-white/60" : "border-white/[0.08] hover:border-iris/40"}`}>
-                <div className="relative h-[86px]" style={{ background: s.swatches[0] }}>
-                  <div className="absolute inset-0" style={{ background: `radial-gradient(130% 100% at 50% 130%, ${s.swatches[1]}66, transparent 60%)` }} />
-                  <div className="absolute bottom-2 left-3 h-8 w-2.5 rounded-sm" style={{ background: s.swatches[1], boxShadow: `0 0 10px ${s.swatches[2]}` }} />
-                  <div className="absolute bottom-2 left-7 h-11 w-2.5 rounded-sm" style={{ background: s.swatches[1], opacity: 0.9, boxShadow: `0 0 12px ${s.swatches[2]}` }} />
-                  <div className="absolute bottom-2 right-3 h-9 w-2.5 rounded-sm" style={{ background: s.swatches[2], boxShadow: `0 0 12px ${s.swatches[2]}` }} />
-                  <div className="absolute bottom-2 left-0 right-0 h-px" style={{ background: s.swatches[2], opacity: 0.5 }} />
-                </div>
-                <div className="px-3 py-2.5">
-                  <div className="truncate text-[12px] font-semibold text-white/85">{s.name}</div>
-                  <div className="truncate text-[10px] text-white/35">{s.tagline}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* ── Feature grid + stats ── */}
       <section className="mx-auto max-w-6xl px-6 py-20">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -465,7 +458,6 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
           </div>
           <nav className="flex flex-wrap items-center gap-5 text-[11.5px] text-white/40">
             <a href="#features" className="transition-colors hover:text-white">Features</a>
-            <a href="#styles" className="transition-colors hover:text-white">Styles</a>
             <a href="#pricing" className="transition-colors hover:text-white">Pricing</a>
             <a href="#faq" className="transition-colors hover:text-white">FAQ</a>
             <Link href="/sign-in" className="transition-colors hover:text-white">Sign in</Link>

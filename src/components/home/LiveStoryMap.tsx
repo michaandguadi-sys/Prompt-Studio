@@ -61,13 +61,29 @@ export type MapGrade = {
   accents: [string, string, string];  // arc / pin / hub palette
   saturation?: number;                // raster-saturation (-1..1)
   brightness?: number;                // raster-brightness-max (0..1)
+  hueRotate?: number;                 // raster-hue-rotate (degrees)
+  contrast?: number;                  // raster-contrast (-1..1)
+  /** 0..1 — how hard the tint wash hits (drives the duotone feel). */
+  tintStrength?: number;
 };
+
+/** How the typed story previews on the map: flowing route arcs, plain pins,
+ *  glowing territory highlights, or a heat scatter (event density). */
+export type PreviewFlavor = "route" | "pins" | "highlight" | "heat";
+
+/** Pick the preview flavor from the prompt text + the intent engine's action. */
+export function flavorForPrompt(text: string, action?: string | null): PreviewFlavor {
+  if (/heat ?map|earthquake|wildfire|outbreak|cases|crime|density|incidents|hotspots?|events\b/i.test(text)) return "heat";
+  if (action === "highlight" || /highlight|every country|countries i|visited|territory|empire|region/i.test(text)) return "highlight";
+  return "route";
+}
 
 type Props = {
   stops: GeoStop[];
   hoverStops?: GeoStop[] | null;
   generating?: boolean;
   grade?: MapGrade | null;
+  flavor?: PreviewFlavor;
 };
 
 /* Ambient world hubs — the idle "airline network" show. */
@@ -88,7 +104,7 @@ const IRIS = "#6E7BFF", CYAN = "#2FE0FF", VIOLET = "#B57BFF", AMBER = "#FFB86E";
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const eio = (t: number) => (t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t);
 
-export const LiveStoryMap: React.FC<Props> = ({ stops, hoverStops, generating, grade }) => {
+export const LiveStoryMap: React.FC<Props> = ({ stops, hoverStops, generating, grade, flavor }) => {
   const mapStyle = useMemo(
     () => satelliteNightStyle(typeof window !== "undefined" ? window.location.origin : ""),
     [],
@@ -105,20 +121,26 @@ export const LiveStoryMap: React.FC<Props> = ({ stops, hoverStops, generating, g
   const hoverRef = useRef(hoverStops);
   const genRef = useRef(!!generating);
   const gradeRef = useRef(grade);
+  const flavorRef = useRef(flavor);
   // Pin bloom: remember when each stop label first appeared, for the pop-in.
   const bornRef = useRef(new Map<string, number>());
   stopsRef.current = stops;
   hoverRef.current = hoverStops;
   genRef.current = !!generating;
   gradeRef.current = grade;
+  flavorRef.current = flavor;
 
-  /* Tap-to-restyle: regrade the satellite raster live (no style reload). */
+  /* Tap-to-restyle: regrade the satellite raster live (no style reload).
+     The change must be UNMISTAKABLE — hue rotation + saturation + contrast
+     together produce a real duotone shift, not a subtle wash. */
   useEffect(() => {
     const m = mapRef.current?.getMap() as any;
     if (!m || !loadedRef.current) return;
     try {
       m.setPaintProperty("sat", "raster-saturation", grade?.saturation ?? -0.45);
       m.setPaintProperty("sat", "raster-brightness-max", grade?.brightness ?? 0.6);
+      m.setPaintProperty("sat", "raster-hue-rotate", grade?.hueRotate ?? 8);
+      m.setPaintProperty("sat", "raster-contrast", grade?.contrast ?? 0.22);
     } catch { /* style mid-load — cosmetic */ }
   }, [grade]);
 
@@ -291,16 +313,59 @@ export const LiveStoryMap: React.FC<Props> = ({ stops, hoverStops, generating, g
         });
       }
 
-      // 3 · The user's recognised story — bright, alive, undeniable.
+      // 3 · The user's recognised story — bright, alive, undeniable. The
+      //     FLAVOR decides the sketch: route arcs, glowing territory
+      //     highlights, or a heat scatter — matching what they described.
       const ss = stopsRef.current;
+      const flav = flavorRef.current ?? "route";
       if (ss.length) {
         const now = performance.now();
-        for (let i = 0; i < ss.length - 1; i++) {
-          const a = proj(ss[i].lon, ss[i].lat), b = proj(ss[i + 1].lon, ss[i + 1].lat);
-          if (onScreen(a) && onScreen(b)) {
-            const traveller = ((t * 0.45 + i * 0.33) % 1);
-            drawArc(a, b, AC1, 2.6, 0.95, traveller);
+        if (flav === "route") {
+          for (let i = 0; i < ss.length - 1; i++) {
+            const a = proj(ss[i].lon, ss[i].lat), b = proj(ss[i + 1].lon, ss[i + 1].lat);
+            if (onScreen(a) && onScreen(b)) {
+              const traveller = ((t * 0.45 + i * 0.33) % 1);
+              drawArc(a, b, AC1, 2.6, 0.95, traveller);
+            }
           }
+        }
+        if (flav === "highlight") {
+          // Glowing territory: a breathing radial fill + rotating dashed ring.
+          ss.forEach((s, i) => {
+            const p = proj(s.lon, s.lat);
+            if (!onScreen(p)) return;
+            const [x, y] = p!;
+            const r = 62 + 7 * Math.sin(t * 1.6 + i * 1.1);
+            const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+            g.addColorStop(0, `${AC1}3d`); g.addColorStop(0.7, `${AC1}22`); g.addColorStop(1, `${AC1}00`);
+            ctx.fillStyle = g;
+            ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = AC1; ctx.lineWidth = 1.8; ctx.globalAlpha = 0.85;
+            ctx.setLineDash([8, 7]); ctx.lineDashOffset = -t * 14;
+            ctx.beginPath(); ctx.arc(x, y, r * 0.82, 0, Math.PI * 2); ctx.stroke();
+            ctx.setLineDash([]); ctx.globalAlpha = 1;
+          });
+        }
+        if (flav === "heat") {
+          // Event-density scatter: seeded warm dots clustered on each place.
+          ss.forEach((s, i) => {
+            const p = proj(s.lon, s.lat);
+            if (!onScreen(p)) return;
+            const [x, y] = p!;
+            for (let k = 0; k < 26; k++) {
+              const seed = i * 97 + k;
+              const h = (n: number) => { const v = Math.sin(seed * 127.1 + n * 311.7) * 43758.5453; return v - Math.floor(v); };
+              const ang = h(1) * Math.PI * 2;
+              const dist = Math.pow(h(2), 0.6) * 58;
+              const flick = 0.55 + 0.45 * Math.sin(t * 2.4 + seed);
+              ctx.globalAlpha = (0.16 + 0.5 * (1 - dist / 58)) * flick;
+              ctx.fillStyle = h(3) > 0.45 ? "#ff5a44" : "#ffb020";
+              ctx.shadowColor = "#ff5a44"; ctx.shadowBlur = 8;
+              ctx.beginPath(); ctx.arc(x + Math.cos(ang) * dist, y + Math.sin(ang) * dist, 1.6 + h(4) * 2.6, 0, Math.PI * 2); ctx.fill();
+              ctx.shadowBlur = 0;
+            }
+            ctx.globalAlpha = 1;
+          });
         }
         ss.forEach((s, i) => {
           const p = proj(s.lon, s.lat);
@@ -369,12 +434,22 @@ export const LiveStoryMap: React.FC<Props> = ({ stops, hoverStops, generating, g
       {/* Cinematic grade — the satellite already carries the texture; these
           keep it a BACKDROP: cool tint wash, readability fades, firm vignette. */}
       <div className="pointer-events-none absolute inset-0" style={{ background: "rgba(6,9,22,0.38)" }} />
-      {/* Style-card tint — the tap-to-preview wash, cross-fading between looks */}
+      {/* Style-card tint — the tap-to-preview wash. Two passes so the change
+          is unmistakable: a colour layer (the duotone body) + a soft-light
+          punch. tintStrength drives both. */}
+      <div
+        className="pointer-events-none absolute inset-0 transition-opacity duration-700"
+        style={{
+          opacity: grade ? (grade.tintStrength ?? 0.5) : 0,
+          background: grade ? grade.tint : "transparent",
+          mixBlendMode: "color" as any,
+        }}
+      />
       <div
         className="pointer-events-none absolute inset-0 transition-opacity duration-700"
         style={{
           opacity: grade ? 1 : 0,
-          background: grade ? `linear-gradient(180deg, ${grade.tint}30 0%, transparent 38%, ${grade.tint}24 100%)` : "transparent",
+          background: grade ? `linear-gradient(180deg, ${grade.tint}55 0%, transparent 40%, ${grade.tint}44 100%)` : "transparent",
           mixBlendMode: "soft-light" as any,
         }}
       />

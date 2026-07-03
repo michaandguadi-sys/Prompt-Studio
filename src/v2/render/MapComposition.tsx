@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AbsoluteFill, useCurrentFrame, useVideoConfig, delayRender, continueRender, getRemotionEnvironment, Img, Audio,
 } from "remotion";
@@ -161,13 +161,23 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
   const released = useRef(false);
 
   // Photoreal 3D (Google Earth) — preview-only, gated on a BYO Google Maps key.
-  // Key from Settings (browser) OR, in the headless render, from a render prop
-  // (passed in the render request — never written to a file or the project JSON).
-  const googleKey = useMemo(() => readGoogleKey() || (googleApiKey ?? ""), [googleApiKey]);
+  // Key from Settings (browser) OR, in the headless render, from a render prop.
+  // REACTIVE: re-read when Settings saves (the "added my key but nothing
+  // changed until reload" bug) — SettingsModal dispatches `mapanisy-google-key`.
+  const [storedGoogleKey, setStoredGoogleKey] = useState(readGoogleKey);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const update = () => setStoredGoogleKey(readGoogleKey());
+    window.addEventListener("mapanisy-google-key", update);
+    window.addEventListener("storage", update); // other tabs
+    return () => { window.removeEventListener("mapanisy-google-key", update); window.removeEventListener("storage", update); };
+  }, []);
+  const googleKey = storedGoogleKey || (googleApiKey ?? "");
   // Photoreal renders in the editor preview, AND in the headless export WHEN a key
   // was supplied to the render (otherwise export falls back to 3-D satellite).
   const photoreal3d = !!(comp.basemap as any).photoreal3d && !!googleKey && (!isRendering || !!googleApiKey);
   const [googleCredit, setGoogleCredit] = useState("");
+  const [googleStatus, setGoogleStatus] = useState<"loading" | "ready" | "error" | null>(null);
   // EXPORT FALLBACK: the headless render can't stream Google's 3D tiles frame-by-
   // frame, so a photoreal scene EXPORTS as a rich satellite + 3D-terrain +
   // 3D-buildings world (the closest faithful 3D look) instead of a flat map.
@@ -603,7 +613,7 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
             and only when the user has supplied a Google Maps key. */}
         {photoreal3d && (
           <React.Suspense fallback={null}>
-            <LazyGoogle3D apiKey={googleKey} onAttribution={setGoogleCredit} timeOfDay={(comp.basemap as any).timeOfDay ?? 13} sunDate={(comp.basemap as any).sunDate} />
+            <LazyGoogle3D apiKey={googleKey} onAttribution={setGoogleCredit} onStatus={setGoogleStatus} timeOfDay={(comp.basemap as any).timeOfDay ?? 13} sunDate={(comp.basemap as any).sunDate} />
           </React.Suspense>
         )}
         {/* ── Pass 1: Earth observation rasters — ALWAYS behind everything else.
@@ -679,6 +689,15 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
       {photoreal3d && (
         <div style={{ position: "absolute", left: 8, bottom: 6, zIndex: 5, fontSize: "1.1vh", color: "rgba(255,255,255,0.7)", textShadow: "0 1px 3px rgba(0,0,0,0.8)", pointerEvents: "none", maxWidth: "60%", lineHeight: 1.3 }}>
           {googleCredit || "Data: Google"}
+        </div>
+      )}
+      {/* Photoreal status — the preview must never fail silently. */}
+      {photoreal3d && !isRendering && googleStatus && googleStatus !== "ready" && (
+        <div style={{ position: "absolute", right: 10, top: 10, zIndex: 7, pointerEvents: "none", display: "flex", alignItems: "center", gap: 6, background: "rgba(4,6,15,0.8)", border: `1px solid ${googleStatus === "error" ? "rgba(255,90,68,0.5)" : "rgba(110,123,255,0.4)"}`, borderRadius: 8, padding: "6px 10px", fontSize: "1.3vh", color: googleStatus === "error" ? "#ff9d8f" : "rgba(255,255,255,0.85)", fontFamily: "Inter, sans-serif" }}>
+          <span style={{ width: "0.8vh", height: "0.8vh", borderRadius: "50%", background: googleStatus === "error" ? "#ff5a44" : "#6E7BFF", boxShadow: `0 0 8px ${googleStatus === "error" ? "#ff5a44" : "#6E7BFF"}` }} />
+          {googleStatus === "error"
+            ? "Google Earth 3D failed — enable the Map Tiles API on your key & check restrictions"
+            : "Loading Google Earth 3D… (visible from city zoom)"}
         </div>
       )}
 

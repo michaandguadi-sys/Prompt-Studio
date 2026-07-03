@@ -422,10 +422,8 @@ const NarrationCaptionField: React.FC = () => {
 const LookPanel: React.FC = () => {
   const look = (useEditor((s) => s.project.composition.look) ?? DEFAULT_LOOK) as Look;
   const patchComposition = useEditor((s) => s.patchComposition);
-  const proMode = useEditor((s) => s.proMode);
   const set = (patch: Partial<Look>) => patchComposition({ look: { ...look, ...patch } });
-  // Pro users default to advanced open; everyone gets an explicit toggle.
-  const [advanced, setAdvanced] = useState(proMode);
+  const [advanced, setAdvanced] = useState(true);
   return (
     <Section title="Look & grade">
       {/* Distinct one-tap looks */}
@@ -959,7 +957,8 @@ const GlobalSections: React.FC = () => {
   return (
     <>
       <MapStylePanel />
-      <QuickAdjust />
+      {/* Camera controls live ON the Camera layer (every project has one) —
+          no duplicate "camera move" section here. */}
       <AddonsPanel />
       <LookPanel />
       <ThemePanel />
