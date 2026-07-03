@@ -92,6 +92,22 @@ export const LAYER_REGISTRY: Record<LayerType, LayerMeta> = {
     type: "heatmap", label: "Heatmap", icon: "Flame", surface: "map",
     hint: "Density of points as a heat surface — driven by imported data.",
   },
+  earthlayer: {
+    type: "earthlayer", label: "Earth Observation", icon: "Satellite", surface: "map",
+    hint: "Real NASA satellite data — NDVI vegetation, nighttime lights, wildfire hotspots.",
+  },
+  radius: {
+    type: "radius", label: "Range rings", icon: "Radar", surface: "map", needsPlace: true,
+    hint: "Geodesic distance rings — \"within 500 km\", coverage, epicenter ripple.",
+  },
+  timestamp: {
+    type: "timestamp", label: "Timestamp", icon: "CalendarClock", surface: "frame",
+    hint: "An animated date or day counter that advances with the film.",
+  },
+  atmosphere: {
+    type: "atmosphere", label: "Atmosphere", icon: "CloudSnow", surface: "frame",
+    hint: "Cinematic weather over the frame — snow, rain, embers, dust, fog.",
+  },
 };
 
 /** Layers offered in the "Add" menu, in a sensible order (camera excluded —
@@ -104,6 +120,9 @@ export const ADDABLE_LAYERS: LayerMeta[] = [
   LAYER_REGISTRY.route,
   LAYER_REGISTRY.connections,
   LAYER_REGISTRY.spotlight,
+  LAYER_REGISTRY.radius,
+  LAYER_REGISTRY.timestamp,
+  LAYER_REGISTRY.atmosphere,
   LAYER_REGISTRY.flag,
   LAYER_REGISTRY.title,
   LAYER_REGISTRY.chart,

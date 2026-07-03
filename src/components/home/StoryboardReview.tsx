@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
-import { Clapperboard, Loader2, ArrowRight, ArrowLeft, ChevronLeft, ChevronRight, Trash2, GripVertical } from "lucide-react";
+import React, { useMemo, useRef, useState } from "react";
+import { Clapperboard, Loader2, ArrowRight, ArrowLeft, ChevronLeft, ChevronRight, Trash2, GripVertical, Mic, Play, Square, X as XIcon } from "lucide-react";
 import { SIGNATURE_STYLES, signatureStyleById } from "@/lib/presets/signatureStyles";
 import { fontStack } from "@/v2/doc/themes";
 import { loadAISettings } from "@/v2/ui/SettingsModal";
+import { loadVoiceoverSettings, generateVoiceover, hasVoiceoverKey, measureAudioDuration } from "@/lib/voiceover";
 
 /**
  * The Storyboard Review — the moment between "storyboard it" and the editor.
@@ -14,7 +15,7 @@ import { loadAISettings } from "@/v2/ui/SettingsModal";
  * in the chosen Signature Style so it FEELS like your film already.
  */
 
-type Beat = { stop: string; title: string; narration: string };
+type Beat = { stop: string; title: string; narration: string; energy?: string; pacing?: string; cameraIntent?: string };
 
 export type ReviewData = {
   project: any;
@@ -28,6 +29,10 @@ export type ReviewData = {
    *  Used to enrich the beat breakdown when the plan itself is thin (e.g. the
    *  no-AI heuristic path) so the review always shows a coherent storyline. */
   storyboard?: { pattern?: string; scenes?: { n: number; purpose: string; kind: string; locations: string[] }[] } | null;
+  /** The Director's editorial script (Phase 1 of the two-phase AI pipeline).
+   *  Beat titles and narration are from the Director's editorial intent, not
+   *  reverse-engineered from the Composer's plan — used to enrich the review. */
+  dirScript?: { thesis: string; arc?: string; inputType?: string; beats: { title: string; narration: string; focus: string; energy?: string; pacing?: string; cameraIntent?: string }[] } | null;
   /** Single-scene "Director's cut": no story rebuild on open — the runtime
    *  slider just sets the scene duration, narration is carried through. */
   single?: boolean;
@@ -38,17 +43,33 @@ function confColor(c: string): string {
   return c === "high" ? "#34d399" : c === "medium" ? "#fbbf24" : "#fb7185";
 }
 
-function beatsFromPlan(plan: any, narration: string[], storyboard?: ReviewData["storyboard"]): Beat[] {
+function beatsFromPlan(plan: any, narration: string[], storyboard?: ReviewData["storyboard"], dirScript?: ReviewData["dirScript"]): Beat[] {
   const stops: string[] = Array.isArray(plan?.cameraStops) ? plan.cameraStops : [];
   const titles: any[] = (plan?.layers ?? []).filter((l: any) => l?.kind === "title");
   const sbScenes = Array.isArray(storyboard?.scenes) ? storyboard!.scenes : [];
-  // Prefer the richest source for the beat COUNT — the framework storyboard is
-  // a complete, ordered structure even when the plan came back thin (no-AI path).
-  const n = Math.max(stops.length, titles.length, narration.length, sbScenes.length, 1);
+  const dirBeats = dirScript?.beats ?? [];
+
+  // Director beats are the gold standard when available: they represent the
+  // editorial intent of Phase 1 before the Composer built the animation.
+  if (dirBeats.length > 0) {
+    return dirBeats.map((b, i) => ({
+      stop: b.focus ?? stops[i] ?? plan?.focus ?? "",
+      title: b.title,
+      narration: narration[i] ?? b.narration ?? "",
+      energy: b.energy,
+      pacing: b.pacing,
+      cameraIntent: b.cameraIntent,
+    }));
+  }
+
+  // Narration lines are the most reliable beat count — the AI is explicitly
+  // instructed to emit exactly one narration line per beat. Fall back through
+  // titles → storyboard → cameraStops in decreasing reliability order.
+  const primaryN = narration.length || titles.length || sbScenes.length || stops.length || 1;
+  // Never show more beats than the richest available source (avoids empty phantom beats).
+  const n = Math.min(primaryN, Math.max(narration.length, titles.length, sbScenes.length, stops.length, 1));
   return Array.from({ length: n }, (_, i) => {
     const sb = sbScenes[i];
-    // The storyboard beat names the place + purpose; the plan's stops/titles win
-    // when present (they reflect the AI's specific geography).
     const stop = stops[i] ?? sb?.locations?.[0] ?? titles[i]?.text ?? plan?.focus ?? "";
     const title = (titles[i]?.text ?? stops[i] ?? sb?.purpose ?? plan?.focus ?? "Beat").toString();
     return { stop, title, narration: narration[i] ?? "" };
@@ -63,11 +84,46 @@ export const StoryboardReview: React.FC<{
   const sig = signatureStyleById(data.styleId) ?? null;
   const sw = sig?.swatches ?? ["#05060e", "#1a1d2e", "#6E7BFF"];
   const font = fontStack(sig?.fontDisplay ?? "Inter");
-  const [beats, setBeats] = useState<Beat[]>(() => beatsFromPlan(data.plan, data.narration, data.storyboard));
+  const [beats, setBeats] = useState<Beat[]>(() => beatsFromPlan(data.plan, data.narration, data.storyboard, data.dirScript));
   const [runtime, setRuntime] = useState<number>(Math.max(8, Math.min(60, Math.round(data.plan?.durationSec ?? 16))));
   const [dirty, setDirty] = useState(false);
   const [building, setBuilding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Voiceover generation
+  const [voUrl, setVoUrl] = useState<string | null>(null);
+  const [voDuration, setVoDuration] = useState(0);
+  const [voLoading, setVoLoading] = useState(false);
+  const [voError, setVoError] = useState<string | null>(null);
+  const [voPlaying, setVoPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const hasVoKey = hasVoiceoverKey();
+
+  const generateVO = async () => {
+    const narrationText = beats.map((b) => b.narration).filter(Boolean).join("  ");
+    if (!narrationText.trim()) { setVoError("Add narration to beats first."); return; }
+    setVoLoading(true); setVoError(null);
+    try {
+      const settings = loadVoiceoverSettings();
+      const { dataUrl, durationSec } = await generateVoiceover(narrationText, settings);
+      const realDur = await measureAudioDuration(dataUrl);
+      setVoUrl(dataUrl);
+      setVoDuration(realDur > 0 ? realDur : durationSec);
+    } catch (e: any) { setVoError(e.message ?? "Voiceover failed — check your ElevenLabs key in Settings."); }
+    finally { setVoLoading(false); }
+  };
+
+  const togglePlay = () => {
+    if (!voUrl) return;
+    if (!audioRef.current) { audioRef.current = new Audio(voUrl); audioRef.current.onended = () => setVoPlaying(false); }
+    if (voPlaying) { audioRef.current.pause(); setVoPlaying(false); }
+    else { audioRef.current.src = voUrl; audioRef.current.play().catch(() => setVoPlaying(false)); setVoPlaying(true); }
+  };
+
+  const discardVO = () => {
+    audioRef.current?.pause(); audioRef.current = null;
+    setVoUrl(null); setVoDuration(0); setVoPlaying(false); setVoError(null);
+  };
 
   const edit = (fn: (b: Beat[]) => Beat[]) => { setBeats(fn); setDirty(true); };
   const move = (i: number, d: -1 | 1) => edit((b) => {
@@ -82,10 +138,11 @@ export const StoryboardReview: React.FC<{
     // Single-scene cut: never re-author into a story — just bake the runtime
     // into the scene duration(s) and open. Narration carries through.
     if (data.single) {
-      const proj = data.project;
+      const proj = structuredClone ? structuredClone(data.project) : JSON.parse(JSON.stringify(data.project));
       try {
         if (proj?.composition) proj.composition.durationSec = runtime;
         if (Array.isArray(proj?.scenes)) for (const s of proj.scenes) if (s?.composition) s.composition.durationSec = runtime;
+        if (voUrl && proj?.composition) proj.composition.voiceover = { url: voUrl, durationSec: voDuration };
       } catch { /* keep original duration */ }
       onOpen(proj, beats.map((b) => b.narration));
       return;
@@ -121,6 +178,8 @@ export const StoryboardReview: React.FC<{
       });
       const d = await r.json();
       if (!r.ok || !d?.project) { setError(d?.error ?? "Couldn't rebuild — opening the original instead."); setBuilding(false); return; }
+      // Attach voiceover to the rebuilt project if one was generated.
+      if (voUrl && d.project?.composition) d.project.composition.voiceover = { url: voUrl, durationSec: voDuration };
       onOpen(d.project, beats.map((b) => b.narration));
     } catch { setError("Network error."); setBuilding(false); }
   };
@@ -142,8 +201,10 @@ export const StoryboardReview: React.FC<{
               {(data.plan?.title ?? (data.single ? "Your animation" : "Your story")).toString().toUpperCase()}
             </div>
             <div className="mt-1 text-[11px] text-white/45">
-              {data.storyboard?.pattern && !data.single && <><span style={{ color: sw[2] }}>{data.storyboard.pattern}</span> · </>}
+              {data.dirScript?.arc && !data.single && <><span style={{ color: sw[2], textTransform: "capitalize" }}>{data.dirScript.arc}</span> · </>}
+              {!data.dirScript?.arc && data.storyboard?.pattern && !data.single && <><span style={{ color: sw[2] }}>{data.storyboard.pattern}</span> · </>}
               {data.single ? <>1 scene · {runtime}s</> : <>{beats.length} beats · ~{Math.round(perBeat)}s each</>} {sig ? <>· <span style={{ color: sw[2] }}>{sig.name}</span></> : "· Director's choice"}
+              {data.dirScript?.inputType && <> · <span style={{ opacity: 0.55 }}>{data.dirScript.inputType === "voiceover" ? "narration" : data.dirScript.inputType === "brief" ? "story brief" : "topic"}</span></>}
             </div>
           </div>
           <button onClick={onClose} className="shrink-0 rounded-lg border border-white/10 px-3 py-1.5 text-[11px] text-white/55 transition-colors hover:border-white/30 hover:text-white">
@@ -157,7 +218,7 @@ export const StoryboardReview: React.FC<{
             <div className="mb-2 flex items-center justify-between">
               <span className="text-[10px] font-semibold uppercase tracking-[0.25em] text-white/45">Director&apos;s brief</span>
               {data.verification.provider === "ai"
-                ? <span className="rounded-full border px-2 py-0.5 text-[9px] font-semibold" style={{ borderColor: `${sw[2]}66`, color: sw[2] }}>✦ AI-researched</span>
+                ? <span className="rounded-full border px-2 py-0.5 text-[9px] font-semibold" style={{ borderColor: `${sw[2]}66`, color: sw[2] }}>{data.dirScript ? "✦ Phase 1 · Director" : "✦ AI-researched"}</span>
                 : <span className="rounded-full border border-emerald-400/40 px-2 py-0.5 text-[9px] font-semibold text-emerald-300">⚡ Built-in logic</span>}
             </div>
             {data.verification.thesis && <div className="text-[13px] leading-snug text-white/85">“{data.verification.thesis}”</div>}
@@ -202,12 +263,27 @@ export const StoryboardReview: React.FC<{
                   <GripVertical size={11} className="text-white/15" />
                 </div>
                 <div className="min-w-0 flex-1 space-y-1.5">
-                  <input
-                    value={b.title}
-                    onChange={(e) => edit((bs) => bs.map((x, k) => (k === i ? { ...x, title: e.target.value } : x)))}
-                    className="w-full bg-transparent text-[15px] font-bold uppercase tracking-wide text-white focus:outline-none"
-                    style={{ fontFamily: font }}
-                  />
+                  <div className="flex items-start gap-2">
+                    <input
+                      value={b.title}
+                      onChange={(e) => edit((bs) => bs.map((x, k) => (k === i ? { ...x, title: e.target.value } : x)))}
+                      className="min-w-0 flex-1 bg-transparent text-[15px] font-bold uppercase tracking-wide text-white focus:outline-none"
+                      style={{ fontFamily: font }}
+                    />
+                    {b.energy && (
+                      <span className="mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em]" style={{
+                        background: { calm: "rgba(56,189,248,0.12)", building: "rgba(251,146,60,0.12)", tension: "rgba(248,113,113,0.12)", reveal: "rgba(167,139,250,0.12)", payoff: "rgba(251,191,36,0.12)" }[b.energy] ?? "rgba(255,255,255,0.06)",
+                        color: { calm: "#38bdf8", building: "#fb923c", tension: "#f87171", reveal: "#a78bfa", payoff: "#fbbf24" }[b.energy] ?? "rgba(255,255,255,0.4)",
+                      }}>{b.energy}</span>
+                    )}
+                    <span className="mt-0.5 shrink-0 rounded-full bg-white/8 px-2 py-0.5 text-[9px] font-mono tabular-nums text-white/35">~{Math.round(perBeat)}s</span>
+                  </div>
+                  {b.stop && (
+                    <div className="flex items-center gap-1 text-[10px] text-white/35">
+                      <span>📍</span>
+                      <span className="truncate">{b.stop}</span>
+                    </div>
+                  )}
                   <textarea
                     value={b.narration}
                     onChange={(e) => edit((bs) => bs.map((x, k) => (k === i ? { ...x, narration: e.target.value } : x)))}
@@ -226,6 +302,47 @@ export const StoryboardReview: React.FC<{
               </div>
             ))}
           </div>
+          {!data.single && (
+            <button
+              onClick={() => edit((bs) => [...bs, { stop: "", title: "NEW BEAT", narration: "" }])}
+              className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/10 py-2 text-[11px] font-medium text-white/30 transition-colors hover:border-white/25 hover:text-white/60"
+            >
+              + Add beat
+            </button>
+          )}
+        </div>
+
+        {/* Voiceover generation strip */}
+        <div className="border-t border-white/[0.06] px-6 py-3">
+          {!voUrl ? (
+            <div className="flex items-center gap-3">
+              <Mic size={13} style={{ color: hasVoKey ? sw[2] : "rgba(255,255,255,0.2)" }} />
+              {hasVoKey ? (
+                <button
+                  onClick={generateVO}
+                  disabled={voLoading}
+                  className="flex items-center gap-1.5 text-[11px] font-semibold transition-opacity hover:opacity-80 disabled:opacity-50"
+                  style={{ color: sw[2] }}
+                >
+                  {voLoading ? <><Loader2 size={11} className="animate-spin" /> Generating narration voiceover…</> : "Generate narration voiceover"}
+                </button>
+              ) : (
+                <span className="text-[11px] text-white/30">Add ElevenLabs key in <span style={{ color: sw[2] }}>Settings</span> to generate a real narrator voiceover</span>
+              )}
+              {voError && <span className="ml-2 text-[11px] text-red-400/80">{voError}</span>}
+            </div>
+          ) : (
+            <div className="flex items-center gap-3">
+              <button onClick={togglePlay} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/20 text-white/70 hover:text-white transition-colors">
+                {voPlaying ? <Square size={11} fill="currentColor" /> : <Play size={11} fill="currentColor" />}
+              </button>
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] font-semibold text-white/80">Narration voiceover ready</div>
+                <div className="text-[10px] text-white/40">{Math.round(voDuration)}s · will bake into exported video</div>
+              </div>
+              <button onClick={discardVO} className="rounded p-1 text-white/30 hover:text-red-400 transition-colors"><XIcon size={13} /></button>
+            </div>
+          )}
         </div>
 
         {/* Footer: runtime + build */}

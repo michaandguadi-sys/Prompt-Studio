@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Player, type PlayerRef } from "@remotion/player";
+import { Frame } from "lucide-react";
 import { MapComposition } from "../render/MapComposition";
 import { StoryComposition, storyFrames } from "../render/StoryComposition";
 import { dimsFor } from "../doc/schema";
@@ -9,6 +10,15 @@ import { useEditor } from "../store/editor";
 import { useTier } from "@/hooks/useTier";
 import { PreviewOverlay } from "./PreviewOverlay";
 import { LayerHalo } from "./LayerHalo";
+
+type SafeZoneMode = "off" | "title" | "social";
+const SAFEZONE_KEY = "mapanisy-safezones";
+const nextZoneMode: Record<SafeZoneMode, SafeZoneMode> = { off: "title", title: "social", social: "off" };
+const zoneLabel: Record<SafeZoneMode, string> = {
+  off: "Guides off",
+  title: "Title-safe guides",
+  social: "Social UI zones",
+};
 
 /** Center canvas — plays the active scene (editable) OR the whole story sequence. */
 export const Canvas: React.FC = () => {
@@ -23,6 +33,14 @@ export const Canvas: React.FC = () => {
   const { width, height } = dimsFor(comp.aspect);
   const fps = comp.fps;
   const stageRef = useRef<HTMLDivElement>(null);
+
+  // Safe-zone guides — show where platform UI covers the frame before posting.
+  const [safeZones, setSafeZones] = useState<SafeZoneMode>(() => {
+    if (typeof window === "undefined") return "off";
+    const v = localStorage.getItem(SAFEZONE_KEY);
+    return v === "title" || v === "social" ? v : "off";
+  });
+  useEffect(() => { localStorage.setItem(SAFEZONE_KEY, safeZones); }, [safeZones]);
 
   // Click-to-select on the preview: geometric hit-test against rendered overlay
   // elements (they're pointer-events:none, so we test bounding rects and pick the
@@ -134,10 +152,68 @@ export const Canvas: React.FC = () => {
               <PreviewOverlay containerRef={stageRef} />
               {/* The Halo — contextual quick-actions blooming at the selected element. */}
               <LayerHalo containerRef={stageRef} />
+              {safeZones !== "off" && <SafeZoneGuides mode={safeZones} vertical={comp.aspect === "9:16"} />}
             </>
           )}
         </div>
+
+        {/* Safe-zone toggle — floats over the drafting table, never the frame. */}
+        <button
+          onClick={() => setSafeZones((m) => nextZoneMode[m])}
+          title={`${zoneLabel[safeZones]} — click to cycle (off → title-safe → social UI)`}
+          className={`absolute right-4 top-4 z-10 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10.5px] font-medium backdrop-blur transition-colors ${
+            safeZones === "off"
+              ? "border-line/60 bg-paper/70 text-graphite-muted hover:text-graphite"
+              : "border-iris/40 bg-iris/10 text-iris"
+          }`}
+        >
+          <Frame size={12} /> {zoneLabel[safeZones]}
+        </button>
       </div>
     </div>
   );
 };
+
+/**
+ * Safe-zone guides drawn over the preview (never rendered into the video).
+ *
+ * "title"  — broadcast convention: action-safe (5% inset, dashed) and
+ *            title-safe (10% inset, solid) rectangles. Keep text inside.
+ * "social" — where platform UI actually covers the frame. On 9:16 that's the
+ *            TikTok / Reels / Shorts union: top status area, right-side action
+ *            rail (like/comment/share), bottom caption + progress band. On
+ *            16:9 / 1:1 it's the subtitle band platforms draw at the bottom.
+ */
+const SafeZoneGuides: React.FC<{ mode: "title" | "social"; vertical: boolean }> = ({ mode, vertical }) => (
+  <div className="pointer-events-none absolute inset-0 z-[5]" aria-hidden>
+    {mode === "title" ? (
+      <>
+        <div className="absolute rounded-lg border border-dashed border-white/40" style={{ inset: "5%" }} />
+        <div className="absolute rounded-lg border border-white/60" style={{ inset: "10%" }} />
+        <span className="absolute left-[10.5%] top-[10.5%] rounded bg-black/50 px-1.5 py-0.5 text-[9px] font-semibold tracking-wide text-white/80">
+          TITLE SAFE
+        </span>
+      </>
+    ) : vertical ? (
+      <>
+        {/* Top: status bar + camera controls */}
+        <div className="absolute inset-x-0 top-0 bg-red-500/[0.14]" style={{ height: "8%" }} />
+        {/* Right rail: like / comment / share / profile buttons (lower half) */}
+        <div className="absolute right-0 bg-red-500/[0.14]" style={{ width: "15%", top: "42%", bottom: "10%" }} />
+        {/* Bottom: caption, sound, progress bar */}
+        <div className="absolute inset-x-0 bottom-0 bg-red-500/[0.14]" style={{ height: "17%" }} />
+        <span className="absolute bottom-[18%] left-1/2 -translate-x-1/2 rounded bg-black/55 px-2 py-0.5 text-[9px] font-semibold tracking-wide text-white/85">
+          RED = COVERED BY TIKTOK / REELS / SHORTS UI
+        </span>
+      </>
+    ) : (
+      <>
+        {/* Landscape/square: platform subtitle + control band at the bottom */}
+        <div className="absolute inset-x-0 bottom-0 bg-red-500/[0.14]" style={{ height: "12%" }} />
+        <span className="absolute bottom-[13%] left-1/2 -translate-x-1/2 rounded bg-black/55 px-2 py-0.5 text-[9px] font-semibold tracking-wide text-white/85">
+          RED = SUBTITLES / PLAYER CONTROLS
+        </span>
+      </>
+    )}
+  </div>
+);

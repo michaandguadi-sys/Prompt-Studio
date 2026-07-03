@@ -13,6 +13,7 @@ import { Inspector } from "./Inspector";
 import { AiBar } from "./AiBar";
 import { ExportButton } from "./ExportButton";
 import { RenderButton } from "./RenderButton";
+import { RenderQueue } from "./RenderQueue";
 import { ProjectMenu } from "./ProjectMenu";
 import { Timeline } from "./Timeline";
 import { SceneStrip } from "./SceneStrip";
@@ -158,6 +159,7 @@ export const Editor: React.FC = () => {
           <button onClick={() => setRestyleOpen(true)} title="Restyle your render with AI" className={accentBtn}><Wand2 size={13} /> Restyle</button>
           <span className="mx-1 h-5 w-px bg-line" />
           <RenderButton />
+          <RenderQueue />
           <ExportButton />
           <button onClick={() => setSettingsOpen(true)} title="API keys & AI providers" className={iconBtn}><KeyRound size={15} /></button>
         </div>

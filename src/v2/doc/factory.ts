@@ -49,12 +49,16 @@ export function createLayer(type: LayerType, overrides: Record<string, unknown> 
     bubble: { type: "bubble", name: "Bubble map", timing, data: [], metric: "", unit: "", maxSizePx: 140, showLabels: true, showLegend: true, animate: "grow" },
     flow: { type: "flow", name: "Flow arcs", timing, data: [], metric: "", unit: "", color: "#2fe0ff", maxWidthPx: 14, curve: 0.3, animate: "draw", showLegend: false },
     heatmap: { type: "heatmap", name: "Heatmap", timing, data: [], metric: "", unit: "", radius: 40, intensity: 1, colorLow: "#1a237e", colorHigh: "#ff3d00", showLegend: false },
+    earthlayer: { type: "earthlayer", name: "Earth Observation", timing, datasetId: "MODIS_Terra_CorrectedReflectance_TrueColor", date: "latest", tileFormat: "jpg", tileMatrix: "GoogleMapsCompatible_Level9", maxzoom: 9, opacity: 0.75, label: "", attribution: "NASA GIBS / Earthdata" },
     image: { type: "image", name: "Image", timing, url: "", anchor: { kind: "coord", lon: 0, lat: 20 } },
     marker: { type: "marker", name: "Marker", timing, anchor: { lon: 0, lat: 20 }, icon: "pin", color: "#ff5a44" },
     annotation: { type: "annotation", name: "Annotation", timing, anchor: { lon: 0, lat: 20 }, text: "Annotation", accent: DEFAULT_ACCENT },
     connections: { type: "connections", name: "Connections", timing, mode: "hub", hub: null, points: [], color: DEFAULT_ACCENT, dotColor: "#ffffff" },
     spotlight: { type: "spotlight", name: "Spotlight", timing, anchor: { lon: 0, lat: 20 } },
     track: { type: "track", name: "Track", timing, points: [], segments: [] },
+    radius: { type: "radius", name: "Range rings", timing, center: { lon: 0, lat: 20 }, color: DEFAULT_ACCENT },
+    timestamp: { type: "timestamp", name: "Timestamp", timing, accent: DEFAULT_ACCENT },
+    atmosphere: { type: "atmosphere", name: "Atmosphere", timing: { ...timing, inSec: 0.2 } },
   };
   return LayerSchema.parse({ ...base, ...byType[type], ...overrides });
 }

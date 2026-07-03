@@ -1,380 +1,550 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import Link from "next/link";
-import dynamic from "next/dynamic";
-import {
-  ArrowRight, Route, Film, Share2, Check, ChevronDown,
-  Globe2, MountainSnow, MousePointer2, ShieldCheck,
-} from "lucide-react";
+import Map, { type MapRef } from "react-map-gl/mapbox";
+import "mapbox-gl/dist/mapbox-gl.css";
 
-const SERIF = "Newsreader, 'Playfair Display', Georgia, serif";
-const GRAD = "linear-gradient(105deg,#9CA6FF,#2fe0ff)";
+const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
+const MAPBOX_STYLE = "mapbox://styles/michaandguadi/cmn4izmw2000201sl57y7aw5p";
+
+const CAM_START = { lng: 80,    lat: 42,   zoom: 2.1, pitch:  0, bearing:  0 };
+const CAM_END   = { lng: 126.6, lat: 45.8, zoom: 11,  pitch: 62, bearing: 26 };
+
+// ─── palette ─────────────────────────────────────────────────────────────────
+const GOLD    = "#f59e0b";
+const BG      = "#0a0906";
+const CARD_BG = "#111008";
+const CREAM   = "#fef3c7";
+const BORDER  = "rgba(245,158,11,0.10)";
+const BLIGHT  = "rgba(245,158,11,0.38)";
+const SANS    = "'Hanken Grotesk', system-ui, sans-serif";
+const HEAD    = "'Montserrat', system-ui, sans-serif";
+
+// ─── math ─────────────────────────────────────────────────────────────────────
+const lerp  = (a: number, b: number, t: number) => a + (b - a) * t;
 const clamp = (v: number, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, v));
-const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+const ease  = (t: number) =>
+  t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
-// Real satellite + 3-D terrain flythrough — lazy-loaded (maplibre + tiles are
-// heavy), so the hero paints instantly and the map chunk arrives as you scroll.
-const FlyThroughMapLazy = dynamic(() => import("./FlyThroughMap").then((m) => m.FlyThroughMap), {
-  ssr: false,
-  loading: () => (
-    <section id="how" className="relative" style={{ height: "400vh" }}>
-      <div className="sticky top-0 flex h-screen items-center justify-center bg-[#05060e]">
-        <div className="h-6 w-6 rounded-full border-2 border-white/15 border-t-iris animate-spin" />
-      </div>
-    </section>
-  ),
-});
+// ─── data ─────────────────────────────────────────────────────────────────────
 
-/* ───────────────────────── hooks ───────────────────────── */
+const FEATURES = [
+  { icon: "🗺", title: "Map Studio",    desc: "Fly-to routes, city zooms, region highlights, cinematic pushes — driven by a live Mapbox map. Any geography on Earth, animated in seconds." },
+  { icon: "📊", title: "Data Viz",      desc: "Animated choropleth maps, bubble charts, and weighted flow lines. The kind of overlays you see in NYT and Vox explainers — no code required." },
+  { icon: "🎨", title: "Brand Presets", desc: "Set your colors, fonts, and map style once. Every scene you generate automatically inherits your brand with zero extra work." },
+  { icon: "🎞", title: "4K Export",     desc: "Renders to broadcast-quality MP4 via Remotion. FCPXML for Final Cut Pro, DaVinci Resolve-compatible, or share a public live-preview link." },
+  { icon: "▶",  title: "Live Preview",  desc: "Scrub the timeline, tweak camera angles, and adjust overlays — all in real time before you commit to a render. What you see is what you export." },
+  { icon: "✨", title: "Free to Start", desc: "Every feature is unlocked on the free plan. Exported videos carry a small watermark — upgrade to remove it and unlock cloud rendering." },
+];
 
-function useScrollY() {
-  const [y, setY] = useState(0);
-  useEffect(() => {
-    let raf = 0;
-    const on = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => setY(window.scrollY)); };
-    window.addEventListener("scroll", on, { passive: true });
-    on();
-    return () => { window.removeEventListener("scroll", on); cancelAnimationFrame(raf); };
-  }, []);
-  return y;
-}
-
-/** Scroll progress 0→1 across a tall section's pin range. */
-function useSectionProgress(ref: React.RefObject<HTMLElement | null>) {
-  const [p, setP] = useState(0);
-  useEffect(() => {
-    let raf = 0;
-    const on = () => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        const el = ref.current; if (!el) return;
-        const r = el.getBoundingClientRect();
-        const total = r.height - window.innerHeight;
-        const passed = Math.min(Math.max(-r.top, 0), Math.max(total, 1));
-        setP(total > 0 ? passed / total : 0);
-      });
-    };
-    window.addEventListener("scroll", on, { passive: true });
-    window.addEventListener("resize", on);
-    on();
-    return () => { window.removeEventListener("scroll", on); window.removeEventListener("resize", on); cancelAnimationFrame(raf); };
-  }, [ref]);
-  return p;
-}
-
-/** Fire `true` once the element scrolls into view. */
-function useInView(ref: React.RefObject<HTMLElement | null>, threshold = 0.3) {
-  const [seen, setSeen] = useState(false);
-  useEffect(() => {
-    const el = ref.current; if (!el) return;
-    const io = new IntersectionObserver(([e]) => { if (e.isIntersecting) { setSeen(true); io.disconnect(); } }, { threshold });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [ref, threshold]);
-  return seen;
-}
-
-function useCountUp(target: number, run: boolean, dur = 1400) {
-  const [n, setN] = useState(0);
-  useEffect(() => {
-    if (!run) return;
-    let raf = 0; const t0 = performance.now();
-    const tick = (t: number) => {
-      const p = Math.min(1, (t - t0) / dur);
-      setN(Math.round(target * (1 - Math.pow(1 - p, 3))));
-      if (p < 1) raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [run, target, dur]);
-  return n;
-}
-
-const Reveal: React.FC<{ children: React.ReactNode; delay?: number; y?: number; className?: string }> = ({ children, delay = 0, y = 30, className = "" }) => {
-  const ref = useRef<HTMLDivElement>(null);
-  const seen = useInView(ref, 0.16);
-  return (
-    <div ref={ref} className={className} style={{ opacity: seen ? 1 : 0, transform: seen ? "none" : `translateY(${y}px)`, transition: `opacity .85s cubic-bezier(.22,1,.36,1) ${delay}ms, transform .85s cubic-bezier(.22,1,.36,1) ${delay}ms` }}>
-      {children}
-    </div>
-  );
+type BillingPeriod = "monthly" | "yearly" | "lifetime";
+const PRO_PRICE: Record<BillingPeriod, { price: string; suffix: string; note?: string }> = {
+  monthly:  { price: "€9",   suffix: "/month" },
+  yearly:   { price: "€79",  suffix: "/year",   note: "Save 27% vs monthly" },
+  lifetime: { price: "€149", suffix: " once",   note: "Pay once. Use forever. No subscriptions." },
 };
 
-/* ───────────────────────── loader ───────────────────────── */
+const FAQ_DATA: { q: string; a: string }[] = [
+  {
+    q: "How do I animate a map for YouTube?",
+    a: "With Prompt Studio, describe your story or paste a script and the AI Director builds camera moves, route animations, and timing automatically. Animate a route between any two cities, fly into a location cinematically, or highlight an entire country — then export 4K MP4 ready for your YouTube edit. No After Effects needed.",
+  },
+  {
+    q: "What is the best free map animation tool for YouTube creators?",
+    a: "Prompt Studio's free plan unlocks every feature — animate routes, fly to cities, highlight regions, and export MP4. The free plan adds a small 'Made with Prompt Studio' watermark that you can remove by upgrading. It's the most fully-featured free documentary map animation tool available.",
+  },
+  {
+    q: "Can I make Vox-style or Johnny Harris-style map animations without After Effects?",
+    a: "Yes — that's exactly what Prompt Studio is built for. You get the cinematic fly-throughs, smooth city zooms, country highlight fills, and animated routes that define the Vox and Johnny Harris aesthetic, without touching After Effects, plugins, or motion design software.",
+  },
+  {
+    q: "How do documentary makers animate maps?",
+    a: "Traditionally, teams used After Effects with expensive plugins — a process that took hours per map shot. Prompt Studio replaces that entirely: describe your story, choose a camera style, and export 4K footage in minutes. The AI Director handles camera timing, route drawing, and geographic framing automatically.",
+  },
+  {
+    q: "What is a Johnny Harris-style map animation?",
+    a: "It's the signature look of documentary YouTube — smooth fly-throughs of real-world satellite imagery, animated route lines, dramatic country reveals, and a dark cinematic grade. Prompt Studio is specifically designed to produce this look, powered by live Mapbox maps and Remotion rendering.",
+  },
+  {
+    q: "Can I animate maps for travel video content?",
+    a: "Absolutely. Import a GPX track from your hike, cycle, or road trip and watch it animate on a cinematic map. Or describe a travel route in plain text — 'from Vienna to Istanbul by train' — and the AI Director builds the animation. Export in any aspect ratio for YouTube, Shorts, or Reels.",
+  },
+  {
+    q: "What video formats does Prompt Studio export to?",
+    a: "Prompt Studio exports to 4K MP4 (H.264) via Remotion, FCPXML for Final Cut Pro, and DaVinci Resolve-compatible formats. You can also export animated GIFs or share a public live-preview link. Cloud rendering is available on pay-as-you-go and Pro plans.",
+  },
+  {
+    q: "How long does it take to make a map animation?",
+    a: "Most animations are ready to preview in under 60 seconds. Rendering to 4K MP4 takes 1–4 minutes depending on length. Compare that to the 2–4 hours a motion designer spends in After Effects for the same result.",
+  },
+];
 
-const MapLoader: React.FC<{ done: boolean }> = ({ done }) => (
-  <div
-    className="fixed inset-0 z-[100] flex flex-col items-center justify-center"
-    style={{ background: "radial-gradient(120% 90% at 50% 30%, #0b1024 0%, #05060e 70%)", opacity: done ? 0 : 1, pointerEvents: done ? "none" : "auto", transition: "opacity 0.9s ease 0.1s" }}
-    aria-hidden={done}
-  >
-    <svg viewBox="0 0 200 200" className="h-40 w-40" style={{ filter: "drop-shadow(0 0 24px rgba(110,123,255,0.5))" }}>
-      <defs>
-        <radialGradient id="ld-g" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="#6E7BFF" stopOpacity="0.35" />
-          <stop offset="100%" stopColor="#6E7BFF" stopOpacity="0" />
-        </radialGradient>
-      </defs>
-      <circle cx="100" cy="100" r="90" fill="url(#ld-g)" />
-      {[34, 58, 82].map((r, k) => (
-        <circle key={r} cx="100" cy="100" r={r} fill="none" stroke="#6E7BFF" strokeWidth="1" strokeOpacity={0.18 + k * 0.04}>
-          <animate attributeName="r" values={`${r};${r + 8};${r}`} dur="3.4s" begin={`${k * 0.4}s`} repeatCount="indefinite" />
-        </circle>
-      ))}
-      <path d="M30 120 Q 80 40 150 70" fill="none" stroke="#2fe0ff" strokeWidth="2" strokeLinecap="round" strokeDasharray="200" strokeDashoffset="200">
-        <animate attributeName="stroke-dashoffset" from="200" to="0" dur="1.6s" fill="freeze" />
-      </path>
-      <circle cx="150" cy="70" r="4" fill="#2fe0ff">
-        <animate attributeName="r" values="4;7;4" dur="1.2s" begin="1.5s" repeatCount="indefinite" />
-      </circle>
-      {[[60, 150], [120, 140], [80, 95], [140, 110]].map(([x, y], k) => (
-        <circle key={k} cx={x} cy={y} r="2" fill="#9CA6FF">
-          <animate attributeName="opacity" values="0.25;1;0.25" dur="2.2s" begin={`${k * 0.5}s`} repeatCount="indefinite" />
-        </circle>
-      ))}
-    </svg>
-    <div className="mt-6 text-[11px] font-semibold uppercase tracking-[0.5em] text-white/70" style={{ paddingLeft: "0.5em" }}>Mapanisy</div>
-    <div className="mt-3 h-[3px] w-40 overflow-hidden rounded-full bg-white/10">
-      <div className="h-full w-1/2 rounded-full" style={{ background: "linear-gradient(90deg,transparent,#6E7BFF,transparent)", animation: "loaderSweep 1.4s cubic-bezier(.5,0,.3,1) infinite" }} />
-    </div>
-  </div>
-);
+// ─── main component ───────────────────────────────────────────────────────────
 
-/* ───────────────────────── page ───────────────────────── */
+export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) {
+  const mapRef      = useRef<MapRef>(null);
+  const heroRef     = useRef<HTMLElement>(null);
+  const rafRef      = useRef<number | null>(null);
+  const progressRef = useRef(0);
+  const [scrollProgress, setScrollProgress] = useState(0);
+  const [billing, setBilling] = useState<BillingPeriod>("lifetime");
 
-export const LandingExperience: React.FC = () => {
-  const [done, setDone] = useState(false);
-  useEffect(() => { const t = setTimeout(() => setDone(true), 2100); return () => clearTimeout(t); }, []);
-  const y = useScrollY();
-  const navSolid = y > 40;
+  const applyCamera = useCallback((progress: number) => {
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+    const e = ease(progress);
+    map.jumpTo({
+      center:  [lerp(CAM_START.lng, CAM_END.lng, e), lerp(CAM_START.lat, CAM_END.lat, e)],
+      zoom:    lerp(CAM_START.zoom, CAM_END.zoom, e),
+      pitch:   lerp(CAM_START.pitch, CAM_END.pitch, e),
+      bearing: lerp(CAM_START.bearing, CAM_END.bearing, e),
+    });
+  }, []);
+
+  useEffect(() => {
+    const onScroll = () => {
+      const hero = heroRef.current;
+      if (!hero) return;
+      const total = hero.offsetHeight - window.innerHeight;
+      progressRef.current = clamp(total > 0 ? window.scrollY / total : 0);
+      if (rafRef.current) return;
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
+        const p = progressRef.current;
+        setScrollProgress(p);
+        applyCamera(p);
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [applyCamera]);
+
+  const handleMapLoad = useCallback(() => {
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+    try {
+      (map as any).setFog({
+        color: "rgb(18,13,8)", "high-color": "rgb(55,36,8)",
+        "horizon-blend": 0.04, "space-color": "rgb(5,3,1)", "star-intensity": 0.38,
+      });
+    } catch { /* style may not support fog */ }
+    const hero = heroRef.current;
+    if (hero) {
+      const total = hero.offsetHeight - window.innerHeight;
+      applyCamera(clamp(total > 0 ? window.scrollY / total : 0));
+    }
+  }, [applyCamera]);
+
+  const textOpacity  = clamp((scrollProgress - 0.52) / 0.38);
+  const scrollHintOp = clamp(1 - scrollProgress / 0.18);
 
   return (
-    <div className="relative min-h-screen overflow-x-clip bg-[#05060e] text-white antialiased">
-      <MapLoader done={done} />
+    <div style={{ background: BG, color: CREAM, minHeight: "100vh", fontFamily: SANS }}>
 
-      {/* Persistent top scrim — guarantees nav contrast over the flythrough from frame 0. */}
-      <div className="pointer-events-none fixed inset-x-0 top-0 z-40 h-24" aria-hidden style={{ background: "linear-gradient(to bottom, rgba(5,6,14,0.88), rgba(5,6,14,0.42) 45%, transparent)" }} />
-
-      {/* ── Nav ── */}
-      <header className={`fixed inset-x-0 top-0 z-50 transition-all duration-500 ${navSolid ? "border-b border-white/10 bg-[#05060e]/70 backdrop-blur-xl" : "border-b border-transparent"}`}>
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3.5">
-          <div className="flex items-center gap-2.5">
-            <span className="flex h-8 w-8 items-center justify-center rounded-xl text-white" style={{ background: "linear-gradient(135deg,#6E7BFF,#4F59E0)", boxShadow: "0 6px 20px -6px rgba(110,123,255,0.8)" }}><span className="text-[14px] font-black">M</span></span>
-            <span className="text-[17px] font-medium tracking-tight" style={{ fontFamily: SERIF }}>Mapanisy</span>
-          </div>
-          <nav className="hidden items-center gap-7 text-[13px] text-white/55 md:flex">
-            <a href="#how" className="transition-colors hover:text-white">How it works</a>
-            <a href="#features" className="transition-colors hover:text-white">Features</a>
-            <a href="#pricing" className="transition-colors hover:text-white">Pricing</a>
-            <a href="#faq" className="transition-colors hover:text-white">FAQ</a>
-          </nav>
-          <div className="flex items-center gap-2.5">
-            <Link href="/sign-in" className="text-[13px] text-white/60 transition-colors hover:text-white">Sign in</Link>
-            <Link href="/sign-up" className="rounded-lg px-4 py-2 text-[13px] font-semibold text-white transition-transform hover:-translate-y-0.5" style={{ background: "linear-gradient(135deg,#6E7BFF,#4F59E0)", boxShadow: "0 8px 24px -8px rgba(110,123,255,0.7)" }}>Start free</Link>
-          </div>
-        </div>
+      {/* ── Nav ──────────────────────────────────────────────────────────────── */}
+      <header style={{
+        position: "fixed", top: 0, left: 0, right: 0, zIndex: 50,
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "16px 40px",
+        background: "rgba(10,9,6,0.82)", backdropFilter: "blur(18px)",
+        WebkitBackdropFilter: "blur(18px)", borderBottom: "1px solid rgba(245,158,11,0.10)",
+      }}>
+        <div style={{ fontSize: 17, fontWeight: 700, letterSpacing: "-0.02em", color: CREAM }}>Prompt Studio</div>
+        <nav style={{ display: "flex", alignItems: "center", gap: 28 }}>
+          {[["Features","#features"],["Pricing","#pricing"],["FAQ","#faq"]].map(([l,h]) => (
+            <a key={l} href={h} style={{ fontSize: 13, color: "rgba(254,243,199,0.42)", textDecoration: "none" }}
+              aria-label={`Navigate to ${l} section`}>{l}</a>
+          ))}
+          {signedIn ? (
+            <Link href="/home"
+              style={{ fontSize: 13, fontWeight: 700, color: "#1a0c00", textDecoration: "none", padding: "9px 20px", background: GOLD }}
+              aria-label="Open the studio">
+              Open studio →
+            </Link>
+          ) : (
+            <>
+              <Link href="/sign-in" style={{ fontSize: 13, color: "rgba(254,243,199,0.42)", textDecoration: "none" }}>Sign in</Link>
+              <Link href="/sign-up"
+                style={{ fontSize: 13, fontWeight: 700, color: "#1a0c00", textDecoration: "none", padding: "9px 20px", background: GOLD }}
+                aria-label="Start free account">
+                Start free
+              </Link>
+            </>
+          )}
+        </nav>
       </header>
 
-      {/* ── Fly-through OPENER — real satellite + 3-D terrain; every visitor scrolls it first ── */}
-      <FlyThroughMapLazy />
+      {/* ── Hero — 300vh sticky scroll-driven fly-through ─────────────────────── */}
+      <section ref={heroRef} aria-label="Hero map animation" style={{ height: "300vh", position: "relative" }}>
+        <div style={{ position: "sticky", top: 0, height: "100vh", overflow: "hidden" }}>
+          <Map
+            ref={mapRef}
+            mapboxAccessToken={MAPBOX_TOKEN}
+            mapStyle={MAPBOX_STYLE}
+            projection={{ name: "globe" } as any}
+            antialias
+            initialViewState={{ longitude: CAM_START.lng, latitude: CAM_START.lat, zoom: CAM_START.zoom, pitch: CAM_START.pitch, bearing: CAM_START.bearing }}
+            style={{ width: "100%", height: "100%" }}
+            scrollZoom={false} dragPan={false} dragRotate={false}
+            doubleClickZoom={false} touchZoomRotate={false} keyboard={false}
+            attributionControl={false} onLoad={handleMapLoad}
+          />
+          {/* Warm vignette */}
+          <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "radial-gradient(130% 95% at 50% 38%, rgba(10,9,6,0.04) 20%, rgba(10,9,6,0.72) 100%)" }} />
+          <div style={{ position: "absolute", inset: "auto 0 0 0", height: 130, pointerEvents: "none", background: `linear-gradient(to bottom, transparent, ${BG})` }} />
+          <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "radial-gradient(ellipse 80% 60% at 50% 50%, rgba(120,70,8,0.10), transparent 70%)" }} />
 
-      {/* (Text hero removed — the flythrough opener IS the hero, ending on "Tell your story with a MAP".) */}
+          {/* Scroll hint */}
+          {scrollHintOp > 0.01 && (
+            <div style={{ position: "absolute", bottom: 52, left: "50%", transform: "translateX(-50%)", opacity: scrollHintOp, pointerEvents: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.3em", textTransform: "uppercase", color: "rgba(245,158,11,0.72)" }}>Scroll to explore</span>
+              <svg width="16" height="24" viewBox="0 0 16 24" fill="none" aria-hidden style={{ animation: "nudge 1.6s ease-in-out infinite" }}>
+                <path d="M8 4v16M8 20l-4-4M8 20l4-4" stroke={GOLD} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.72" />
+              </svg>
+              <style>{`@keyframes nudge{0%,100%{transform:translateY(0)}50%{transform:translateY(6px)}}`}</style>
+            </div>
+          )}
 
-      {/* ── Credibility line (honest — a style, not a false endorsement) ── */}
-      <section className="border-y border-white/5 bg-white/[0.01] py-8">
-        <p className="mx-auto max-w-3xl px-6 text-center text-[13px] leading-relaxed text-white/40">
-          The cartographic-storytelling style behind modern explainer videos — the moving maps, the cinematic push-ins, the graded looks — now from a single sentence.
+          {/* Headline — fades in with scroll */}
+          <div style={{
+            position: "absolute", inset: 0, display: "flex", flexDirection: "column",
+            alignItems: "center", justifyContent: "center", textAlign: "center", padding: "0 24px",
+            pointerEvents: textOpacity > 0.5 ? "auto" : "none",
+            opacity: textOpacity, transform: `translateY(${lerp(20, 0, textOpacity)}px)`,
+          }}>
+            <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.38em", textTransform: "uppercase", color: GOLD, marginBottom: 22, textShadow: "0 0 30px rgba(245,158,11,0.55)" }}>
+              Documentary-grade map animations
+            </p>
+            <h1 style={{ fontSize: "clamp(2.5rem,6vw,5rem)", fontWeight: 800, lineHeight: 1.06, letterSpacing: "-0.03em", margin: "0 0 18px", maxWidth: 860, color: CREAM, fontFamily: HEAD, textShadow: "0 2px 60px rgba(0,0,0,0.95)" }}>
+              Make documentary-quality<br />map animations. No After Effects.
+            </h1>
+            <p style={{ fontSize: "clamp(1rem,1.8vw,1.15rem)", color: "rgba(254,243,199,0.58)", fontWeight: 400, margin: "0 0 44px", maxWidth: 440, textShadow: "0 1px 20px rgba(0,0,0,0.95)" }}>
+              Used by travel YouTubers, journalists, and documentary makers.
+            </p>
+            <Link href="/sign-up" aria-label="Start free — no credit card required"
+              style={{ display: "inline-flex", alignItems: "center", gap: 10, background: GOLD, color: "#1a0c00", textDecoration: "none", padding: "17px 40px", fontSize: 15, fontWeight: 800, letterSpacing: "0.01em", boxShadow: "0 0 48px rgba(245,158,11,0.45), 0 8px 32px rgba(0,0,0,0.55)" }}>
+              Start free — no credit card <span style={{ fontSize: 18, lineHeight: 1 }}>→</span>
+            </Link>
+          </div>
+          <div style={{ position: "absolute", bottom: 10, right: 12, fontSize: 10, color: "rgba(254,243,199,0.20)", pointerEvents: "none" }}>
+            © Mapbox © OpenStreetMap
+          </div>
+        </div>
+      </section>
+
+      {/* ── Social proof bar ─────────────────────────────────────────────────── */}
+      <section aria-label="Compatibility" style={{ borderTop: "1px solid rgba(245,158,11,0.08)", borderBottom: "1px solid rgba(245,158,11,0.08)", padding: "18px 40px", background: CARD_BG }}>
+        <div style={{ maxWidth: 1120, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "center", gap: "clamp(20px,4vw,56px)", flexWrap: "wrap" }}>
+          {[
+            { icon: "🎬", label: "Renders via Remotion" },
+            { icon: "🎞", label: "Final Cut Pro ready" },
+            { icon: "🎥", label: "DaVinci Resolve compatible" },
+            { icon: "📺", label: "4K MP4 export" },
+            { icon: "🌍", label: "Real Mapbox satellite" },
+          ].map(({ icon, label }) => (
+            <div key={label} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "rgba(254,243,199,0.38)", whiteSpace: "nowrap" }}>
+              <span style={{ fontSize: 15 }}>{icon}</span>
+              <span>{label}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── Problem / Solution ────────────────────────────────────────────────── */}
+      <section aria-labelledby="problem-solution-heading" style={{ padding: "100px 48px", background: BG }}>
+        <div style={{ maxWidth: 1120, margin: "0 auto" }}>
+          <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.36em", textTransform: "uppercase", color: GOLD, textAlign: "center", marginBottom: 14 }}>Why Prompt Studio</p>
+          <h2 id="problem-solution-heading" style={{ fontSize: "clamp(1.9rem,3.5vw,2.9rem)", fontWeight: 800, textAlign: "center", letterSpacing: "-0.03em", marginBottom: 64, fontFamily: HEAD, lineHeight: 1.1, color: CREAM }}>
+            The old way takes days.<br />Ours takes minutes.
+          </h2>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            {/* OLD WAY */}
+            <div style={{ background: CARD_BG, border: BORDER, borderColor: "rgba(255,255,255,0.06)", padding: "40px 36px" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.26em", textTransform: "uppercase", color: "rgba(254,243,199,0.28)", marginBottom: 20 }}>The old way — After Effects</div>
+              <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 14 }}>
+                {[
+                  "2–4 hours per map animation",
+                  "Motion Bro, Video Copilot, and plugin soup",
+                  "Expensive software subscription (~$60/month)",
+                  "Motion design skills required",
+                  "Re-export everything to change one color",
+                  "No live preview — render to see result",
+                ].map((t) => (
+                  <li key={t} style={{ display: "flex", alignItems: "flex-start", gap: 12, fontSize: 14, color: "rgba(254,243,199,0.40)", lineHeight: 1.5 }}>
+                    <span style={{ color: "#ef4444", flexShrink: 0, marginTop: 1 }}>✗</span>{t}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            {/* NEW WAY */}
+            <div style={{ background: CARD_BG, border: `1px solid ${BLIGHT}`, padding: "40px 36px", boxShadow: "0 0 48px rgba(245,158,11,0.06)" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.26em", textTransform: "uppercase", color: GOLD, marginBottom: 20 }}>The Prompt Studio way</div>
+              <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 14 }}>
+                {[
+                  "Animation ready in under 60 seconds",
+                  "Describe your story in plain language",
+                  "Free to start, no software to install",
+                  "Zero motion design experience required",
+                  "Live preview — tweak before you render",
+                  "4K MP4, FCPXML, DaVinci export",
+                ].map((t) => (
+                  <li key={t} style={{ display: "flex", alignItems: "flex-start", gap: 12, fontSize: 14, color: "rgba(254,243,199,0.70)", lineHeight: 1.5 }}>
+                    <span style={{ color: GOLD, flexShrink: 0, marginTop: 1 }}>✓</span>{t}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Features ─────────────────────────────────────────────────────────── */}
+      <section id="features" aria-labelledby="features-heading" style={{ background: CARD_BG, padding: "100px 48px 96px", borderTop: "1px solid rgba(245,158,11,0.08)" }}>
+        <div style={{ maxWidth: 1120, margin: "0 auto" }}>
+          <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.36em", textTransform: "uppercase", color: GOLD, textAlign: "center", marginBottom: 14 }}>Capabilities</p>
+          <h2 id="features-heading" style={{ fontSize: "clamp(1.9rem,3.5vw,2.9rem)", fontWeight: 800, textAlign: "center", letterSpacing: "-0.03em", marginBottom: 64, fontFamily: HEAD, lineHeight: 1.1, color: CREAM }}>
+            Everything a motion designer does.<br />Without the learning curve.
+          </h2>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 }}>
+            {FEATURES.map((f) => <FeatureCard key={f.title} {...f} />)}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Pricing ──────────────────────────────────────────────────────────── */}
+      <section id="pricing" aria-labelledby="pricing-heading" style={{ background: BG, padding: "100px 48px 96px" }}>
+        <div style={{ maxWidth: 1120, margin: "0 auto" }}>
+          <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.36em", textTransform: "uppercase", color: GOLD, textAlign: "center", marginBottom: 14 }}>Pricing</p>
+          <h2 id="pricing-heading" style={{ fontSize: "clamp(1.9rem,3.5vw,2.9rem)", fontWeight: 800, textAlign: "center", letterSpacing: "-0.03em", marginBottom: 12, fontFamily: HEAD, lineHeight: 1.1, color: CREAM }}>
+            Simple, honest pricing.
+          </h2>
+          <p style={{ textAlign: "center", fontSize: 15, color: "rgba(254,243,199,0.42)", marginBottom: 44 }}>
+            Start free, pay only when you need more.
+          </p>
+
+          {/* Billing toggle */}
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 52 }}>
+            <div style={{ display: "flex", background: CARD_BG, border: BORDER, padding: 4, gap: 0 }} role="group" aria-label="Select billing period">
+              {(["monthly","yearly","lifetime"] as const).map((b) => (
+                <button key={b} onClick={() => setBilling(b)} aria-pressed={billing === b}
+                  style={{ padding: "9px 22px", fontSize: 13, fontWeight: 600, background: billing === b ? GOLD : "transparent", color: billing === b ? "#1a0c00" : "rgba(254,243,199,0.45)", border: "none", cursor: "pointer", transition: "background 0.15s, color 0.15s", fontFamily: SANS }}>
+                  {b === "monthly" ? "Monthly" : b === "yearly" ? "Yearly" : "Lifetime"}
+                  {b === "yearly" && billing === "yearly" && <span style={{ fontSize: 10, marginLeft: 6, opacity: 0.75 }}>−27%</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
+
+            {/* Free */}
+            <div style={{ background: CARD_BG, border: BORDER, padding: "36px 32px", display: "flex", flexDirection: "column" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.26em", textTransform: "uppercase", color: "rgba(254,243,199,0.38)", marginBottom: 16 }}>Free</div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 6 }}>
+                <span style={{ fontSize: "2.8rem", fontWeight: 800, color: CREAM, fontFamily: HEAD, lineHeight: 1 }}>€0</span>
+                <span style={{ fontSize: 14, color: "rgba(254,243,199,0.38)" }}>/month</span>
+              </div>
+              <p style={{ fontSize: 13, color: "rgba(254,243,199,0.38)", marginBottom: 28, lineHeight: 1.5 }}>All features unlocked. Watermark on exports.</p>
+              <ul style={{ listStyle: "none", padding: 0, margin: "0 0 32px", display: "flex", flexDirection: "column", gap: 10, flex: 1 }}>
+                {["All animation types", "Local Remotion rendering", "Live preview", "Public share links", "Community support"].map((f) => (
+                  <li key={f} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "rgba(254,243,199,0.58)" }}>
+                    <span style={{ color: GOLD, flexShrink: 0 }}>✓</span>{f}
+                  </li>
+                ))}
+                <li style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "rgba(254,243,199,0.30)" }}>
+                  <span style={{ color: "rgba(254,243,199,0.22)", flexShrink: 0 }}>✗</span>Watermark on exported video
+                </li>
+              </ul>
+              <p style={{ fontSize: 11, color: "rgba(254,243,199,0.25)", marginBottom: 20, lineHeight: 1.5 }}>Watermark reads "Made with Prompt Studio" — upgrade anytime to remove.</p>
+              <Link href="/sign-up" style={{ display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid rgba(245,158,11,0.22)", color: "rgba(254,243,199,0.65)", textDecoration: "none", padding: "13px 24px", fontSize: 14, fontWeight: 700, transition: "border-color 0.15s" }}>
+                Start free
+              </Link>
+            </div>
+
+            {/* Pay as you go */}
+            <div style={{ background: CARD_BG, border: BORDER, padding: "36px 32px", display: "flex", flexDirection: "column", position: "relative" }}>
+              <div style={{ position: "absolute", top: -13, left: "50%", transform: "translateX(-50%)", background: CARD_BG, border: "1px solid rgba(245,158,11,0.30)", padding: "4px 14px", fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: GOLD, whiteSpace: "nowrap" }}>
+                Most flexible
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.26em", textTransform: "uppercase", color: "rgba(254,243,199,0.38)", marginBottom: 16 }}>Pay as you go</div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 6 }}>
+                <span style={{ fontSize: "2.8rem", fontWeight: 800, color: CREAM, fontFamily: HEAD, lineHeight: 1 }}>€0</span>
+                <span style={{ fontSize: 14, color: "rgba(254,243,199,0.38)" }}>monthly fee</span>
+              </div>
+              <p style={{ fontSize: 13, color: "rgba(254,243,199,0.38)", marginBottom: 28, lineHeight: 1.5 }}>~€0.10–0.50 per render · no subscription.</p>
+              <ul style={{ listStyle: "none", padding: 0, margin: "0 0 32px", display: "flex", flexDirection: "column", gap: 10, flex: 1 }}>
+                {["No watermark", "Cloud rendering (Remotion Lambda)", "4K MP4 + FCPXML + DaVinci export", "Download immediately", "Email support"].map((f) => (
+                  <li key={f} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "rgba(254,243,199,0.58)" }}>
+                    <span style={{ color: GOLD, flexShrink: 0 }}>✓</span>{f}
+                  </li>
+                ))}
+              </ul>
+              <p style={{ fontSize: 11, color: "rgba(254,243,199,0.25)", marginBottom: 20, lineHeight: 1.5 }}>Render cost: actual Remotion Lambda cost + 5× margin. Estimated €0.10–0.50 for a 60-second 4K animation.</p>
+              <Link href="/sign-up" style={{ display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid rgba(245,158,11,0.22)", color: "rgba(254,243,199,0.65)", textDecoration: "none", padding: "13px 24px", fontSize: 14, fontWeight: 700 }}>
+                Add credits
+              </Link>
+            </div>
+
+            {/* Pro */}
+            <div style={{ background: CARD_BG, border: `1px solid ${BLIGHT}`, padding: "36px 32px", display: "flex", flexDirection: "column", position: "relative", boxShadow: "0 0 64px rgba(245,158,11,0.10), 0 0 0 1px rgba(245,158,11,0.18)" }}>
+              <div style={{ position: "absolute", top: -13, left: "50%", transform: "translateX(-50%)", background: GOLD, padding: "4px 14px", fontSize: 10, fontWeight: 700, letterSpacing: "0.18em", textTransform: "uppercase", color: "#1a0c00", whiteSpace: "nowrap" }}>
+                Best value
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.26em", textTransform: "uppercase", color: GOLD, marginBottom: 16 }}>Pro</div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 6 }}>
+                <span style={{ fontSize: "2.8rem", fontWeight: 800, color: CREAM, fontFamily: HEAD, lineHeight: 1 }}>
+                  {PRO_PRICE[billing].price}
+                </span>
+                <span style={{ fontSize: 14, color: "rgba(254,243,199,0.38)" }}>{PRO_PRICE[billing].suffix}</span>
+              </div>
+              {PRO_PRICE[billing].note && (
+                <p style={{ fontSize: 12, color: GOLD, marginBottom: 12, fontWeight: 600 }}>{PRO_PRICE[billing].note}</p>
+              )}
+              <p style={{ fontSize: 13, color: "rgba(254,243,199,0.38)", marginBottom: 28, lineHeight: 1.5 }}>Everything unlocked, forever.</p>
+              <ul style={{ listStyle: "none", padding: 0, margin: "0 0 32px", display: "flex", flexDirection: "column", gap: 10, flex: 1 }}>
+                {[
+                  "Everything in Pay as you go",
+                  "Unlimited cloud renders (fair use)",
+                  "Priority rendering queue",
+                  "All future features included",
+                  billing === "lifetime" ? "Lifetime updates — pay once" : "Updates included",
+                  "Discord community access",
+                  "Priority email support",
+                ].map((f) => (
+                  <li key={f} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "rgba(254,243,199,0.70)" }}>
+                    <span style={{ color: GOLD, flexShrink: 0 }}>✓</span>{f}
+                  </li>
+                ))}
+              </ul>
+              <Link href="/sign-up"
+                style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: GOLD, color: "#1a0c00", textDecoration: "none", padding: "14px 24px", fontSize: 14, fontWeight: 800, boxShadow: "0 0 32px rgba(245,158,11,0.35)" }}>
+                Get Pro <span style={{ fontSize: 16 }}>→</span>
+              </Link>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+      {/* ── FAQ ──────────────────────────────────────────────────────────────── */}
+      <section id="faq" aria-labelledby="faq-heading" style={{ background: CARD_BG, padding: "100px 48px 96px", borderTop: "1px solid rgba(245,158,11,0.08)" }}>
+        <div style={{ maxWidth: 760, margin: "0 auto" }}>
+          <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.36em", textTransform: "uppercase", color: GOLD, textAlign: "center", marginBottom: 14 }}>FAQ</p>
+          <h2 id="faq-heading" style={{ fontSize: "clamp(1.9rem,3.5vw,2.6rem)", fontWeight: 800, textAlign: "center", letterSpacing: "-0.03em", marginBottom: 64, fontFamily: HEAD, lineHeight: 1.1, color: CREAM }}>
+            Common questions about<br />map animation for YouTube
+          </h2>
+          <FAQList items={FAQ_DATA} />
+        </div>
+      </section>
+
+      {/* ── Final CTA ────────────────────────────────────────────────────────── */}
+      <section aria-labelledby="final-cta-heading" style={{ padding: "100px 48px 108px", textAlign: "center", background: BG, position: "relative", overflow: "hidden" }}>
+        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", background: "radial-gradient(ellipse 55% 55% at 50% 50%, rgba(245,158,11,0.08), transparent)" }} />
+        <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 1, pointerEvents: "none", background: "linear-gradient(90deg, transparent, rgba(245,158,11,0.30), transparent)" }} />
+        <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.36em", textTransform: "uppercase", color: GOLD, marginBottom: 18 }}>Get started</p>
+        <h2 id="final-cta-heading" style={{ fontSize: "clamp(2rem,4.5vw,3.5rem)", fontWeight: 800, letterSpacing: "-0.03em", marginBottom: 44, fontFamily: HEAD, lineHeight: 1.08, color: CREAM }}>
+          Start making your first<br />map animation today.
+        </h2>
+        <Link href="/sign-up" aria-label="Start making map animations for free"
+          style={{ display: "inline-flex", alignItems: "center", gap: 10, background: GOLD, color: "#1a0c00", textDecoration: "none", padding: "18px 46px", fontSize: 16, fontWeight: 800, letterSpacing: "0.01em", boxShadow: "0 0 56px rgba(245,158,11,0.50), 0 10px 40px rgba(0,0,0,0.55)" }}>
+          Start free — no credit card <span style={{ fontSize: 19, lineHeight: 1 }}>→</span>
+        </Link>
+        <p style={{ marginTop: 22, fontSize: 13, color: "rgba(254,243,199,0.28)" }}>
+          Free plan includes all features. No credit card required.
         </p>
       </section>
 
-      {/* ── Features — tilt cards ── */}
-      <section id="features" className="relative mx-auto max-w-6xl px-6 py-24">
-        <Reveal><h2 className="text-center text-[clamp(1.8rem,4vw,2.8rem)] font-medium tracking-tight" style={{ fontFamily: SERIF }}>Everything a motion designer does</h2></Reveal>
-        <Reveal delay={80}><p className="mx-auto mt-3 max-w-xl text-center text-[15px] text-white/50">From one prompt to a finished, on-brand film — with full control whenever you want it.</p></Reveal>
-        <div className="mt-14 grid grid-cols-1 gap-5 md:grid-cols-3">
-          {FEATURES.map((f, i) => (
-            <Reveal key={f.t} delay={(i % 3) * 100}><TiltCard {...f} /></Reveal>
-          ))}
-        </div>
-      </section>
-
-      {/* ── Stats band (count-up) ── */}
-      <StatsBand />
-
-      {/* ── Styles marquee ── */}
-      <section className="relative overflow-hidden border-y border-white/8 py-6">
-        <div className="flex w-max gap-3" style={{ animation: "marqueeX 34s linear infinite" }}>
-          {[...LOOKS, ...LOOKS].map((s, i) => (
-            <span key={i} className="whitespace-nowrap rounded-full border border-white/10 bg-white/[0.03] px-4 py-1.5 text-[13px] text-white/55">{s}</span>
-          ))}
-        </div>
-      </section>
-
-      {/* ── Use-cases ── */}
-      <section className="relative mx-auto max-w-6xl px-6 py-24">
-        <Reveal><h2 className="text-center text-[clamp(1.8rem,4vw,2.8rem)] font-medium tracking-tight" style={{ fontFamily: SERIF }}>Made for storytellers</h2></Reveal>
-        <div className="mt-12 grid grid-cols-1 gap-5 md:grid-cols-3">
-          {USES.map((u, i) => (
-            <Reveal key={u.t} delay={i * 100}>
-              <div className="h-full rounded-2xl border border-white/10 bg-white/[0.03] p-7">
-                <div className="mb-5 inline-flex h-11 w-11 items-center justify-center rounded-xl text-iris ring-1 ring-iris/25" style={{ background: "rgba(110,123,255,0.1)" }}><u.icon size={20} /></div>
-                <h3 className="mb-2 text-[16px] font-medium">{u.t}</h3>
-                <p className="text-[14px] leading-relaxed text-white/50">{u.b}</p>
-              </div>
-            </Reveal>
-          ))}
-        </div>
-      </section>
-
-      {/* ── Pricing ── */}
-      <section id="pricing" className="relative mx-auto max-w-6xl px-6 py-24">
-        <Reveal><h2 className="text-center text-[clamp(1.8rem,4vw,2.8rem)] font-medium tracking-tight" style={{ fontFamily: SERIF }}>Unlimited 4K renders. Seriously.</h2></Reveal>
-        <Reveal delay={80}><p className="mx-auto mt-3 max-w-lg text-center text-[15px] text-white/50">Renders run on your machine, so paid plans never meter them. Start free.</p></Reveal>
-        <div className="mt-14 grid grid-cols-1 gap-5 md:grid-cols-3">
-          {PRICING.map((p, i) => (
-            <Reveal key={p.name} delay={i * 110}>
-              <div className={`relative flex h-full flex-col rounded-2xl border p-7 transition-all duration-300 hover:-translate-y-1.5 ${p.featured ? "border-iris/50 bg-iris/[0.06]" : "border-white/10 bg-white/[0.03] hover:border-white/20"}`} style={p.featured ? { boxShadow: "0 24px 70px -28px rgba(110,123,255,0.6)" } : undefined}>
-                {p.featured && <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-iris px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-white">Most popular</div>}
-                <div className="text-[13px] font-semibold uppercase tracking-[0.2em] text-white/50">{p.name}</div>
-                <div className="mt-3 flex items-baseline gap-1"><span className="text-4xl font-light" style={{ fontFamily: SERIF }}>{p.price}</span>{p.suffix && <span className="text-sm text-white/40">{p.suffix}</span>}</div>
-                <p className="mt-2 text-[13px] text-white/50">{p.tagline}</p>
-                <ul className="mt-6 flex-1 space-y-2.5">
-                  {p.features.map((ft) => <li key={ft} className="flex items-start gap-2 text-[13px] text-white/65"><Check size={15} className="mt-0.5 shrink-0 text-iris" /> {ft}</li>)}
-                </ul>
-                <Link href="/sign-up" className={`mt-7 inline-flex items-center justify-center gap-1.5 rounded-xl px-5 py-3 text-sm font-semibold transition-all ${p.featured ? "text-white hover:-translate-y-0.5" : "border border-white/15 text-white/80 hover:border-white/30 hover:text-white"}`} style={p.featured ? { background: "linear-gradient(135deg,#6E7BFF,#4F59E0)", boxShadow: "0 10px 30px -10px rgba(110,123,255,0.7)" } : undefined}>{p.cta} <ArrowRight size={15} /></Link>
-              </div>
-            </Reveal>
-          ))}
-        </div>
-        <Reveal delay={120}><p className="mt-6 text-center text-[12px] text-white/35">Need team seats, white-label or an API? <Link href="/pricing" className="text-iris hover:underline">See Studio &amp; Enterprise →</Link></p></Reveal>
-      </section>
-
-      {/* ── FAQ ── */}
-      <section id="faq" className="relative mx-auto max-w-3xl px-6 py-24">
-        <Reveal><h2 className="text-center text-[clamp(1.8rem,4vw,2.8rem)] font-medium tracking-tight" style={{ fontFamily: SERIF }}>Questions</h2></Reveal>
-        <div className="mt-10"><FaqList /></div>
-      </section>
-
-      {/* ── Final CTA ── */}
-      <section className="relative overflow-hidden px-6 py-32 text-center">
-        <div className="pointer-events-none absolute inset-0" aria-hidden style={{ background: "radial-gradient(60% 60% at 50% 50%, rgba(110,123,255,0.14), transparent 70%)" }} />
-        <Reveal>
-          <h2 className="mx-auto max-w-2xl text-[clamp(2.2rem,5vw,3.6rem)] font-medium leading-tight tracking-tight" style={{ fontFamily: SERIF }}>Build your first map<br />in the next five minutes</h2>
-          <Link href="/sign-up" className="mt-9 inline-flex items-center gap-2 rounded-xl px-7 py-3.5 text-sm font-semibold text-white transition-transform hover:-translate-y-0.5" style={{ background: "linear-gradient(135deg,#6E7BFF,#4F59E0)", boxShadow: "0 14px 40px -12px rgba(110,123,255,0.7)" }}>Start free <ArrowRight size={16} /></Link>
-          <div className="mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 text-[12px] text-white/45">
-            <span className="inline-flex items-center gap-1.5"><Check size={13} className="text-iris" /> No credit card</span>
-            <span className="inline-flex items-center gap-1.5"><ShieldCheck size={13} className="text-iris" /> Renders stay on your machine</span>
+      {/* ── Footer ───────────────────────────────────────────────────────────── */}
+      <footer style={{ borderTop: "1px solid rgba(245,158,11,0.08)", background: BG }}>
+        <div style={{ maxWidth: 1120, margin: "0 auto", padding: "48px 48px 36px", display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: "48px", alignItems: "start" }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "rgba(254,243,199,0.65)", letterSpacing: "-0.01em", marginBottom: 8 }}>Prompt Studio</div>
+            <p style={{ fontSize: 13, color: "rgba(254,243,199,0.28)", lineHeight: 1.6, maxWidth: 240 }}>
+              The map animation tool for YouTube creators, journalists, and documentary makers.
+            </p>
           </div>
-        </Reveal>
-      </section>
-
-      <footer className="border-t border-white/8 px-6 py-8">
-        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 text-[12px] text-white/40 sm:flex-row">
-          <div className="flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-lg text-white" style={{ background: "linear-gradient(135deg,#6E7BFF,#4F59E0)" }}><span className="text-[10px] font-black">M</span></span><span className="font-medium text-white/65" style={{ fontFamily: SERIF }}>Mapanisy</span><span>· The AI story-map studio</span></div>
-          <div className="flex items-center gap-5"><Link href="/pricing" className="hover:text-white/70">Pricing</Link><Link href="/sign-in" className="hover:text-white/70">Sign in</Link><Link href="/sign-up" className="hover:text-white/70">Start free</Link></div>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.22em", textTransform: "uppercase", color: "rgba(254,243,199,0.25)", marginBottom: 14 }}>Product</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {[["Features","#features"],["Pricing","#pricing"],["FAQ","#faq"]].map(([l,h]) => (
+                <a key={l} href={h} style={{ fontSize: 13, color: "rgba(254,243,199,0.38)", textDecoration: "none" }}>{l}</a>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.22em", textTransform: "uppercase", color: "rgba(254,243,199,0.25)", marginBottom: 14 }}>Account</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <Link href="/sign-in" style={{ fontSize: 13, color: "rgba(254,243,199,0.38)", textDecoration: "none" }}>Sign in</Link>
+              <Link href="/sign-up" style={{ fontSize: 13, color: "rgba(254,243,199,0.38)", textDecoration: "none" }}>Start free</Link>
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.22em", textTransform: "uppercase", color: "rgba(254,243,199,0.25)", marginBottom: 14 }}>Export to</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {["MP4 · 4K", "FCPXML", "DaVinci Resolve", "GIF"].map((t) => (
+                <span key={t} style={{ fontSize: 13, color: "rgba(254,243,199,0.28)" }}>{t}</span>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div style={{ borderTop: "1px solid rgba(245,158,11,0.06)", padding: "16px 48px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 12, color: "rgba(254,243,199,0.20)" }}>© 2025 Prompt Studio</span>
+          <span style={{ fontSize: 12, color: "rgba(254,243,199,0.18)" }}>Map data © Mapbox · © OpenStreetMap contributors</span>
         </div>
       </footer>
+
     </div>
   );
-};
+}
 
-/* ───────────────────────── sub-components ───────────────────────── */
+// ─── FeatureCard ──────────────────────────────────────────────────────────────
 
-const TiltCard: React.FC<{ icon: React.ComponentType<{ size?: number; className?: string }>; t: string; b: string }> = ({ icon: Icon, t, b }) => {
+function FeatureCard({ icon, title, desc }: { icon: string; title: string; desc: string }) {
   const ref = useRef<HTMLDivElement>(null);
-  const onMove = (e: React.MouseEvent) => {
-    const el = ref.current; if (!el) return;
-    const r = el.getBoundingClientRect();
-    const px = (e.clientX - r.left) / r.width - 0.5;
-    const py = (e.clientY - r.top) / r.height - 0.5;
-    el.style.transform = `perspective(800px) rotateX(${py * -6}deg) rotateY(${px * 6}deg) translateY(-4px)`;
-  };
-  const reset = () => { if (ref.current) ref.current.style.transform = ""; };
   return (
-    <div ref={ref} onMouseMove={onMove} onMouseLeave={reset} className="group h-full rounded-2xl border border-white/10 bg-white/[0.03] p-7 hover:border-iris/40 hover:bg-white/[0.05]" style={{ transition: "transform .15s ease-out, border-color .3s, background-color .3s" }}>
-      <div className="mb-5 inline-flex h-11 w-11 items-center justify-center rounded-xl text-iris ring-1 ring-iris/25" style={{ background: "rgba(110,123,255,0.1)" }}><Icon size={20} /></div>
-      <h3 className="mb-2 text-[16px] font-medium">{t}</h3>
-      <p className="text-[14px] leading-relaxed text-white/50">{b}</p>
+    <div ref={ref}
+      onMouseEnter={() => { if (ref.current) ref.current.style.borderColor = BLIGHT; }}
+      onMouseLeave={() => { if (ref.current) ref.current.style.borderColor = BORDER; }}
+      style={{ background: BG, border: `1px solid ${BORDER}`, padding: "36px 32px", transition: "border-color 0.2s" }}>
+      <div style={{ fontSize: 28, marginBottom: 20, lineHeight: 1 }} aria-hidden>{icon}</div>
+      <h3 style={{ fontSize: 17, fontWeight: 700, letterSpacing: "-0.02em", marginBottom: 10, color: CREAM, fontFamily: HEAD }}>{title}</h3>
+      <p style={{ fontSize: 14, lineHeight: 1.72, color: "rgba(254,243,199,0.44)" }}>{desc}</p>
     </div>
   );
-};
+}
 
-const StatsBand: React.FC = () => {
-  const ref = useRef<HTMLDivElement>(null);
-  const run = useInView(ref, 0.4);
-  const looks = useCountUp(12, run);
-  const mins = useCountUp(5, run);
-  const STATS: { n: string; label: string }[] = [
-    { n: `${looks}+`, label: "cinematic looks" },
-    { n: "4K", label: "· 24fps broadcast" },
-    { n: "∞", label: "renders on paid" },
-    { n: `${mins} min`, label: "to your first map" },
-  ];
-  return (
-    <section ref={ref} className="relative border-y border-white/8 px-6 py-16">
-      <div className="mx-auto grid max-w-5xl grid-cols-2 gap-8 text-center md:grid-cols-4">
-        {STATS.map((s) => (
-          <div key={s.label}>
-            <div className="text-[clamp(2.2rem,5vw,3.4rem)] font-medium tracking-tight" style={{ fontFamily: SERIF, background: GRAD, WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>{s.n}</div>
-            <div className="mt-1 text-[12px] uppercase tracking-[0.18em] text-white/45">{s.label}</div>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-};
+// ─── FAQ accordion ────────────────────────────────────────────────────────────
 
-const FaqList: React.FC = () => {
-  const [open, setOpen] = useState<number | null>(0);
+function FAQList({ items }: { items: { q: string; a: string }[] }) {
+  const [open, setOpen] = useState<number | null>(null);
   return (
-    <div className="space-y-3">
-      {FAQS.map(([q, a], i) => (
-        <Reveal key={i} delay={i * 50}>
-          <button onClick={() => setOpen(open === i ? null : i)} className="w-full rounded-2xl border border-white/10 bg-white/[0.03] px-6 py-5 text-left transition-colors hover:border-white/20">
-            <div className="flex items-center justify-between gap-4">
-              <span className="text-[15px] font-medium text-white/90">{q}</span>
-              <ChevronDown size={18} className={`shrink-0 text-iris transition-transform duration-300 ${open === i ? "rotate-180" : ""}`} />
-            </div>
-            <div className="grid transition-[grid-template-rows] duration-300 ease-[cubic-bezier(.4,0,.2,1)]" style={{ gridTemplateRows: open === i ? "1fr" : "0fr" }}>
-              <div className="overflow-hidden"><p className="pt-3 text-[14px] leading-relaxed text-white/55">{a}</p></div>
-            </div>
-          </button>
-        </Reveal>
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }} role="list">
+      {items.map(({ q, a }, i) => (
+        <FAQItem key={i} q={q} a={a} isOpen={open === i} onToggle={() => setOpen(open === i ? null : i)} />
       ))}
     </div>
   );
-};
+}
 
-/* ───────────────────────── data ───────────────────────── */
-
-const FEATURES = [
-  { icon: Globe2, t: "Tell it once", b: "Describe your idea and the director asks the 3–4 questions that matter, then builds the best version." },
-  { icon: Route, t: "Drop a GPS track", b: "GPX, TCX, KML — a run, hike, flight or drive becomes an animated flythrough." },
-  { icon: Film, t: "Cinematic camera", b: "Fly in, orbit, push, pull back — tuned with sliders. No keyframes, ever." },
-  { icon: MountainSnow, t: "Looks that grade themselves", b: "Documentary noir, topographic, satellite — every style locks a cohesive palette and grade." },
-  { icon: MousePointer2, t: "Edit by asking", b: "Click anything in the preview to drag and scale it, or just type what to change." },
-  { icon: Share2, t: "Share & export 4K", b: "Send a read-only viewer link, or render a broadcast-ready 4K clip in any aspect." },
-];
-
-const USES = [
-  { icon: Film, t: "YouTubers", b: "Drop a script and get broadcast-grade map shots between your cuts — in minutes, not a freelancer's week." },
-  { icon: Globe2, t: "Journalists", b: "Fact-checked on-air explainers — conflict maps, expansions, supply routes — graded and citation-ready." },
-  { icon: Route, t: "Travel creators", b: "Turn a GPX track into a cinematic flythrough of your trek, ride or flight." },
-];
-
-const LOOKS = ["Documentary noir", "Topographic", "Satellite", "Blueprint", "Minimal mono", "Golden hour", "Neon noir", "Papercraft", "Aurora", "War room", "Sakura", "Holographic"];
-
-const FAQS: [string, string][] = [
-  ["Do I need design skills?", "No. Describe your idea in a sentence; the director researches it, composes the shot and grades the look. You fine-tune with sliders or just by asking."],
-  ["How do renders work?", "A tiny agent runs on your machine (macOS, Windows or Linux) and renders true 4K locally — so paid plans get unlimited renders and your files never leave your computer."],
-  ["Is it really unlimited?", "Yes, on every paid plan. Renders run on your hardware, so we don't meter them."],
-  ["What can I import?", "A sentence, or a GPS track (GPX, TCX, KML, GeoJSON) — a run, hike, flight or drive becomes an animated flythrough."],
-  ["Can I share or export?", "Send a read-only viewer link to anyone, or export a broadcast-ready 4K clip in landscape, vertical or square."],
-];
-
-const PRICING = [
-  { name: "Free", price: "$0", suffix: "", tagline: "For trying it out.", featured: false, cta: "Start free", features: ["3 animations / month", "1080p export", "Watermark", "All scene types"] },
-  { name: "Creator", price: "$19", suffix: "/mo", tagline: "For solo creators.", featured: true, cta: "Start free", features: ["Unlimited 4K renders", "No watermark", "All styles + GPS tracks", "Public share links"] },
-  { name: "Pro", price: "$39", suffix: "/mo", tagline: "For power users.", featured: false, cta: "Go Pro", features: ["Everything in Creator", "AI Director + story arcs", "Brand kits + NLE export", "Priority support"] },
-];
+function FAQItem({ q, a, isOpen, onToggle }: { q: string; a: string; isOpen: boolean; onToggle: () => void }) {
+  return (
+    <div style={{ background: BG, border: `1px solid ${isOpen ? BLIGHT : BORDER}`, transition: "border-color 0.2s" }} role="listitem">
+      <button
+        onClick={onToggle}
+        aria-expanded={isOpen}
+        style={{ width: "100%", background: "none", border: "none", cursor: "pointer", padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, textAlign: "left", fontFamily: SANS }}>
+        <span style={{ fontSize: 15, fontWeight: 600, color: CREAM, lineHeight: 1.4 }}>{q}</span>
+        <span style={{ color: GOLD, fontSize: 18, flexShrink: 0, display: "inline-block", transform: isOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.25s ease", lineHeight: 1 }} aria-hidden>▾</span>
+      </button>
+      {isOpen && (
+        <div style={{ padding: "0 24px 22px" }}>
+          <p style={{ fontSize: 14, lineHeight: 1.75, color: "rgba(254,243,199,0.52)", margin: 0 }}>{a}</p>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,29 @@
+# Mapanisy — Caddy v2 reverse proxy
+# Caddy automatically obtains and renews TLS from Let's Encrypt.
+#
+# Deploy: copy this file to /etc/caddy/Caddyfile on the VPS (or the same
+# directory as docker-compose.yml), then: systemctl reload caddy
+#
+# Replace mapanisy.com with your actual domain.
+
+mapanisy.com {
+    # Forward all traffic to the Next.js app running in Docker on port 3030
+    reverse_proxy localhost:3030
+
+    # Compress text responses
+    encode gzip zstd
+
+    # Cache rendered video files for 30 days (Next.js already sets Cache-Control
+    # on /api/render/* streams; this header only applies to unmatched paths)
+    @renders path /renders/*
+    header @renders Cache-Control "public, max-age=2592000, immutable"
+
+    # Strip the X-Forwarded-For spoofing risk — Caddy re-adds the real one
+    header_up X-Forwarded-For {remote_host}
+    header_up X-Real-IP {remote_host}
+}
+
+# Optional: redirect www → apex
+www.mapanisy.com {
+    redir https://mapanisy.com{uri} permanent
+}

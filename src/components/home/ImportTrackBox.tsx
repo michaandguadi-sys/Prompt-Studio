@@ -66,17 +66,17 @@ export const ImportTrackBox: React.FC = () => {
           onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
           onDragLeave={() => setDrag(false)}
           onDrop={onDrop}
-          className={`flex w-full items-center justify-center gap-2 rounded-xl border border-dashed py-2.5 text-[13px] font-medium transition-colors ${drag ? "border-iris bg-iris/10 text-iris" : "border-line bg-graphite/[0.03] text-graphite/60 hover:border-graphite/25 hover:text-graphite/80"}`}
+          className={`flex w-full items-center justify-center gap-2 rounded-xl border border-dashed py-2.5 text-[13px] font-medium transition-colors ${drag ? "border-iris bg-iris/15 text-[#aab4ff]" : "border-white/[0.14] bg-white/[0.04] text-white/45 hover:border-white/30 hover:text-white/75"}`}
         >
           <Upload size={14} /> Import a GPS route — GPX, TCX, KML, GeoJSON
         </button>
       )}
 
       {open && (
-        <div className="rounded-xl border border-line bg-graphite/[0.04] p-4 backdrop-blur">
+        <div className="rounded-xl border border-white/[0.10] bg-white/[0.05] p-4 backdrop-blur-xl">
           <div className="mb-3 flex items-center justify-between">
-            <div className="flex items-center gap-2 text-[13px] font-semibold text-graphite/85"><RouteIcon size={15} className="text-iris" /> Flythrough from a GPS track</div>
-            <button onClick={() => { setOpen(false); reset(); }} className="text-graphite/45 hover:text-graphite"><X size={15} /></button>
+            <div className="flex items-center gap-2 text-[13px] font-semibold text-white/85"><RouteIcon size={15} className="text-iris" /> Flythrough from a GPS track</div>
+            <button onClick={() => { setOpen(false); reset(); }} className="text-white/35 hover:text-white"><X size={15} /></button>
           </div>
 
           {/* Dropzone / parsed summary */}
@@ -87,11 +87,11 @@ export const ImportTrackBox: React.FC = () => {
                 onDragLeave={() => setDrag(false)}
                 onDrop={onDrop}
                 onClick={() => fileRef.current?.click()}
-                className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed py-8 text-center transition-colors ${drag ? "border-iris bg-iris/10" : "border-line hover:border-graphite/25"}`}
+                className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed py-8 text-center transition-colors ${drag ? "border-iris bg-iris/15" : "border-white/[0.14] hover:border-white/30"}`}
               >
-                {busy ? <Loader2 size={20} className="animate-spin text-iris" /> : <Upload size={20} className="text-graphite/55" />}
-                <div className="text-[13px] text-graphite/70">{busy ? "Reading track…" : "Drop a file or click to choose"}</div>
-                <div className="text-[11px] text-graphite/40">Strava, Garmin, Wahoo, Coros, Komoot, Apple/Google — .gpx · .fit · .tcx · .kml · .kmz · .geojson</div>
+                {busy ? <Loader2 size={20} className="animate-spin text-iris" /> : <Upload size={20} className="text-white/45" />}
+                <div className="text-[13px] text-white/65">{busy ? "Reading track…" : "Drop a file or click to choose"}</div>
+                <div className="text-[11px] text-white/30">Strava, Garmin, Wahoo, Coros, Komoot, Apple/Google — .gpx · .fit · .tcx · .kml · .kmz · .geojson</div>
               </div>
               <input ref={fileRef} type="file" accept=".gpx,.fit,.tcx,.kml,.kmz,.geojson,.json,application/gpx+xml,application/xml,text/xml,application/json" className="hidden"
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) ingest(f); e.currentTarget.value = ""; }} />
@@ -100,49 +100,49 @@ export const ImportTrackBox: React.FC = () => {
           ) : (
             <>
               {/* Track stat chips */}
-              <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px] text-graphite/70">
-                <span className="truncate rounded-md bg-graphite/[0.06] px-2 py-1 font-medium text-graphite/85">{track.name}</span>
-                <span className="inline-flex items-center gap-1 rounded-md bg-graphite/[0.06] px-2 py-1"><MapPin size={11} className="text-iris" /> {fmtKm(track.stats.distanceM)} km</span>
-                {track.hasElevation && <span className="inline-flex items-center gap-1 rounded-md bg-graphite/[0.06] px-2 py-1"><MountainSnow size={11} className="text-cyan" /> ↑{Math.round(track.stats.ascentM)} m</span>}
-                {track.segments.length > 0 && <span className="rounded-md bg-graphite/[0.06] px-2 py-1">{track.segments.length + 1} segments</span>}
-                <span className="rounded-md bg-graphite/[0.06] px-2 py-1 text-graphite/45">{track.points.length} pts</span>
+              <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px] text-white/60">
+                <span className="truncate rounded-md bg-white/[0.07] px-2 py-1 font-medium text-white/85">{track.name}</span>
+                <span className="inline-flex items-center gap-1 rounded-md bg-white/[0.07] px-2 py-1"><MapPin size={11} className="text-iris" /> {fmtKm(track.stats.distanceM)} km</span>
+                {track.hasElevation && <span className="inline-flex items-center gap-1 rounded-md bg-white/[0.07] px-2 py-1"><MountainSnow size={11} className="text-cyan" /> ↑{Math.round(track.stats.ascentM)} m</span>}
+                {track.segments.length > 0 && <span className="rounded-md bg-white/[0.07] px-2 py-1">{track.segments.length + 1} segments</span>}
+                <span className="rounded-md bg-white/[0.07] px-2 py-1 text-white/35">{track.points.length} pts</span>
               </div>
 
               {/* Variant picker */}
-              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-graphite/45">Camera</div>
+              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-white/35">Camera</div>
               <div className="mb-3 grid grid-cols-2 gap-1.5">
                 {VARIANTS.map((v) => {
                   const dis = VARIANT_PRESETS[v].terrain && !track.hasElevation;
                   return (
                     <button key={v} disabled={dis} onClick={() => setVariant(v)}
                       title={dis ? "Needs elevation data" : VARIANT_PRESETS[v].blurb}
-                      className={`rounded-lg border px-2.5 py-2 text-left transition-colors ${variant === v ? "border-iris bg-iris/15" : "border-line hover:border-graphite/25"} ${dis ? "opacity-35 cursor-not-allowed" : ""}`}>
-                      <div className="text-[12px] font-semibold text-graphite/85">{VARIANT_PRESETS[v].label}</div>
-                      <div className="mt-0.5 line-clamp-1 text-[10px] text-graphite/50">{VARIANT_PRESETS[v].blurb}</div>
+                      className={`rounded-lg border px-2.5 py-2 text-left transition-colors ${variant === v ? "border-iris bg-iris/15" : "border-white/[0.10] hover:border-white/25"} ${dis ? "opacity-35 cursor-not-allowed" : ""}`}>
+                      <div className="text-[12px] font-semibold text-white/85">{VARIANT_PRESETS[v].label}</div>
+                      <div className="mt-0.5 line-clamp-1 text-[10px] text-white/40">{VARIANT_PRESETS[v].blurb}</div>
                     </button>
                   );
                 })}
               </div>
 
               {/* Style picker */}
-              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-graphite/45">Look</div>
+              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-white/35">Look</div>
               <div className="mb-4 grid grid-cols-4 gap-1.5">
                 {STYLES.map((s) => {
                   const sb = STYLE_PRESETS[s];
                   return (
                     <button key={s} onClick={() => setStyle(s)}
-                      className={`overflow-hidden rounded-lg border text-center transition-colors ${style === s ? "border-iris" : "border-line hover:border-graphite/25"}`}>
+                      className={`overflow-hidden rounded-lg border text-center transition-colors ${style === s ? "border-iris" : "border-white/[0.10] hover:border-white/25"}`}>
                       <div className="h-7 w-full" style={{ background: sb.bgColor }}>
                         <div className="h-full w-full" style={{ background: `linear-gradient(90deg, transparent, ${sb.routeGlow}66)` }} />
                       </div>
-                      <div className="px-1 py-1 text-[10px] font-medium capitalize text-graphite/70">{s.replace("-", " ")}</div>
+                      <div className="px-1 py-1 text-[10px] font-medium capitalize text-white/60">{s.replace("-", " ")}</div>
                     </button>
                   );
                 })}
               </div>
 
               <div className="flex items-center gap-2">
-                <button onClick={() => reset()} className="rounded-lg border border-line px-3 py-2 text-[12px] text-graphite/60 hover:text-graphite">Change file</button>
+                <button onClick={() => reset()} className="rounded-lg border border-white/[0.12] px-3 py-2 text-[12px] text-white/50 hover:text-white">Change file</button>
                 <button onClick={create} disabled={busy}
                   className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-gradient-to-br from-iris to-[#9b5cff] px-4 py-2 text-[13px] font-semibold text-white shadow-glow-iris hover:-translate-y-0.5 transition-transform disabled:opacity-60">
                   {busy ? <Loader2 size={14} className="animate-spin" /> : <ArrowRight size={14} />} Open in editor

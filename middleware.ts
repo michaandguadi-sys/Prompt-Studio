@@ -23,9 +23,10 @@ const isPublic = createRouteMatcher([
   "/api/agent/heartbeat(.*)",
   "/api/agent/progress(.*)",
   "/api/agent/complete(.*)",
-  // DEM tile proxy (CORS) for 3-D terrain — read-only, fixed upstream, no auth
-  // needed (the render agent / map tiles fetch it with no Clerk session).
+  // Tile proxies — read-only, fixed upstreams, no auth needed. The render agent
+  // and MapLibre fetch these with no Clerk session (headless Chromium has none).
   "/api/dem(.*)",
+  "/api/sat(.*)",
 ]);
 
 export default clerkMiddleware(async (auth, req) => {

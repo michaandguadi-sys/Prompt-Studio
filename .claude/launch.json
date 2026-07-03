@@ -3,9 +3,9 @@
   "configurations": [
     {
       "name": "prompt-studio",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
-      "port": 3030,
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["next", "dev"],
+      "autoPort": true,
       "cwd": "/Users/micharoessler/Desktop/Projekte/Guada & Micha YT/PROMPT STUDIO"
     }
   ]

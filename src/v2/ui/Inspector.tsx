@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { MapPin, Upload, Sparkles, Boxes } from "lucide-react";
+import { MapPin, Upload, Sparkles, Boxes, Mic, Play, Square, X as XIcon, Loader2 } from "lucide-react";
+import { hasVoiceoverKey, loadVoiceoverSettings, generateVoiceover, measureAudioDuration } from "@/lib/voiceover";
 import { MAP3D_STYLES } from "@/lib/presets/map3dStyles";
 import { Field, Input, NumberInput, Select, Section, Slider, Toggle } from "./controls";
 import { ColorInput } from "@/components/ui/ColorInput";
@@ -275,6 +276,142 @@ const LookSwatch: React.FC<{ lk: Look }> = ({ lk }) => {
   );
 };
 
+/** Voiceover panel — shows any attached TTS audio, lets the creator play/remove/regenerate it.
+ *  The audio bakes into exported video via Remotion's <Audio> component. */
+const VoiceoverPanel: React.FC = () => {
+  const comp = useEditor((s) => s.project.composition);
+  const patchComposition = useEditor((s) => s.patchComposition);
+  const voiceover: { url: string; durationSec: number; voice?: string } | undefined = (comp as any).voiceover;
+
+  const [playing, setPlaying] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const hasKey = hasVoiceoverKey();
+
+  const togglePlay = () => {
+    if (!voiceover?.url) return;
+    if (!audioRef.current) { audioRef.current = new Audio(voiceover.url); audioRef.current.onended = () => setPlaying(false); }
+    if (playing) { audioRef.current.pause(); setPlaying(false); }
+    else { audioRef.current.src = voiceover.url; audioRef.current.play().catch(() => setPlaying(false)); setPlaying(true); }
+  };
+
+  const remove = () => {
+    audioRef.current?.pause(); audioRef.current = null; setPlaying(false);
+    patchComposition({ voiceover: undefined } as any);
+  };
+
+  const regenerate = async () => {
+    const narrationLines: Array<{ text: string; startSec: number }> = (comp as any).narrationLines ?? [];
+    const singleNarration: string = (comp as any).narration ?? "";
+    const text = narrationLines.length > 1
+      ? narrationLines.map((l) => l.text).filter(Boolean).join("  ")
+      : singleNarration;
+    if (!text.trim()) { setError("Add narration first."); return; }
+    setLoading(true); setError(null);
+    try {
+      const settings = loadVoiceoverSettings();
+      const { dataUrl, durationSec } = await generateVoiceover(text, settings);
+      const realDur = await measureAudioDuration(dataUrl);
+      audioRef.current = null; setPlaying(false);
+      patchComposition({ voiceover: { url: dataUrl, durationSec: realDur > 0 ? realDur : durationSec } } as any);
+    } catch (e: any) { setError(e.message ?? "Failed — check ElevenLabs key in Settings."); }
+    finally { setLoading(false); }
+  };
+
+  if (!voiceover && !hasKey) return null;
+
+  return (
+    <div className="mb-3">
+      <div className="mb-1.5 flex items-center gap-1.5">
+        <Mic size={11} className="text-iris/70" />
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-graphite/45">Voiceover</span>
+      </div>
+      {voiceover ? (
+        <div className="flex items-center gap-2 rounded-lg border border-iris/20 bg-iris/[0.04] px-2.5 py-2">
+          <button onClick={togglePlay} className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-iris/30 text-iris transition-colors hover:bg-iris/10">
+            {playing ? <Square size={9} fill="currentColor" /> : <Play size={9} fill="currentColor" />}
+          </button>
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] font-semibold text-graphite/80">Narration audio</div>
+            <div className="text-[9px] text-graphite/45">{Math.round(voiceover.durationSec)}s · bakes into export</div>
+          </div>
+          <button onClick={regenerate} disabled={loading || !hasKey} className="rounded px-1.5 py-0.5 text-[9px] font-medium text-iris/60 hover:text-iris disabled:opacity-30">
+            {loading ? <Loader2 size={9} className="animate-spin" /> : "↺ redo"}
+          </button>
+          <button onClick={remove} className="rounded p-1 text-graphite/30 hover:text-red-400"><XIcon size={11} /></button>
+        </div>
+      ) : (
+        <button
+          onClick={regenerate}
+          disabled={loading}
+          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-iris/25 py-2 text-[10px] font-medium text-iris/60 transition-colors hover:border-iris/50 hover:text-iris disabled:opacity-40"
+        >
+          {loading ? <><Loader2 size={10} className="animate-spin" /> Generating…</> : <><Mic size={10} /> Generate voiceover from narration</>}
+        </button>
+      )}
+      {error && <div className="mt-1 text-[10px] text-red-400/80">{error}</div>}
+    </div>
+  );
+};
+
+/** Narration captions control: toggle visibility + edit text inline.
+ *  When the AI generated multi-beat narrationLines, shows each beat's text
+ *  in a mini-filmstrip so the creator can tweak line by line. */
+const NarrationCaptionField: React.FC = () => {
+  const look = (useEditor((s) => s.project.composition.look) ?? DEFAULT_LOOK) as Look;
+  const comp = useEditor((s) => s.project.composition);
+  const patchComposition = useEditor((s) => s.patchComposition);
+  const set = (patch: Partial<Look>) => patchComposition({ look: { ...look, ...patch } });
+
+  const narrationLines: Array<{ text: string; startSec: number }> = (comp as any).narrationLines ?? [];
+  const singleNarration: string = (comp as any).narration ?? "";
+  const hasMulti = narrationLines.length > 1;
+
+  const updateLine = (i: number, text: string) => {
+    const next = narrationLines.map((l, idx) => idx === i ? { ...l, text } : l);
+    patchComposition({ narrationLines: next } as any);
+  };
+  const updateSingle = (text: string) => patchComposition({ narration: text } as any);
+
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-graphite/45">Narration captions</span>
+        <label className="flex cursor-pointer items-center gap-1.5 text-[10px] text-graphite/60">
+          <input type="checkbox" checked={look.showCaptions ?? false} onChange={(e) => set({ showCaptions: e.target.checked })} className="accent-iris" />
+          {look.showCaptions ? "Visible" : "Hidden"}
+        </label>
+      </div>
+      {hasMulti ? (
+        <div className="space-y-1.5">
+          {narrationLines.map((line, i) => (
+            <div key={i} className="rounded-lg border border-line bg-paper-50 p-1.5">
+              <div className="mb-0.5 text-[9px] font-semibold uppercase tracking-wider text-graphite/35">Beat {i + 1} · {line.startSec.toFixed(1)}s</div>
+              <textarea
+                value={line.text}
+                onChange={(e) => updateLine(i, e.target.value)}
+                rows={2}
+                className="w-full resize-none rounded border-0 bg-transparent text-[11px] leading-snug text-graphite/80 placeholder:text-graphite/30 focus:outline-none"
+                placeholder="Narration for this beat…"
+              />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <textarea
+          value={singleNarration}
+          onChange={(e) => updateSingle(e.target.value)}
+          rows={3}
+          className="w-full resize-none rounded-lg border border-line bg-paper-50 p-2 text-[11px] leading-snug text-graphite/80 placeholder:text-graphite/30 focus:border-iris/50 focus:outline-none"
+          placeholder="Add narration text — shows as animated subtitles…"
+          onFocus={() => { if (!look.showCaptions) set({ showCaptions: true }); }}
+        />
+      )}
+    </div>
+  );
+};
+
 /** Look & grade — film-stock presets + the one-tap map grade + colour wheels up
  *  top; the full fine-control spec lives behind an "Advanced" toggle. */
 const LookPanel: React.FC = () => {
@@ -341,12 +478,8 @@ const LookPanel: React.FC = () => {
       <Slider label="Vignette" value={look.vignette} onChange={(v) => set({ vignette: v })} />
       <Slider label="Letterbox bars" value={look.letterbox} min={0} max={0.25} onChange={(v) => set({ letterbox: v })} format={(v) => v <= 0 ? "off" : `${Math.round(v * 100)}%`} />
       <Slider label="Film grain" value={look.grain} onChange={(v) => set({ grain: v })} />
-      <Field label="Narration captions">
-        <label className="flex items-center gap-2 text-xs text-graphite/70">
-          <input type="checkbox" checked={look.showCaptions ?? false} onChange={(e) => set({ showCaptions: e.target.checked })} className="accent-iris" />
-          {look.showCaptions ? "Visible" : "Hidden"}
-        </label>
-      </Field>
+      <VoiceoverPanel />
+      <NarrationCaptionField />
       </>)}
     </Section>
   );
@@ -817,6 +950,7 @@ const GlobalSections: React.FC = () => {
   const aspect = useEditor((s) => s.project.composition.aspect);
   const durationSec = useEditor((s) => s.project.composition.durationSec);
   const patchComposition = useEditor((s) => s.patchComposition);
+  const retimeScene = useEditor((s) => s.retimeScene);
   return (
     <>
       <MapStylePanel />
@@ -840,6 +974,26 @@ const GlobalSections: React.FC = () => {
             </Select>
           </Field>
         </div>
+        {/* Fit-to: retimes EVERYTHING proportionally — layer in/outs, narration
+            beats, route dwells — so the film keeps its rhythm at the new length. */}
+        <Field label="Fit film to" hint="rescales every layer's timing with it">
+          <div className="flex items-center gap-1.5">
+            {[15, 30, 60].map((sec) => (
+              <button
+                key={sec}
+                onClick={() => retimeScene(sec)}
+                className={`flex-1 rounded-lg border px-2 py-1.5 text-[11px] font-semibold transition-colors ${
+                  Math.abs(durationSec - sec) < 0.01
+                    ? "border-iris bg-iris/10 text-iris"
+                    : "border-line text-graphite/60 hover:border-iris/40 hover:text-graphite"
+                }`}
+                title={`Retime the whole film to ${sec}s — all animations rescale proportionally`}
+              >
+                {sec}s
+              </button>
+            ))}
+          </div>
+        </Field>
       </Section>
     </>
   );
@@ -1136,6 +1290,15 @@ const LayerFields: React.FC<{ layer: Layer; set: (p: Record<string, unknown>) =>
 
     case "spotlight":
       return <SpotlightFields layer={layer} set={set} />;
+
+    case "radius":
+      return <RadiusFields layer={layer} set={set} />;
+
+    case "timestamp":
+      return <TimestampFields layer={layer} set={set} />;
+
+    case "atmosphere":
+      return <AtmosphereFields layer={layer} set={set} />;
 
     case "track":
       return <TrackFields layer={layer} set={set} />;
@@ -1630,6 +1793,139 @@ const SpotlightFields: React.FC<{ layer: Extract<Layer, { type: "spotlight" }>; 
       <Toggle label="Edge ring" checked={layer.ring} onChange={(v) => set({ ring: v })} />
       <Toggle label="Pulse" checked={layer.pulse} onChange={(v) => set({ pulse: v })} />
     </div>
+  </Section>
+);
+
+/* ── Range rings — geodesic distance circles ──────────────────────────────── */
+
+const RadiusFields: React.FC<{ layer: Extract<Layer, { type: "radius" }>; set: (p: Record<string, unknown>) => void }> = ({ layer, set }) => (
+  <Section title="Range rings">
+    <Field label="Centre" hint="Where the rings radiate from">
+      <div className="space-y-1.5">
+        <PlaceSearch size="sm" placeholder="Search a place…" onPick={(p) => set({ center: { lon: p.lon, lat: p.lat, name: p.name } })} />
+        <PickOnMap label="Centre on map" lon={layer.center.lon} lat={layer.center.lat} onPick={(lon, lat) => set({ center: { lon, lat } })} />
+      </div>
+    </Field>
+    <div className="grid grid-cols-2 gap-2">
+      <Field label="Radius"><NumberInput value={layer.radiusKm} step={layer.radiusKm >= 100 ? 50 : 5} min={0.1} max={20000} unit="km" onChange={(v) => set({ radiusKm: v })} /></Field>
+      <Field label="Rings"><NumberInput value={layer.rings} step={1} min={1} max={5} onChange={(v) => set({ rings: Math.round(v) })} /></Field>
+    </div>
+    <Field label="Animation">
+      <Select value={layer.mode} onChange={(e) => set({ mode: e.target.value })}>
+        <option value="grow">Grow once (staggered)</option>
+        <option value="ripple">Ripple (endless sonar)</option>
+        <option value="static">Static</option>
+      </Select>
+    </Field>
+    <div className="grid grid-cols-2 gap-2">
+      <Field label={layer.mode === "ripple" ? "Pulse takes" : "Grow over"}><NumberInput value={layer.growSec} step={0.2} min={0.3} max={10} unit="s" onChange={(v) => set({ growSec: v })} /></Field>
+      {layer.mode === "ripple"
+        ? <Field label="Every"><NumberInput value={layer.intervalSec} step={0.2} min={0.5} max={10} unit="s" onChange={(v) => set({ intervalSec: v })} /></Field>
+        : <Field label="Line width"><NumberInput value={layer.width} step={0.5} min={0.5} max={20} unit="px" onChange={(v) => set({ width: v })} /></Field>}
+    </div>
+    <div className="grid grid-cols-2 gap-2">
+      <Field label="Colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
+      <Field label="Unit">
+        <Select value={layer.labelUnit} onChange={(e) => set({ labelUnit: e.target.value })}>
+          <option value="km">Kilometres</option>
+          <option value="mi">Miles</option>
+        </Select>
+      </Field>
+    </div>
+    <Slider label="Fill tint" value={layer.fillOpacity} min={0} max={0.5} onChange={(v) => set({ fillOpacity: v })} />
+    <div className="grid grid-cols-2 gap-2">
+      <Toggle label="Distance labels" checked={layer.showLabels} onChange={(v) => set({ showLabels: v })} />
+      <Toggle label="Dashed" checked={layer.dashed} onChange={(v) => set({ dashed: v })} />
+    </div>
+    <Toggle label="Centre dot" checked={layer.centerDot} onChange={(v) => set({ centerDot: v })} />
+  </Section>
+);
+
+/* ── Timestamp — the documentary date ticker ──────────────────────────────── */
+
+const TimestampFields: React.FC<{ layer: Extract<Layer, { type: "timestamp" }>; set: (p: Record<string, unknown>) => void }> = ({ layer, set }) => (
+  <Section title="Timestamp">
+    <Field label="Mode" hint="The ticker advances across the layer's visible window">
+      <Select value={layer.mode} onChange={(e) => set({ mode: e.target.value })}>
+        <option value="date-range">Date range (animates)</option>
+        <option value="day-counter">Day counter (DAY 1 → 100)</option>
+        <option value="fixed">Fixed text</option>
+      </Select>
+    </Field>
+    {layer.mode === "date-range" && (
+      <>
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="From"><Input value={layer.startDate} onChange={(e) => set({ startDate: e.target.value })} placeholder="1939-09-01" /></Field>
+          <Field label="To"><Input value={layer.endDate} onChange={(e) => set({ endDate: e.target.value })} placeholder="1945-05-08" /></Field>
+        </div>
+        <Field label="Format">
+          <Select value={layer.format} onChange={(e) => set({ format: e.target.value })}>
+            <option value="year">Year — 1944</option>
+            <option value="month-year">Month + year — SEP 1944</option>
+            <option value="full">Full date — 6 JUN 1944</option>
+          </Select>
+        </Field>
+      </>
+    )}
+    {layer.mode === "day-counter" && (
+      <div className="grid grid-cols-3 gap-2">
+        <Field label="Prefix"><Input value={layer.prefix} onChange={(e) => set({ prefix: e.target.value })} placeholder="DAY" /></Field>
+        <Field label="From"><NumberInput value={layer.dayStart} step={1} min={-100000} max={100000} onChange={(v) => set({ dayStart: Math.round(v) })} /></Field>
+        <Field label="To"><NumberInput value={layer.dayEnd} step={1} min={-100000} max={100000} onChange={(v) => set({ dayEnd: Math.round(v) })} /></Field>
+      </div>
+    )}
+    {layer.mode === "fixed" && (
+      <Field label="Text"><Input value={layer.fixedText} onChange={(e) => set({ fixedText: e.target.value })} placeholder="MARCH 1944" /></Field>
+    )}
+    <div className="grid grid-cols-2 gap-2">
+      <Field label="Position">
+        <Select value={layer.position} onChange={(e) => set({ position: e.target.value })}>
+          <option value="top-left">Top left</option>
+          <option value="top-center">Top centre</option>
+          <option value="top-right">Top right</option>
+          <option value="bottom-left">Bottom left</option>
+          <option value="bottom-center">Bottom centre</option>
+          <option value="bottom-right">Bottom right</option>
+        </Select>
+      </Field>
+      <Field label="Style">
+        <Select value={layer.style} onChange={(e) => set({ style: e.target.value })}>
+          <option value="chip">Chip (glass badge)</option>
+          <option value="minimal">Minimal (bare text)</option>
+        </Select>
+      </Field>
+    </div>
+    <Slider label="Size" value={layer.sizeVh} min={1} max={14} onChange={(v) => set({ sizeVh: v })} format={(v) => `${v.toFixed(1)}vh`} />
+    <div className="grid grid-cols-2 gap-2">
+      <Field label="Text colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
+      <Field label="Accent dot"><ColorInput value={layer.accent} onChange={(v) => set({ accent: v })} /></Field>
+    </div>
+  </Section>
+);
+
+/* ── Atmosphere — cinematic weather particles ─────────────────────────────── */
+
+const AtmosphereFields: React.FC<{ layer: Extract<Layer, { type: "atmosphere" }>; set: (p: Record<string, unknown>) => void }> = ({ layer, set }) => (
+  <Section title="Atmosphere">
+    <Field label="Effect" hint="Deterministic — preview and render match exactly">
+      <Select value={layer.effect} onChange={(e) => set({ effect: e.target.value })}>
+        <option value="snow">Snow</option>
+        <option value="rain">Rain</option>
+        <option value="embers">Embers / sparks</option>
+        <option value="dust">Dust / sand</option>
+        <option value="fog">Fog / mist</option>
+      </Select>
+    </Field>
+    <Slider label="Density" value={layer.density} onChange={(v) => set({ density: v })} />
+    <Slider label="Speed" value={layer.speed} min={0.1} max={3} onChange={(v) => set({ speed: v })} format={(v) => `${v.toFixed(1)}×`} />
+    <Slider label="Wind" value={layer.wind} min={-2} max={2} onChange={(v) => set({ wind: v })} format={(v) => (v > 0 ? `→ ${v.toFixed(1)}` : v < 0 ? `← ${Math.abs(v).toFixed(1)}` : "0")} />
+    <Slider label="Opacity" value={layer.opacity} onChange={(v) => set({ opacity: v })} />
+    <Field label="Colour" hint="Empty = the effect's natural colour">
+      <div className="flex items-center gap-2">
+        <ColorInput value={layer.color || "#ffffff"} onChange={(v) => set({ color: v })} />
+        {layer.color && <button onClick={() => set({ color: "" })} className="text-[10px] text-graphite/45 hover:text-graphite/80">reset</button>}
+      </div>
+    </Field>
   </Section>
 );
 

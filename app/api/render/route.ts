@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import { spawn } from "child_process";
 import path from "path";
 import { RenderPayload, parseOrError } from "@/lib/schemas";
@@ -22,6 +23,9 @@ const MOTION_GRAFIKS_PATH = process.env.MOTION_GRAFIKS_PATH;
  *    high enough that "Failed to fetch tile" gets a second chance via Chromium.
  */
 export async function POST(req: NextRequest) {
+  const { userId: clerkId } = await auth();
+  if (!clerkId) return new Response("Unauthenticated", { status: 401 });
+
   if (!MOTION_GRAFIKS_PATH) {
     return new Response("MOTION_GRAFIKS_PATH not set", { status: 500 });
   }

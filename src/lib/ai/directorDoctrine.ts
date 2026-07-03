@@ -59,6 +59,9 @@ export const ARCHETYPES: Archetype[] = [
   { name: "Scale / magnitude", triggers: ["how big", "size of", "as large as", "fits inside", "bigger than", "magnitude", "enormous"],
     storyFocus: "This is THIS big — a familiar comparison makes the size graspable.",
     recipe: "Highlight the subject's footprint over a familiar reference geography; pull back to reveal scale; annotate the comparison ('larger than France'). Honest projection only." },
+  { name: "Environmental change / earth observation", triggers: ["deforest", "amazon", "glacier", "wildfire", "fire season", "urban sprawl", "drought", "flood", "sea level", "coral bleach", "habitat loss", "land use change", "carbon", "climate", "artic ice", "permafrost", "desertification", "reforestation", "biodiversity"],
+    storyFocus: "The landscape itself is the data: show it BEFORE and AFTER, or animate the change year-by-year so the viewer feels the scale of transformation.",
+    recipe: "Lead with an earthlayer (dataset:\"ndvi\" for forests/vegetation, \"true-color\" for general change, \"fire\" for wildfires, \"nightlights\" for urban growth) at the relevant year. A second earthlayer with compareDate shows the contrast. Add a choropleth or bubbles for the numeric data (hectares lost, temperature rise). Use basemapStyle:\"satellite\" underneath. The movement IS the story — camera slow orbit over the affected area, pitch 40-50°. Palette: Arctic Cold for ice/climate, Default for vegetation, Trade Green for reforestation success stories." },
 ];
 
 /** No-AI archetype match (keyword heuristic) → the recipe to follow. */

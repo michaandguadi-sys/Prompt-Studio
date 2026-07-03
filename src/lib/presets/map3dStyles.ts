@@ -8,6 +8,8 @@
  * Applied by merging `basemap`/`look` over the composition's current values and
  * setting the camera's end pitch.
  */
+import { PRO_MAP_STYLES } from "./proMapStyles";
+
 export type Map3DStyle = {
   id: string;
   name: string;
@@ -125,4 +127,9 @@ export const MAP3D_STYLES: Map3DStyle[] = [
   },
 ];
 
-export const map3dStyleById = (id: string): Map3DStyle | undefined => MAP3D_STYLES.find((s) => s.id === id);
+/** Look up ANY style — creative worlds here, plus the professional documentary
+ *  collection (proMapStyles.ts) — so the AI director and templates can use both.
+ *  (proMapStyles only imports our TYPE, which is erased at compile time — no
+ *  runtime cycle.) */
+export const map3dStyleById = (id: string): Map3DStyle | undefined =>
+  MAP3D_STYLES.find((s) => s.id === id) ?? PRO_MAP_STYLES.find((s) => s.id === id);

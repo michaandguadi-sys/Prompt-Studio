@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
+import { rateLimit } from "@/lib/rateLimit";
 
 /**
  * Search any place (country, region, district, city, town, neighborhood,
@@ -42,6 +44,12 @@ function classify(item: any): string {
 }
 
 export async function GET(req: NextRequest) {
+  const { userId: clerkId } = await auth();
+  if (!clerkId) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+  if (!rateLimit("highlight-search", clerkId, { maxRequests: 60, windowSec: 60 })) {
+    return NextResponse.json({ error: "Too many requests." }, { status: 429 });
+  }
+
   const q = req.nextUrl.searchParams.get("q")?.trim();
   if (!q) return NextResponse.json({ results: [] });
 
