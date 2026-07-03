@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { MapPin, Sparkles, Upload, Loader2 } from "lucide-react";
+import { MapPin, Sparkles, Upload, Loader2, Clapperboard, Camera } from "lucide-react";
 import { useEditor } from "@/v2/store/editor";
 import { parseTrackFile, buildTrackProject } from "@/v2/track";
 import { interpret } from "@/lib/parse";
@@ -40,6 +40,12 @@ export const GenerateExperience: React.FC = () => {
   const router = useRouter();
   const load = useEditor((s) => s.load);
   const [prompt, setPrompt] = useState("");
+  // Film vs Still — bloggers pick "Still image" up front; the same director
+  // builds the same composition, then the Still Studio opens in the editor.
+  const [mode, setMode] = useState<"film" | "still">(() => {
+    try { return localStorage.getItem("mapanisy-mode") === "still" ? "still" : "film"; } catch { return "film"; }
+  });
+  useEffect(() => { try { localStorage.setItem("mapanisy-mode", mode); } catch {} }, [mode]);
   const [hoverStops, setHoverStops] = useState<GeoStop[] | null>(null);
   const [generating, setGenerating] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -187,9 +193,42 @@ export const GenerateExperience: React.FC = () => {
           </h1>
         </div>
 
+        {/* Film / Still — what are we making today? */}
+        <div className="mb-3 flex items-center justify-center" style={{ animation: "genRise 0.8s ease both", animationDelay: "120ms" }}>
+          <div className="flex items-center rounded-xl border border-white/[0.1] bg-white/[0.05] p-1 backdrop-blur-md">
+            <button
+              onClick={() => setMode("film")}
+              title="A cinematic map animation — 4K MP4"
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[12px] font-semibold transition-all ${mode === "film" ? "bg-iris text-white shadow-glow-iris" : "text-white/40 hover:text-white/75"}`}
+            >
+              <Clapperboard size={12} /> Film
+            </button>
+            <button
+              onClick={() => setMode("still")}
+              title="One perfect frame — PNG, JPG, WebP, SVG or PDF. Made for blog posts."
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[12px] font-semibold transition-all ${mode === "still" ? "bg-iris text-white shadow-glow-iris" : "text-white/40 hover:text-white/75"}`}
+            >
+              <Camera size={12} /> Still image
+            </button>
+          </div>
+          {mode === "still" && (
+            <span className="ml-3 hidden text-[10.5px] text-[#7fe9ff] sm:block" style={{ animation: "genRise 0.3s ease both" }}>
+              ✦ for blogs & articles — annotate, then export PNG · JPG · WebP · SVG · PDF
+            </span>
+          )}
+        </div>
+
         {/* The floating glass prompt — softly breathing glow */}
         <div className="rounded-2xl" style={{ animation: "genRise 0.8s ease both, genGlowBreathe 4s ease-in-out 1s infinite", animationDelay: "160ms" }}>
-          <AiIdeaBox darkMode onPromptChange={setPrompt} onGenerateStart={() => setGenerating(true)} />
+          <AiIdeaBox
+            darkMode
+            onPromptChange={setPrompt}
+            onGenerateStart={() => {
+              setGenerating(true);
+              // Still mode: tell the editor to open the Still Studio on arrival.
+              try { if (mode === "still") sessionStorage.setItem("mapanisy-open-still", "1"); } catch {}
+            }}
+          />
         </div>
 
         {/* Live understanding: journey + richness (the map reacts behind) */}

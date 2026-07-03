@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import {
-  Undo2, Redo2, RotateCcw, Wand2, KeyRound, Boxes,
+  Undo2, Redo2, RotateCcw, Wand2, KeyRound, Boxes, Camera,
   Layers as LayersIcon, SlidersHorizontal, PanelBottomClose, PanelBottom,
   PanelLeftClose, PanelRightClose,
 } from "lucide-react";
@@ -20,6 +20,7 @@ import { SceneStrip } from "./SceneStrip";
 import { RestyleModal } from "./RestyleModal";
 import { Map3DStyleModal } from "./Map3DStyleModal";
 import { SettingsModal } from "./SettingsModal";
+import { StillStudio } from "./StillStudio";
 import { CommandPalette } from "./CommandPalette";
 import { ErrorBoundary } from "./ErrorBoundary";
 
@@ -58,6 +59,18 @@ export const Editor: React.FC = () => {
   const [restyleOpen, setRestyleOpen] = useState(false);
   const [style3dOpen, setStyle3dOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [stillOpen, setStillOpen] = useState(false);
+
+  // Blogger flow: generated from home in "Still image" mode → the Still Studio
+  // opens itself so the first thing they do is pick + export their image.
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem("mapanisy-open-still") === "1") {
+        sessionStorage.removeItem("mapanisy-open-still");
+        setStillOpen(true);
+      }
+    } catch { /* SSR / private mode */ }
+  }, []);
   const [layersOpen, setLayersOpen] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [dockOpen, setDockOpen] = useState(true);
@@ -157,6 +170,7 @@ export const Editor: React.FC = () => {
           <ProjectMenu />
           <button onClick={() => setStyle3dOpen(true)} title="Creative 3D map styles" className={accentBtn}><Boxes size={13} /> 3D</button>
           <button onClick={() => setRestyleOpen(true)} title="Restyle your render with AI" className={accentBtn}><Wand2 size={13} /> Restyle</button>
+          <button onClick={() => setStillOpen(true)} title="Extract this frame as an image — annotate & export PNG/JPG/WebP/SVG/PDF" className={accentBtn}><Camera size={13} /> Still</button>
           <span className="mx-1 h-5 w-px bg-line" />
           <RenderButton />
           <RenderQueue />
@@ -221,6 +235,7 @@ export const Editor: React.FC = () => {
       <RestyleModal open={restyleOpen} onClose={() => setRestyleOpen(false)} onOpenSettings={() => { setRestyleOpen(false); setSettingsOpen(true); }} />
       <Map3DStyleModal open={style3dOpen} onClose={() => setStyle3dOpen(false)} />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <StillStudio open={stillOpen} onClose={() => setStillOpen(false)} />
       <CommandPalette />
     </div>
   );
