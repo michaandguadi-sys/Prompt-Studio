@@ -1,0 +1,28 @@
+# Dependencies + build output (rebuilt inside the image for the right platform)
+node_modules
+.next
+.remotion-bundle-tmp
+public/remotion-bundle
+tsconfig.tsbuildinfo
+
+# Secrets — runtime env comes from env_file, never baked into the image
+.env
+.env.*
+.clerk
+
+# Local runtime data (mounted as volumes instead)
+.renders
+.dev-data
+projects-v2
+
+# Dev / meta
+.git
+.gitignore
+.claude
+.DS_Store
+*.mp4
+*.mov
+.smoke-render.mp4
+.smoke-route.mp4
+Dockerfile
+docker-compose.yml

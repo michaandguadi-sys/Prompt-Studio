@@ -2,6 +2,7 @@ node_modules/
 .next/
 out/
 .env.local
+.env.production
 # presets/
 .dev-data/
 *.tsbuildinfo
@@ -9,7 +10,16 @@ out/
 
 # clerk configuration (can include secrets)
 /.clerk/
+
+# Claude Code agent worktrees (embedded git repos — never commit)
+.claude/worktrees/
 public/remotion-bundle
 .remotion-bundle-tmp
 .smoke-render.mp4
 .smoke-route.mp4
+
+# server-side cloud renders (transient outputs)
+.renders/
+
+# user project data — lives in the docker volume on the VPS, not in git
+projects-v2/

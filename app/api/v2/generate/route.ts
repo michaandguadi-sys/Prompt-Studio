@@ -9,6 +9,8 @@
  * it with Zod. Degrades to a richer heuristic when no API key is present.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
+import { rateLimit } from "@/lib/rateLimit";
 import { createDefaultProject, createLayer, defaultCamera, id as newId } from "@/v2/doc/factory";
 import { Project as ProjectSchema, type Project, type Layer, type Theme } from "@/v2/doc/schema";
 import { HIGHLIGHT_PRESETS } from "@/lib/presets/highlightPresets";
@@ -84,29 +86,31 @@ function dedupeText(layers: Layer[]): Layer[] {
 // glow, smoothness, reveal, extrude, labelText, borderDash, transform, …) —
 // curated templates use it to art-direct every detail; Zod strips anything bad.
 type Styled = { style?: Record<string, unknown> };
+// Timing fields the AI can set directly on any layer — builder trusts these over heuristics.
+type Timed = { inSec?: number; outSec?: number | null; enter?: string; exit?: string };
 type PlanLayer =
-  | ({ kind: "highlight"; place: string; fill?: "solid" | "flag" | "hatch" | "crosshatch" | "stripes" | "dots"; mood?: string; label?: string } & Styled)
-  | ({ kind: "label"; text: string; sub?: string; place: string; variant?: "pin" | "card" | "banner" | "lower-third" } & Styled)
-  | ({ kind: "route"; from: string; to: string; transport?: string; icon?: string; cameraMode?: "follow" | "frame" | "chase" | "orbit" } & Styled)
-  | ({ kind: "flag"; place: string } & Styled)
-  | ({ kind: "title"; text: string; sub?: string; template?: string; position?: string } & Styled)
-  | ({ kind: "chart"; variant?: "counter" | "bar" | "line"; value?: number; prefix?: string; suffix?: string; label?: string } & Styled)
+  | ({ kind: "highlight"; place: string; fill?: "solid" | "flag" | "hatch" | "crosshatch" | "stripes" | "dots"; mood?: string; label?: string } & Styled & Timed)
+  | ({ kind: "label"; text: string; sub?: string; place: string; variant?: "pin" | "card" | "banner" | "lower-third" } & Styled & Timed)
+  | ({ kind: "route"; from: string; to: string; transport?: string; icon?: string; cameraMode?: "follow" | "frame" | "chase" | "orbit" } & Styled & Timed)
+  | ({ kind: "flag"; place: string } & Styled & Timed)
+  | ({ kind: "title"; text: string; sub?: string; template?: string; position?: string } & Styled & Timed)
+  | ({ kind: "chart"; variant?: "counter" | "bar" | "line"; value?: number; prefix?: string; suffix?: string; label?: string } & Styled & Timed)
   // A symbol dropped on a spot — `between:[A,B]` sits it on the contested border
   // between two places (midpoint); else `place` names where it lands.
-  | ({ kind: "marker"; place?: string; between?: [string, string]; icon?: string; emoji?: string; label?: string } & Styled)
+  | ({ kind: "marker"; place?: string; between?: [string, string]; icon?: string; emoji?: string; label?: string } & Styled & Timed)
   // An editorial leader-line callout pointing at a place.
-  | ({ kind: "annotation"; place: string; text: string; sub?: string; side?: "top" | "bottom" | "left" | "right" | "auto" } & Styled)
+  | ({ kind: "annotation"; place: string; text: string; sub?: string; side?: "top" | "bottom" | "left" | "right" | "auto" } & Styled & Timed)
   // A network of arcs: hub-and-spoke (hub → places) or a chain (places in order).
-  | ({ kind: "connections"; hub?: string; places: string[]; mode?: "hub" | "chain" } & Styled)
+  | ({ kind: "connections"; hub?: string; places: string[]; mode?: "hub" | "chain" } & Styled & Timed)
   // Darken everything except a circle on `place` to force the eye there.
-  | ({ kind: "spotlight"; place: string } & Styled)
+  | ({ kind: "spotlight"; place: string } & Styled & Timed)
   // COMPOSITE: a clash between two countries — auto-highlights BOTH (opposing
   // colours), draws the real shared border (glowing, its own style) and places
   // crossing-swords ALONG that border. Camera frames both. One word does it all.
-  | ({ kind: "conflict"; a: string; b: string; icon?: string; swords?: number; colorA?: string; colorB?: string; border?: string } & Styled)
+  | ({ kind: "conflict"; a: string; b: string; icon?: string; swords?: number; colorA?: string; colorB?: string; border?: string } & Styled & Timed)
   // COMPOSITE: drop every country in a region as a flag badge (staggered pop-in)
   // and frame the camera on that region. "every country in Europe with flags".
-  | ({ kind: "regionFlags"; region: string } & Styled)
+  | ({ kind: "regionFlags"; region: string } & Styled & Timed)
   // DATA-BOUND choropleth: fill countries/regions with a proportional colour
   // scale driven by real figures from the brief (GDP, population, etc.).
   | ({ kind: "choropleth"; places: string[]; values: number[]; metric?: string; unit?: string; labels?: string[] } & Styled)
@@ -118,9 +122,23 @@ type PlanLayer =
   | ({ kind: "character"; name: string; places: string[]; icon?: string } & Styled)
   // PROPORTIONAL SYMBOL MAP: circles sized by value at each location. The classic
   // Gapminder / Hans Rosling visual for population, GDP, cases, deaths, etc.
-  | ({ kind: "bubbles"; places: string[]; values: number[]; labels?: string[]; metric?: string; unit?: string; color?: string } & Styled)
+  // stagger: seconds between each bubble appearing for a cinematic one-by-one reveal.
+  | ({ kind: "bubbles"; places: string[]; values: number[]; labels?: string[]; metric?: string; unit?: string; color?: string; stagger?: number } & Styled)
   // WEIGHTED FLOW: like connections but arc width = volume (trade, migration, data).
-  | ({ kind: "flows"; hub?: string; places: string[]; weights: number[]; mode?: "hub" | "chain"; color?: string } & Styled);
+  | ({ kind: "flows"; hub?: string; places: string[]; weights: number[]; mode?: "hub" | "chain"; color?: string } & Styled)
+  // EARTH OBSERVATION (NASA GIBS / satellite): overlays a real satellite raster on
+  // the map — vegetation (NDVI), nighttime lights, wildfires, true-color imagery.
+  // Use for environmental-change, deforestation, glacier, wildfire, urban-sprawl stories.
+  // Optional compareDatasetId+compareDate shows a second layer for before/after contrast.
+  | ({ kind: "earthlayer"; dataset: "true-color" | "ndvi" | "nightlights" | "fire" | "sea-temp" | "snow" | "aerosol"; date?: string; opacity?: number; label?: string; compareDataset?: "true-color" | "ndvi" | "nightlights" | "fire" | "sea-temp" | "snow" | "aerosol"; compareDate?: string } & Styled & Timed)
+  // GEODESIC RANGE RINGS: true distance circles on the sphere — "within 500 km",
+  // missile/radar range, blast radius, earthquake epicenter, coverage area.
+  | ({ kind: "radius"; place: string; radiusKm: number; rings?: number; mode?: "grow" | "ripple" | "static"; color?: string; unit?: "km" | "mi" } & Styled & Timed)
+  // ANIMATED TIMESTAMP: a date (or day counter) that ADVANCES across the scene —
+  // the documentary ticker ("SEP 1939 → MAY 1945", "DAY 1 → DAY 872").
+  | ({ kind: "timestamp"; start?: string; end?: string; format?: "year" | "month-year" | "full"; dayStart?: number; dayEnd?: number; prefix?: string; text?: string; position?: string } & Styled & Timed)
+  // CINEMATIC WEATHER: deterministic particles over the whole frame.
+  | ({ kind: "atmosphere"; effect: "snow" | "rain" | "embers" | "dust" | "fog"; density?: number; wind?: number } & Styled & Timed);
 export type Plan = {
   title: string; subtitle?: string; durationSec: number; aspect?: "16:9" | "9:16" | "1:1";
   basemapStyle?: string; terrain?: boolean; buildings3d?: boolean; focus: string; mood?: string; motion?: string;
@@ -153,6 +171,8 @@ export type Plan = {
   look?: Record<string, unknown>;
   /** Ordered places the camera flies THROUGH for a journey (ends at focus). */
   cameraStops?: string[];
+  /** Full per-beat camera poses (AI-authored). When present, overrides heuristic framing. */
+  cameraPoses?: Array<{ place: string; zoom?: number; pitch?: number; bearing?: number; motion?: string }>;
   /** STORY MODE: one voiceover line per beat, in order (suggested narration). */
   narration?: string[];
   /** OPTIONAL: reusable feature add-ons the AI invented for this story. */
@@ -164,7 +184,7 @@ const MOTIONS = ["fly-in", "zoom-out", "orbit", "push-in", "pan", "hold"];
 const SYSTEM = `You are the director of "Mapanisy", a cinematic MAP-animation studio (Vox / Johnny Harris style). Translate the user's idea into ONE finished, well-composed, art-directed map animation. Think like an editor: what is the single visual story, where does the eye go, what's the one focal point?
 
 Output ONLY minified JSON (no prose, no markdown) of EXACTLY this shape:
-{"title":str(≤30),"subtitle":str(≤48),"durationSec":num(5-12),"aspect":"16:9"|"9:16"|"1:1","basemapStyle":"dark"|"light"|"satellite"|"streets"|"outdoors"|"historical","mapYear":"1880 (start era, historical only)","mapYearEnd":"1920 (end era — animates year sweep + on-screen counter; historical only)","terrain":bool,"focus":str,"motion":"fly-in"|"zoom-out"|"orbit"|"push-in"|"pan"|"hold","cameraStops":[str],"mood":"conflict"|"historical"|"trade"|"empire"|"political"|"arctic"|"neutral","palette":"Default"|"Vox Editorial"|"Arctic Cold"|"Conflict Red"|"Trade Green"|"Political Violet"|"Classic Mono","priority":"camera"|"route"|"highlight","map3dStyle":"(optional creative 3D world) holographic|neon-noir|miniature|blueprint|obsidian|molten|aurora|crystal-ice|papercraft|war-room|sakura|emerald|golden-hour|monochrome","map3dCustom":{"(optional — INVENT a bespoke 3D world when no preset fits)":"","landColor":"#hex","waterColor":"#hex","buildingColor":"#hex","buildingOpacity":0-1,"buildingHeightMult":0.2-8,"buildingGradient":bool,"boundaryGlow":"#hex","terrain":bool,"terrainStrength":0-5,"bgColor":"#hex","tintColor":"#hex","tintOpacity":0-1,"vignette":0-0.7,"pitch":0-84},"look":{"vignette":0-0.7,"grain":0-0.3,"texture":"none"|"paper","mapFilter":"none"|"antique"|"noir"|"sepia"},"layers":[...]}
+{"title":str(≤30),"subtitle":str(≤48),"durationSec":num(5-12),"aspect":"16:9"|"9:16"|"1:1","basemapStyle":"dark"|"light"|"satellite"|"streets"|"outdoors"|"historical","mapYear":"1880 (start era, historical only)","mapYearEnd":"1920 (end era — animates year sweep + on-screen counter; historical only)","terrain":bool,"focus":str,"motion":"fly-in"|"zoom-out"|"orbit"|"push-in"|"pan"|"hold","cameraStops":[str],"mood":"conflict"|"historical"|"trade"|"empire"|"political"|"arctic"|"neutral","palette":"Default"|"Vox Editorial"|"Arctic Cold"|"Conflict Red"|"Trade Green"|"Political Violet"|"Classic Mono","priority":"camera"|"route"|"highlight","map3dStyle":"(optional look) PRO: clean-minimal|apple-light|apple-dark|earth-documentary|natgeo|satellite-cinematic|adventure|hiking|luxury-travel|editorial|filmic|midnight|desert|winter|ocean|vintage-atlas|modern-monochrome · CREATIVE: holographic|neon-noir|miniature|blueprint|obsidian|molten|aurora|crystal-ice|papercraft|war-room|sakura|emerald|golden-hour|monochrome","map3dCustom":{"(optional — INVENT a bespoke 3D world when no preset fits)":"","landColor":"#hex","waterColor":"#hex","buildingColor":"#hex","buildingOpacity":0-1,"buildingHeightMult":0.2-8,"buildingGradient":bool,"boundaryGlow":"#hex","terrain":bool,"terrainStrength":0-5,"bgColor":"#hex","tintColor":"#hex","tintOpacity":0-1,"vignette":0-0.7,"pitch":0-84},"look":{"vignette":0-0.7,"grain":0-0.3,"texture":"none"|"paper","mapFilter":"none"|"antique"|"noir"|"sepia"},"layers":[...]}
 
 layer kinds (refer to places by NAME — coords are resolved for you):
  {"kind":"highlight","place":"France","fill":"flag"|"solid"|"hatch"|"crosshatch"|"stripes"|"dots","mood":"conflict","label":"optional ON-MAP text"}
@@ -182,8 +202,12 @@ layer kinds (refer to places by NAME — coords are resolved for you):
  {"kind":"choropleth","places":["United States","China","Germany"],"values":[25000,18000,4000],"metric":"GDP","unit":"billion USD"}  ← DATA MAP: fills each country/region with a proportional colour (light→dark scale). ALWAYS use when the brief contains a ranked list of countries by any figure (GDP, population, CO₂, poverty rate, military spending, etc.). Pairs perfectly with a "chart" counter for the top figure.
  {"kind":"truesize","source":"France","target":"Texas, USA","label":"France fits inside Texas"}  ← SCALE METAPHOR: overlays France's exact shape on Texas to show true relative size. Use for "how big is X vs Y", empire-scale context, country comparisons. The label becomes an on-map annotation.
  {"kind":"character","name":"Marco Polo","places":["Venice, Italy","Baghdad, Iraq","Samarkand, Uzbekistan","Beijing, China"],"icon":"pin"}  ← CHARACTER THREAD: animates a named person's journey as a traced chain of stops. Use for biographies, expeditions, migrations, invasions. Each stop gets a marker; the whole path draws in order.
- {"kind":"bubbles","places":["China","USA","India","Indonesia"],"values":[1400000000,330000000,1380000000,270000000],"metric":"Population","unit":"people"}  ← PROPORTIONAL SYMBOLS: circles sized by sqrt-scaled value — perfect for population, deaths, GDP per country at-a-glance. Pairs with a choropleth for maximum impact on data stories.
+ {"kind":"bubbles","places":["China","USA","India","Indonesia"],"values":[1400000000,330000000,1380000000,270000000],"metric":"Population","unit":"people","stagger":0}  ← PROPORTIONAL SYMBOLS: circles sized by sqrt-scaled value. STAGGERED REVEAL: when "stagger":N is set (N = seconds between bubbles, e.g. 0.9), each bubble pops in one-by-one — ALWAYS order smallest→largest so the largest appears last as a dramatic climax. Use stagger:0.7–1.1 for multi-entity reveal stories ("six centers", "top-ten cities"). The final hero entity should also get a camera push-in in the next beat.
  {"kind":"flows","hub":"London, UK","places":["New York","Mumbai","Sydney"],"weights":[450,320,180],"mode":"hub"}  ← WEIGHTED FLOWS: arc thickness = volume. Use when quantities differ significantly (trade $450B vs $180B). Shows MAGNITUDE not just connection. Add "pulse":true style for live-trade feel.
+ {"kind":"radius","place":"Pyongyang, North Korea","radiusKm":1500,"rings":3,"mode":"grow","color":"#ff5a44"}  ← GEODESIC RANGE RINGS: true distance circles ("within 500 km"). ALWAYS use for: missile/radar/weapon range, blast radius, evacuation zone, earthquake epicenter (mode:"ripple" = endless sonar pulses), airport/port coverage, "everything within X km/hours". The most journalistic way to show REACH and PROXIMITY. Labels show real distances on each ring.
+ {"kind":"timestamp","start":"1939-09-01","end":"1945-05-08","format":"month-year","position":"top-right"}  ← ANIMATED DATE TICKER: the date ADVANCES with the film — the documentary time-passing device. ALWAYS add for: wars, pandemics, expeditions, empire rise/fall, any story spanning months/years. Day-counter variant: {"kind":"timestamp","dayStart":1,"dayEnd":872,"prefix":"DAY"} for sieges/disasters ("DAY 872 of the siege"). One per composition.
+ {"kind":"atmosphere","effect":"snow","density":0.5,"wind":0.3}  ← CINEMATIC WEATHER over the frame: "snow" (winter campaigns, arctic), "rain" (monsoon, storms), "embers" (war zones, wildfires — pairs with marker icon:"fire"), "dust" (deserts, drought), "fog" (mystery, dawn battles). Sets MOOD instantly; use ONE, subtle (density 0.3-0.6), when the story has a strong environmental character.
+ {"kind":"earthlayer","dataset":"ndvi","date":"2024-01-01","opacity":0.75,"label":"Vegetation 2024"}  ← EARTH OBSERVATION: overlays real NASA satellite data on the map. ALWAYS use for: deforestation, glaciers melting, wildfires, urban sprawl, drought, sea-level, biodiversity, land cover change. Datasets: "true-color" (daily satellite imagery), "ndvi" (vegetation index — green=healthy forest, brown=lost/dry), "nightlights" (city light growth, urbanization), "fire" (thermal hotspots), "sea-temp" (ocean warming), "snow" (ice/snow extent), "aerosol" (pollution/smoke). For before/after change detection add compareDataset+compareDate (different year). Date format: YYYY-MM-DD. Pairs with basemapStyle:"satellite" and terrain:true for maximum realism. This makes environmental map journalism genuinely data-driven, not illustrative.
 ANY layer may add "style":{...} to art-direct exact fields — e.g. highlight {"fillColor":"#c0392b","extrude":18,"glowColor":"#ff4030"}, route {"color":"#e67e22","dashStyle":"dashed","glow":0.8}, marker {"color":"#ff3030","sizePx":150}.
 
 VISUAL VOCABULARY — translate the user's WORDS into VISUALS (show, don't write):
@@ -194,9 +218,13 @@ VISUAL VOCABULARY — translate the user's WORDS into VISUALS (show, don't write
  • "every / all countries in <region>" → kind:"regionFlags". one country → highlight fill:"flag".
  • ranked countries by a figure (GDP / population / CO₂ / military / poverty / exports) → kind:"choropleth" with the REAL numbers you verified. The colour gradient tells the whole story at a glance — data journalism grade.
  • "how big is X compared to Y" / "X is the size of Y" / scale context → kind:"truesize". The polygon overlay is the most visceral way to convey geographic scale.
+ • range / reach / "within X km" / blast radius / fallout / missile range / radar coverage / evacuation zone / epicenter / shockwave → kind:"radius" (epicenter/shockwave = mode:"ripple"). Distance IS the story — show it as rings, not text.
+ • a story spanning months or years (war, pandemic, expedition, empire) → ADD kind:"timestamp" with the real dates. A siege/blockade/disaster counted in days → the day-counter variant. Time passing is half the drama.
+ • winter campaign / blizzard / arctic → atmosphere "snow" · monsoon / hurricane → "rain" · war zone / wildfire → "embers" · desert / drought → "dust" · dawn / mystery → "fog". Subtle (density≤0.6).
  • country-by-country quantities (population / deaths / infections / GDP per country) → kind:"bubbles". Circle area = value. Use INSTEAD of choropleth when there are fewer places (2-10) and the story is about the MAGNITUDE of each individual place.
  • trade volumes / investment flows / migration corridors with known volumes → kind:"flows" with weights. Arc WIDTH encodes the magnitude. Much more informative than plain connections when the quantities vary widely.
  • biography / expedition / migration / journey of a named person → kind:"character". Traces their stops as an animated chain. Use alongside "title" beats naming each chapter.
+ • deforestation / Amazon / rainforest / glacier / wildfire / wildfire season / urban sprawl / drought / flood / sea level / habitat loss / land cover / NDVI / vegetation / climate change / carbon / coral / biodiversity → kind:"earthlayer" with the appropriate dataset ("ndvi" for forests, "fire" for wildfires, "nightlights" for urbanization, "snow" for glaciers/ice). This is MANDATORY for any environmental-change story — a real satellite layer is the journalism, not just a highlight.
  • any citation/source in brief.facts (World Bank, UN, census, etc.) → the renderer auto-shows them as in-frame source credits — no extra layer needed. Just verify your facts and cite them in the brief.
  • historical / ancient / medieval / empire / BCE / "in 1850" → look.mapFilter:"antique" (+ basemapStyle:"historical"+mapYear when the exact era is the point).
 
@@ -227,7 +255,7 @@ FRAMING & STYLE DISCIPLINE — pick the move + style that SUIT the content (the 
  • A JOURNEY / route → basemapStyle:"dark", motion:"fly-in" through cameraStops, moderate tilt.
  • HISTORICAL → basemapStyle:"historical" or the antique look; keep the camera flatter (old maps read top-down).
  Match basemapStyle to the subject EVERY time — a wrong style (satellite under data, flat dark for a skyline) is the #1 thing that makes it look amateur.
- • CREATIVE 3D WORLDS: for a striking, art-directed look set "map3dStyle" — it recolours land/water, art-directs glowing 3D buildings, relief and grade into a distinctive world. Use "holographic"/"blueprint" for tech/data/future, "neon-noir" for night/urban/culture, "miniature"/"golden-hour" for a charming city diorama, "molten" for disaster/energy/conflict, "aurora"/"crystal-ice"/"emerald" for nature/climate, "war-room" for military/geopolitics, "papercraft" for whimsical/travel, "sakura" for Japan/spring/romance, "monochrome" for stark editorial. Best on a CITY or country reveal (buildings show at city zoom). Pairs with motion:"orbit"/"push-in".
+ • MAP STYLE via "map3dStyle" — PREFER the PROFESSIONAL collection for most stories (they read like premium travel documentaries): "earth-documentary"/"satellite-cinematic" for landscapes+terrain, "natgeo"/"vintage-atlas" for history/exploration, "editorial"/"clean-minimal" for news/data, "apple-light"/"apple-dark" for modern product-grade looks, "adventure"/"hiking" for outdoor journeys, "luxury-travel"/"filmic"/"midnight" for mood pieces, "desert"/"winter"/"ocean" when the geography matches, "modern-monochrome" for stark editorial. The CREATIVE worlds (holographic, neon-noir, miniature, blueprint, molten, aurora, war-room, sakura, …) are for deliberately stylised pieces — use only when the brief calls for that energy; best on a CITY reveal, pairs with motion:"orbit"/"push-in".
  • INVENT A 3D WORLD: when the story has a strong colour identity that no preset nails (e.g. "a toxic green wasteland", "a royal purple empire", "a frozen crimson tundra"), set "map3dCustom" with your own hexes — landColor, waterColor, buildingColor (+ buildingHeightMult/Gradient), boundaryGlow, terrain, bgColor/tintColor, pitch. Be bold and cohesive; the schema clamps anything out of range. Use a preset OR map3dCustom, not both.
 
 8. PLACE ACCURACY (critical — the map MUST land on the right spot). Every place name you emit is geocoded literally, so be UNAMBIGUOUS:
@@ -235,6 +263,8 @@ FRAMING & STYLE DISCIPLINE — pick the move + style that SUIT the content (the 
    • For a COUNTRY, use the country's common English name alone ("Japan", "Georgia (country)"). For a CITY, prefer "City, Country". For a region/feature, name it precisely ("Sichuan, China", "Strait of Hormuz").
    • Highlights/pins/markers must reference the EXACT feature the story is about. If unsure between two readings, pick the one the idea clearly means and qualify it.
    • Never invent a place that doesn't exist; if a beat has no real location, omit the pin rather than guessing.
+   • For Chinese places: always append ", China" (e.g. "Dujiangyan, Sichuan, China", not "Dujiangyan"). For research centers / POIs, use the full official English name + city + province + China so the geocoder finds them.
+   • When you receive RESEARCHED ENTITIES from the Director script (marked with ⚑), copy those place names VERBATIM — the Director verified them; any substitution will break geocoding.
 
 9. HISTORICAL TIME-SWEEP: when the ERA ITSELF CHANGES (empire growing 100 BCE→476 CE, Black Death 1347→1353, WWI border redraw 1914→1918) set basemapStyle:"historical" + mapYear (start year, e.g. "-100") + mapYearEnd (end year, e.g. "476"). The map date animates and an on-screen year counter auto-appears. Set durationSec:14-22. Only when the date-change IS the visual drama — not just for every historical story.
 
@@ -253,6 +283,16 @@ DATA BINDING — when your brief cites a real number, SHOW IT on the map:
 • Trend over time → {"kind":"chart","variant":"line","series":[{"label":"2000","value":100},{"label":"2024","value":340}]}
 • Numbers make the story credible and specific. If you quote a figure, chart it.
 
+TIMING — YOU control when each layer appears. Add these fields DIRECTLY on every layer object (not inside "style"):
+• "inSec":N — exactly when this layer appears (seconds from composition start). Beat 1 layers: 0.3–1.5. Beat 2 layers: [dur×(1/n)]–[dur×(1/n)+1.5]. Stagger same-beat layers by 0.25s each.
+• "outSec":N or null — when to exit. null = stays to end. Chapter titles: set outSec = next title's inSec − 0.35.
+• "enter":"fade"|"slide-up"|"scale"|"border-first" — how it enters. Highlights/routes: "border-first". Titles: "slide-up". Labels/markers: "fade" or "scale".
+Example: {"kind":"title","text":"THE FALL","inSec":1.2,"outSec":5.8,"enter":"slide-up"}
+
+CAMERA POSES — for multi-beat stories, add "cameraPoses" to the top-level plan (one per beat, in story order):
+{"cameraPoses":[{"place":"Europe","zoom":3,"pitch":8,"bearing":0,"motion":"zoom-out"},{"place":"Berlin, Germany","zoom":6,"pitch":45,"bearing":-15,"motion":"push-in"}]}
+zoom 2–4 = continental, 5–6 = country, 7–9 = region, 10–14 = city. pitch 0–12 = data/flat, 30–50 = dramatic lean, 55–65 = skyline.
+
 Be decisive and specific to THIS idea.`;
 
 /* ── STORY MODE: a narrative/script → a sequenced, chaptered fly-through ─────── */
@@ -260,10 +300,10 @@ const STORY_SYSTEM = `${SYSTEM}
 
 STORY MODE — the input is a NARRATIVE or script, not a single idea. Turn it into ONE cinematic map STORY that plays as a sequenced fly-through:
 S1. Read the WHOLE story and find its 3-6 KEY GEOGRAPHIC BEATS in chronological/narrative order.
-S2. Set durationSec to 12-28 (longer — it's a story). Fill "cameraStops" with the beats' places IN ORDER (the camera journeys through them); "focus" is the final/climactic place.
+S2. Set durationSec to 15-45 (longer — it's a story; budget ~6-8s per beat). Fill "cameraStops" with the beats' places IN ORDER (the camera journeys through them); "focus" is the final/climactic place.
 S3. For EACH beat add its visuals (highlight / route / marker icon:swords|fire|… / connections) AND ONE short chapter "title" naming that beat (≤ 24 chars). Put layers in STORY ORDER — they are sequenced automatically so each chapter title appears as the camera arrives, then yields to the next.
 S4. Add "narration": an array with ONE vivid voiceover sentence per beat (same order, same count as the beats) — what a documentary narrator would say.
-S5. ≤ 9 layers total. The MAP + the journey carry the story; titles are short chapter markers, never paragraphs. Keep one cohesive palette + look for the whole piece (antique for history, noir for war).
+S5. ≤ 14 layers total. The MAP + the journey carry the story; titles are short chapter markers, never paragraphs. Keep one cohesive palette + look for the whole piece (antique for history, noir for war).
 S6. MAKE IT VISUAL, not just titles: when the beats form a journey, add ONE {"kind":"connections","places":[beats in order],"mode":"chain"} as the visual spine; give the climactic beat a marker (swords/explosion/fire/skull/oil) or highlight. Every beat should leave something ON the map.
 
 ══ VISUAL STORYTELLING — how the best map-explainers (Vox, Johnny Harris, Kurzgesagt, Bloomberg) actually do it ══
@@ -276,8 +316,8 @@ S6. MAKE IT VISUAL, not just titles: when the beats form a journey, add ONE {"ki
 ══ TEXT SAFETY — CRITICAL, never violate (this is what separates pro from amateur) ══
 T1. NEVER show two text elements (titles/labels) on screen at the SAME TIME if they could overlap. Each chapter title must fully EXIT (fade/slide out) BEFORE the next chapter title ENTERS. Give every title an explicit timing window {inSec, outSec} that does NOT overlap the next title's window.
 T2. Text must not sit ON TOP of a busy feature in the same instant (a route head arriving, a highlight growing, a marker popping). Stagger them: feature animates, settles, THEN its label/title appears — or place the text in clear negative space (opposite side of the focal element).
-T3. Keep on-screen text to AT MOST ONE title + minimal map labels at any moment. If a beat needs more words than one short line, that is a SIGN TO SPLIT IT INTO ITS OWN SEQUENCE — do not cram.
-T4. PREFER A MULTI-SEQUENCE STORY over cramming everything into one continuous scene. If the narrative has distinct phases/chapters (more than ~3-4 beats, or a clear "and then…" structure), say so in the brief ("angle") and design clean, separable beats so each can stand as its own scene/storybeat — even if the camera flows continuously between them. A separable beat = its own focal place + its own single title + its own one narration line.`;
+T3. Keep on-screen text to AT MOST ONE title + minimal map labels at any moment. If a beat needs more words than one short line, cut words — never cram.
+T4. THE WHOLE STORY IS ONE CONTINUOUS TIMELINE — a single uninterrupted shot where the camera flows from beat to beat (there are NO scene cuts). Design every beat's window on that one timeline: give each beat's layers explicit {inSec, outSec} so beat i's title has fully exited before beat i+1's title enters, and each beat's visuals appear as the camera ARRIVES at that beat's place. Think of it as one take by a documentary drone — establish, travel, reveal, land.`;
 
 /* ── The Director Doctrine, woven into the planner so it researches + fact-checks
  * the story FIRST and tells the RIGHT one, cohesively, like a journalist ─────── */
@@ -295,16 +335,408 @@ const ADDON_INSTRUCTION = `\n\n══ OPTIONAL — INVENT A REUSABLE FEATURE (ad
 
 const withDoctrine = (base: string) => `${base}${DOCTRINE}${BRIEF_INSTRUCTION}${ADDON_INSTRUCTION}`;
 
-/* ── Director planner (provider-agnostic: Anthropic / OpenAI / compatible) ──── */
-async function aiPlan(idea: string, cfg: AIConfig | null, system: string = SYSTEM): Promise<{ plan: Plan | null; error?: string }> {
-  if (!cfg) return { plan: null };
-  const { text, error } = await aiComplete(system, `Idea: """${idea.slice(0, 1400)}"""`, cfg);
-  if (!text) return { plan: null, error: error ?? "Empty AI response." };
+/** SIMPLE REQUEST MODE — the lightweight default for direct, non-story prompts.
+ *  No documentary expansion, no deep research, no invented context: the user
+ *  already knows what they want. Deep research is reserved for prompts that ask
+ *  for it (or genuinely need factual grounding). */
+const SIMPLE_MODE = `\n\n══ SIMPLE REQUEST — keep it light ══\nThis is a direct, simple request: the user already knows exactly what they want. Do NOT expand it into a documentary. No research beyond resolving the named places, no extra "context" layers, no invented statistics, dates, or backstory. Produce exactly the requested visual: AT MOST 4 layers, ONE clean intentional camera move, a cohesive look, and at most one short title (only if a heading genuinely helps). Elegant simplicity wins. Include only a one-line "brief": {"thesis":"<what this shows>","angle":"","archetype":"","facts":[],"caveats":[],"disputed":[]}.`;
+
+/** True when a prompt should get the lightweight path: short, direct, ≤2 places,
+ *  and no signal that the user wants a researched story. */
+function isSimpleIntent(idea: string, locationCount: number): boolean {
+  if (idea.length >= 140) return false;
+  if (locationCount > 2) return false;
+  const RESEARCHY = /documentar|research|story|history|histor|explain|why\s|how\s|war|battle|empire|evolution|crisis|conflict|migra|trade|econom|gdp|population|statistic|data|timeline|deep|fact|journal/i;
+  return !RESEARCHY.test(idea);
+}
+
+/* ── Phase 1: Story Director ─────────────────────────────────────────────────
+ * A focused, fast call that translates the user's idea into a structured story
+ * script — what to show per beat and HOW to animate it. The Composer (Phase 2)
+ * receives this script as context and outputs the complete technical Plan JSON.
+ * Separation of concerns: Director = editorial/story decisions; Composer = technical animation. */
+
+type DirectorBeat = {
+  title: string;           // ≤20 chars, chapter heading
+  narration: string;       // one powerful narrator sentence
+  focus: string;           // unambiguous place name for camera
+  energy?: "calm" | "building" | "tension" | "reveal" | "payoff";
+  pacing?: "slow" | "medium" | "fast";
+  cameraIntent?: "establish" | "explore" | "focus" | "reveal" | "hero";
+  zoom?: number;           // 2–14
+  pitch?: number;          // 0–75 degrees
+  bearing?: number;        // -30–30
+  motion?: string;         // fly-in | zoom-out | push-in | orbit | hold
+  layers: string[];        // plain English layer descriptions in geography→emphasis→text order
+  /** Researched entities for data-driven layers — Director fills these in when input says
+   *  "N [unnamed things]". Composer reads them verbatim → kind:"bubbles". */
+  entities?: {
+    place: string;    // fully geocodeable, country-qualified
+    value: number;    // the data value (visitors/year, population, GDP, etc.)
+    label?: string;   // short display label (≤15 chars)
+  }[];
+  entityMetric?: string;   // "Annual Visitors", "Population 2024", "GDP billion USD"
+  entityUnit?: string;     // "visitors/yr", "M people", "billion USD"
+  entityStagger?: number;  // seconds between each bubble appearing (0.6-1.2)
+};
+
+type DirectorScript = {
+  inputType?: "voiceover" | "idea" | "brief";
+  arc?: "journey" | "reveal" | "contrast" | "scale" | "data" | "conflict";
+  thesis: string;
+  totalSec?: number;
+  palette?: string;
+  mapStyle?: string;
+  look?: Record<string, unknown>;
+  beats: DirectorBeat[];
+};
+
+const DIRECTOR_SYSTEM = `You are the Editorial Mind of Mapanisy — a Vox / Johnny Harris / Bloomberg Visual Studio-grade cinematic map studio.
+
+You think. You research. You design. You don't fill templates — you make editorial decisions like the best documentary editors alive.
+
+When a user gives you input, your job is NOT to parse it mechanically. Your job is to understand what they're ACTUALLY trying to show — the subtext, the implicit facts, the emotional arc — and then design the perfect visual sequence to prove it.
+
+━━━ READING THE INPUT ━━━
+
+Detect type (encode as "inputType"):
+• "voiceover" — narrator lines. Read between them. Extract every implicit fact requirement.
+  "six research centers near Chengdu" → you know which six. Name them. The user doesn't know — that's why they're using this tool.
+  "the most visited is right in the city center" → that's the Chengdu Research Base (~2M/yr). It's the contrast entity.
+  "we chose Dujiangyan because it's quieter" → Dujiangyan Panda Base is the hero. Camera ends there.
+  Honor the narrator's EXACT arc. Visualize their words. Don't rewrite their story.
+• "brief" — structured paragraphs. Extract faithfully: who, where, what changed, why it matters.
+• "idea" — keywords or short phrase. Invent the strongest editorial angle yourself.
+
+━━━ FIND THE STORY ━━━
+
+Ask: what does the audience need to FEEL? What is the single visual that PROVES the thesis?
+• "thesis" — ONE punchy sentence (≤20 words)
+• "arc" — "journey"|"reveal"|"contrast"|"scale"|"data"|"conflict"
+
+━━━ RESEARCH — YOUR CORE OBLIGATION ━━━
+
+When input mentions "N [unnamed things]" — you NAME them. All of them. You have the knowledge. Use it.
+A vague description like "show 6 research centers as bubbles" is worthless — the animator cannot geocode unnamed places.
+
+For unnamed entity groups:
+→ Name every entity with full, geocodeable, country-qualified names
+→ Include real quantitative data (visitors/yr, population, GDP, area, deaths — whatever is relevant)
+→ Sort ASCENDING by value — smallest first, largest LAST (= cinematic climax, the eye lands there)
+→ Output on the relevant beat: "entities", "entityMetric", "entityUnit", "entityStagger" (0.7–1.1s)
+
+WORKED EXAMPLE — voiceover: "there are six panda research centers near Chengdu. The most visited is right in the city center, but we chose Dujiangyan for reintroduction":
+
+Beat 2 (DATA REVEAL — all 6 bubble up in staggered order):
+"entities": [
+  {"place":"Hetaoping Research and Conservation Center, Wolong, Sichuan, China","value":65000,"label":"Hetaoping"},
+  {"place":"Wolong Shenshuping Giant Panda Center, Wolong, Sichuan, China","value":95000,"label":"Shenshuping"},
+  {"place":"Panda Valley, Dujiangyan, Sichuan, China","value":150000,"label":"Panda Valley"},
+  {"place":"Dujiangyan Giant Panda Base, Dujiangyan, Sichuan, China","value":280000,"label":"Dujiangyan Base"},
+  {"place":"Bifengxia Giant Panda Base, Ya'an, Sichuan, China","value":480000,"label":"Bifengxia"},
+  {"place":"Chengdu Research Base of Giant Panda Breeding, Chengdu, Sichuan, China","value":2000000,"label":"Chengdu Base"}
+],
+"entityMetric":"Annual Visitors","entityUnit":"visitors/yr","entityStagger":0.9
+
+Beat 3 (HERO — camera pushes to Dujiangyan):
+focus: "Dujiangyan, Sichuan, China", energy:"payoff", cameraIntent:"hero", zoom:11, pitch:65
+layers: ["spotlight on Dujiangyan, Sichuan, China", "annotation at Dujiangyan, Sichuan, China text:REINTRODUCTION FOCUS side:right"]
+
+━━━ BEAT DESIGN ━━━
+
+2-6 beats. Each beat = one camera position + one emotional moment + one core visual.
+Beat 1: ALWAYS wide (zoom 2-5, pitch 0-15°), energy:"calm" — establish context.
+Beat N: ALWAYS the payoff — close, emotional, unmistakable proof of the thesis, energy:"payoff".
+
+ENERGY (emotional charge → camera language):
+• "calm"     → wide, contemplative. pitch 0-20°. 6-10s.
+• "building" → momentum rising. pitch 15-35°, push-in. 4-7s.
+• "tension"  → tight, urgent. pitch 30-50°. 3-5s.
+• "reveal"   → the key moment. Punch close OR sudden wide. 3-6s.
+• "payoff"   → hero shot. pitch 50-75°, slow hold or orbit. 5-10s.
+
+PACING (duration rhythm):
+• "slow" → 6-10s. Layers stagger 0.5s apart.
+• "medium" → 4-7s. Layers 0.3s apart.
+• "fast" → 2-4s. Layers 0.15s. Punchy.
+
+CAMERA INTENT:
+• "establish" → zoom 2-5, pitch 0-15°.
+• "explore"   → zoom 4-7, pitch 15-35°.
+• "focus"     → zoom 7-10, pitch 30-50°.
+• "reveal"    → zoom 9-12 or sudden zoom 2-4.
+• "hero"      → zoom 10-14, pitch 60-80°. Slow hold.
+
+ZOOM: 2-4=continental · 4-6=country/region · 6-8=metro · 8-11=city · 11-14=landmark
+
+VISUALIZATION CHOICE:
+• N specific entities with quantities → entities[] array + bubbles (stagger reveal, ascending order)
+• Countries ranked by one metric → choropleth
+• A journey between named places → route or character
+• Two-country conflict/tension → conflict (auto: both highlights + shared border glowing)
+• Environmental change / satellite imagery → earthlayer (ndvi/fire/nightlights/etc.)
+• Scale comparison → truesize
+
+LAYER ORDER — SACRED. Within every beat:
+  1. GEOGRAPHY: highlight / route / connections / earthlayer — the map speaks first
+  2. EMPHASIS: marker / spotlight / annotation — draw attention
+  3. TEXT: title / sub — arrives LAST, after the map has spoken
+Never put a title before geography in the same beat.
+
+━━━ OUTPUT — JSON only, no prose ━━━
+{"inputType":"voiceover|idea|brief","arc":"journey|reveal|contrast|scale|data|conflict","thesis":"≤20 words","totalSec":8-30,"palette":"Default|Vox Editorial|Arctic Cold|Conflict Red|Trade Green|Political Violet|Classic Mono","mapStyle":"dark|light|satellite|outdoors|historical","look":{"mapFilter":"none|antique|noir","vignette":0.3-0.6},"beats":[{"title":"≤20 CHARS","narration":"exact voiceover line or vivid invented narrator sentence","focus":"Precise, Country-qualified place name","energy":"calm|building|tension|reveal|payoff","pacing":"slow|medium|fast","cameraIntent":"establish|explore|focus|reveal|hero","zoom":2-14,"pitch":0-75,"bearing":-30-30,"motion":"fly-in|zoom-out|push-in|orbit|hold","layers":["GEOGRAPHY first","EMPHASIS second","TEXT last"],"entities":[{"place":"Full Name, City, Region, Country","value":NUMBER,"label":"≤15 chars"}],"entityMetric":"Annual Visitors","entityUnit":"visitors/yr","entityStagger":0.9}]}
+
+LAYER DESCRIPTION EXAMPLES (animator reads these LITERALLY — be precise):
+  "highlight Sichuan province, China subtle blue border-first"
+  "spotlight on Dujiangyan, Sichuan, China"
+  "marker at Chengdu, Sichuan, China icon:pin glow:green"
+  "annotation at Dujiangyan, Sichuan, China text:REINTRODUCTION side:right"
+  "title GIANT PANDAS sub:Sichuan, China enter:slide-up"  ← always last
+
+QUALITY CONTRACT:
+• Voiceover: visualize the narrator's words exactly — don't rewrite the story
+• Places: always country-qualified. "Dujiangyan, Sichuan, China" never "Dujiangyan"
+• Unnamed entities: research and name ALL of them — incomplete = broken animation
+• palette + mapStyle + look must match mood cohesively (antique for history, noir for war, dark for data)`;
+
+/** Robust JSON extraction that handles:
+ *  • Markdown code fences (```json ... ```)
+ *  • Trailing text after the closing brace
+ *  • Truncated output — closes unclosed brackets so a partial Plan is usable */
+function extractJSON(text: string): Record<string, unknown> | null {
+  // Strip markdown fences
+  const stripped = text.replace(/^```[a-z]*\n?/m, "").replace(/\n?```\s*$/m, "").trim();
+  const start = stripped.indexOf("{");
+  if (start === -1) return null;
+
+  // Pass 1: walk brackets to find the outermost complete object
+  let depth = 0, inStr = false, esc = false, complete = -1;
+  for (let i = start; i < stripped.length; i++) {
+    const c = stripped[i];
+    if (esc) { esc = false; continue; }
+    if (c === "\\" && inStr) { esc = true; continue; }
+    if (c === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (c === "{" || c === "[") depth++;
+    else if (c === "}" || c === "]") { depth--; if (depth === 0) { complete = i; break; } }
+  }
+
+  if (complete > 0) {
+    try { return JSON.parse(stripped.slice(start, complete + 1)) as Record<string, unknown>; } catch {}
+  }
+
+  // Pass 2: output was truncated — close all unclosed brackets, strip trailing partial value
+  let partial = stripped.slice(start);
+  // Remove a trailing incomplete string/value (everything after last comma/bracket at depth 1)
+  partial = partial.replace(/,\s*["{\[]*\s*$/, "").replace(/:\s*["{\[0-9]*\s*$/, "");
+  const stack: string[] = [];
+  let inS2 = false, es2 = false;
+  for (const c of partial) {
+    if (es2) { es2 = false; continue; }
+    if (c === "\\" && inS2) { es2 = true; continue; }
+    if (c === '"') { inS2 = !inS2; continue; }
+    if (inS2) continue;
+    if (c === "{") stack.push("}");
+    else if (c === "[") stack.push("]");
+    else if ((c === "}" || c === "]") && stack.length) stack.pop();
+  }
+  const repaired = partial + stack.reverse().join("");
+  try { return JSON.parse(repaired) as Record<string, unknown>; } catch { return null; }
+}
+
+async function directorCall(idea: string, cfg: AIConfig): Promise<DirectorScript | null> {
+  // 1800 tokens: enough for 6-10 entity research entries + 3-5 beats. Keeps cost low.
+  const { text } = await aiComplete(DIRECTOR_SYSTEM, `Idea: """${idea.slice(0, 1600)}"""`, cfg, { maxTokens: 1800 });
+  if (!text) return null;
   try {
-    const json = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
-    if (!json?.focus || !Array.isArray(json?.layers)) return { plan: null, error: "AI returned an unexpected shape." };
-    return { plan: json as Plan };
-  } catch { return { plan: null, error: "AI did not return valid JSON." }; }
+    const json = extractJSON(text);
+    if (!json || !Array.isArray(json?.beats) || (json.beats as unknown[]).length < 1) return null;
+    return json as unknown as DirectorScript;
+  } catch { return null; }
+}
+
+/** Beat duration (seconds) from pacing/energy fields — varies the rhythm of the story. */
+function beatDurFor(b: DirectorBeat): number {
+  const pacing = b.pacing ?? (b.energy === "calm" || b.energy === "payoff" ? "slow" : b.energy === "tension" || b.energy === "reveal" ? "fast" : "medium");
+  if (pacing === "slow")   return b.energy === "payoff" ? 9 : 7;
+  if (pacing === "fast")   return 3;
+  return 5; // medium
+}
+
+/** Layer stagger within a beat — pacing drives how quickly things stack up. */
+function staggerFor(b: DirectorBeat): number {
+  if (b.pacing === "slow") return 0.5;
+  if (b.pacing === "fast") return 0.15;
+  return 0.3;
+}
+
+/** How long the camera settles before the FIRST geography layer appears. */
+function camSettleFor(b: DirectorBeat): number {
+  if (b.pacing === "slow") return 0.6;
+  if (b.pacing === "fast") return 0.2;
+  return 0.4;
+}
+
+/** Format a DirectorScript as a precise context block for the Composer (Phase 2).
+ *  Pre-computes per-beat timing from energy/pacing fields so the Composer only
+ *  outputs JSON — all editorial and choreography decisions stay in the Director. */
+function scriptToComposerContext(script: DirectorScript): string {
+  const n = script.beats.length;
+
+  // Per-beat durations from pacing/energy, then scaled to fit totalSec.
+  const rawDurs = script.beats.map(beatDurFor);
+  const rawTotal = rawDurs.reduce((a, b) => a + b, 0);
+  const totalSec = script.totalSec ?? Math.max(8, rawTotal);
+  const scale = totalSec / rawTotal;
+  const beatDurs = rawDurs.map((d) => Math.round(d * scale * 10) / 10);
+
+  // Beat start times from cumulative durations (not equal splits).
+  const beatStarts: number[] = [];
+  let t = 0;
+  for (const d of beatDurs) { beatStarts.push(Math.round(t * 10) / 10); t += d; }
+
+  const cameraPoses = script.beats.map((b) => ({
+    place: b.focus,
+    zoom: b.zoom ?? undefined,
+    pitch: b.pitch ?? undefined,
+    bearing: b.bearing ?? undefined,
+    motion: b.motion ?? undefined,
+  }));
+
+  const lines: string[] = [
+    `DIRECTOR'S SCRIPT — realize this EXACTLY as a finished Plan JSON:`,
+    `Thesis: ${script.thesis} | Arc: ${script.arc ?? "reveal"} | Input: ${script.inputType ?? "idea"}`,
+    `Total: ${totalSec}s | Palette: ${script.palette ?? "Default"} | Map: ${script.mapStyle ?? "dark"} | Look: ${JSON.stringify(script.look ?? {})}`,
+    ``,
+    `CAMERA POSES — copy this array verbatim into top-level "cameraPoses":`,
+    JSON.stringify(cameraPoses),
+    ``,
+    `BEAT CHOREOGRAPHY — each beat has its own timing rules driven by energy/pacing:`,
+    `(Rule: camera arrives at beatStart. Geography layers appear after camera settles. Text always arrives LAST in the beat.)`,
+    ``,
+  ];
+
+  for (let i = 0; i < n; i++) {
+    const b = script.beats[i];
+    const start = beatStarts[i];
+    const dur = beatDurs[i];
+    const stagger = staggerFor(b);
+    const settle = camSettleFor(b);
+    const firstGeoAt = Math.round((start + settle) * 10) / 10;
+    const titleAt = Math.round((firstGeoAt + stagger * 2.5) * 10) / 10;
+    const nextStart = i + 1 < n ? beatStarts[i + 1] : totalSec;
+    const titleOut = Math.round((nextStart - 0.35) * 10) / 10;
+
+    lines.push(`Beat ${i + 1}: "${b.title}" [${start}s–${Math.round((start + dur) * 10) / 10}s] | energy:${b.energy ?? "medium"} pacing:${b.pacing ?? "medium"} cameraIntent:${b.cameraIntent ?? "focus"}`);
+    lines.push(`  Narration (copy verbatim into narration[]): "${b.narration}"`);
+    lines.push(`  TIMING: Camera at ${start}s. Geography starts ${firstGeoAt}s. Stagger ${stagger}s per layer. Title inSec=${titleAt} outSec=${titleOut}.`);
+    lines.push(`  LAYERS (geography → emphasis → text — NEVER put title before map content):`);
+    for (const l of b.layers) lines.push(`    • ${l}`);
+
+    // When the Director researched specific entities, relay them directly to the Composer
+    // as a structured machine-readable block — no guessing, no hallucination.
+    if (b.entities && b.entities.length > 0) {
+      const sorted = [...b.entities].sort((x, y) => x.value - y.value); // ascending → largest = climax
+      lines.push(``);
+      lines.push(`  ⚑ RESEARCHED ENTITIES — Composer MUST use these EXACT place names verbatim:`);
+      lines.push(`    kind:"bubbles"`);
+      lines.push(`    metric:"${b.entityMetric ?? ""}", unit:"${b.entityUnit ?? ""}"`);
+      lines.push(`    stagger:${b.entityStagger ?? 0.9} (each bubble appears ${b.entityStagger ?? 0.9}s after previous)`);
+      lines.push(`    ORDER: ascending by value (smallest first → largest = cinematic climax)`);
+      lines.push(`    places:${JSON.stringify(sorted.map((e) => e.place))}`);
+      lines.push(`    values:${JSON.stringify(sorted.map((e) => e.value))}`);
+      lines.push(`    labels:${JSON.stringify(sorted.map((e) => e.label ?? ""))}`);
+      lines.push(`    inSec:${firstGeoAt} (first bubble at firstGeoAt, subsequent add stagger each)`);
+      lines.push(`    DO NOT substitute, shorten, rephrase, or invent alternate names — geocoder will fail.`);
+    }
+
+    lines.push(``);
+  }
+
+  lines.push(
+    `CHOREOGRAPHY RULES (enforce on every layer):`,
+    `• Geography layers (highlight/route/connections/spotlight): inSec = firstGeoAt, then +${staggerFor(script.beats[0])}s each`,
+    `• Emphasis layers (marker/annotation): inSec = geography_inSec + stagger`,
+    `• Title layer: inSec = titleAt shown above, outSec = titleOut. NEVER earlier than the beat's geography.`,
+    `• outSec=null for geography/emphasis (they persist until next beat overwrites them)`,
+    `• enter:"fade" for geography, enter:"slide-up" for titles, enter:"pop" for markers`,
+    ``,
+    `⚑ RESEARCHED ENTITIES — BINDING CONTRACT:`,
+    `When a beat above has ⚑ RESEARCHED ENTITIES, you MUST output a kind:"bubbles" layer with:`,
+    `  • places[] copied VERBATIM from the list above (exact strings, no shortening)`,
+    `  • values[] copied exactly`,
+    `  • stagger = the entityStagger value shown`,
+    `  • inSec = the firstGeoAt shown for that beat`,
+    `  • The geocoder will FAIL if you rephrase, abbreviate, or substitute any place name.`,
+    ``,
+    `Output the complete Plan JSON. Include: "cameraPoses", "narration":[], "durationSec":${totalSec}. Every layer must have "inSec" and "enter".`,
+  );
+
+  return lines.join("\n");
+}
+
+/* ── Phase 2: Animation Composer (provider-agnostic) ───────────────────────── */
+/** Minimum quality bar: a plan must have a focal place AND at least one geographic
+ *  visual layer (not just text). Returns a human-readable problem string or null. */
+function checkPlanQuality(plan: Record<string, unknown> | null): string | null {
+  if (!plan) return "No plan";
+  if (!plan.focus || typeof plan.focus !== "string" || !plan.focus.trim()) return "No focal place";
+  const layers = Array.isArray(plan.layers) ? plan.layers as any[] : [];
+  if (layers.length < 1) return "No layers";
+  const GEO_KINDS = ["highlight", "route", "marker", "connections", "conflict", "regionFlags",
+    "choropleth", "bubbles", "flows", "earthlayer", "spotlight", "character", "truesize", "flag", "annotation", "radius"];
+  const hasGeo = layers.some((l) => GEO_KINDS.includes(l?.kind));
+  if (!hasGeo) return "All layers are text — no geographic content on the map";
+  return null;
+}
+
+async function aiPlan(idea: string, cfg: AIConfig | null, system: string = SYSTEM): Promise<{ plan: Plan | null; error?: string; warning?: string; tokensUsed?: number }> {
+  if (!cfg) return { plan: null };
+  // Composer outputs a full Plan JSON — can exceed 2000 tokens for a 4-beat story.
+  // 4096 guarantees complete output. Temperature 0.25 reduces JSON malformation.
+  const result = await aiComplete(system, `Idea: """${idea.slice(0, 3200)}"""`, cfg, { maxTokens: 4096, temperature: 0.25 });
+  const { text, error, truncated, usage } = result;
+  const tokensUsed = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
+
+  if (!text) return { plan: null, error: error ?? "Empty AI response." };
+
+  // Try to parse whatever we got (extractJSON handles truncated JSON via bracket repair)
+  let json = extractJSON(text);
+  let warning: string | undefined;
+
+  if (truncated) {
+    // Output was cut off — first try to use what we extracted
+    if (json?.focus && Array.isArray(json?.layers) && (json.layers as unknown[]).length > 0) {
+      warning = "Your story was very complex — the animation was simplified to fit within AI limits. Try breaking it into shorter sequences for maximum detail.";
+    } else {
+      // Partial JSON wasn't usable — do a repair call asking for a minimal 2-beat version
+      const repairPrompt = `The previous plan was cut off. Produce a SHORTER version: max 2 beats, max 6 layers total, keep the same focus and story. Idea: """${idea.slice(0, 800)}"""`;
+      const repair = await aiComplete(system, repairPrompt, cfg, { maxTokens: 2000, temperature: 0.2 });
+      if (repair.text) json = extractJSON(repair.text);
+      warning = "The AI needed to simplify your animation to complete it — it was longer than the model could generate in one pass. For the full version, split your idea into 2–3 shorter sequences.";
+    }
+  }
+
+  if (!json?.focus || !Array.isArray(json?.layers)) {
+    return { plan: null, error: "AI returned an unexpected shape.", tokensUsed };
+  }
+
+  // Quality gate: if the plan has no geographic layers (text-only), retry once
+  // with an explicit directive so the composer adds at least one visual element.
+  const qualityIssue = checkPlanQuality(json);
+  if (qualityIssue) {
+    const fixPrompt = `ISSUE: ${qualityIssue}. Produce the same story but ensure the "layers" array contains at least ONE geographic layer (highlight/route/marker/connections/earthlayer/spotlight). A map animation with only text layers is broken. Idea: """${idea.slice(0, 1000)}"""`;
+    const fix = await aiComplete(system, fixPrompt, cfg, { maxTokens: 2500, temperature: 0.2 });
+    if (fix.text) {
+      const fixJson = extractJSON(fix.text);
+      if (!checkPlanQuality(fixJson)) json = fixJson;
+    }
+    if (checkPlanQuality(json)) {
+      return { plan: null, error: `AI plan had no map content (${qualityIssue}). Try describing the specific place or event more clearly.`, tokensUsed };
+    }
+  }
+
+  return { plan: json as unknown as Plan, warning, tokensUsed };
 }
 
 /* ── Geography resolvers ─────────────────────────────────────────────────── */
@@ -335,31 +767,35 @@ function zoomForBbox(bbox: [number, number, number, number], pad = 0.82): number
 // them consistent AND halves the Mapbox calls. Bounded so it can't grow forever.
 const GEO_CACHE = new Map<string, GeoResult | null>();
 async function geocode(q: string): Promise<GeoResult | null> {
-  if (!MAPBOX_TOKEN || !q) return null;
+  if (!q) return null;
   const key = q.trim().toLowerCase();
   if (GEO_CACHE.has(key)) return GEO_CACHE.get(key)!;
   let out: GeoResult | null = null;
-  try {
-    const r = await fetch(`https://api.mapbox.com/search/geocode/v6/forward?q=${encodeURIComponent(q)}&limit=1&access_token=${MAPBOX_TOKEN}`);
-    if (r.ok) {
-      const d = await r.json(); const f = d.features?.[0];
-      const [lon, lat] = f?.geometry?.coordinates ?? [];
-      if (typeof lon === "number") {
-        const placeType = f.properties?.feature_type ?? "place";
-        // Mapbox v6 returns an extent bbox [minLon,minLat,maxLon,maxLat] for most
-        // areal features. Frame the camera to the REAL extent (the accuracy win);
-        // only fall back to the placeType guess for points with no bbox.
-        const rawBbox = f.properties?.bbox ?? f.bbox ?? null;
-        const bbox: [number, number, number, number] | null =
-          Array.isArray(rawBbox) && rawBbox.length === 4 && rawBbox.every((n: any) => typeof n === "number")
-            ? [rawBbox[0], rawBbox[1], rawBbox[2], rawBbox[3]] : null;
-        const zoomBy: Record<string, number> = { country: 3.4, region: 5.5, district: 8, place: 9.5, locality: 11, neighborhood: 12.5, street: 14, address: 15.5 };
-        // Pads tuned per scale: areal features get more breathing room than points.
-        const zoom = bbox ? zoomForBbox(bbox, placeType === "country" || placeType === "region" ? 0.86 : 0.8) : (zoomBy[placeType] ?? 9);
-        out = { lon, lat, zoom, placeType, name: f.properties?.name ?? q, iso: f.properties?.context?.country?.country_code?.toUpperCase() ?? null, bbox };
+  if (MAPBOX_TOKEN) {
+    try {
+      const r = await fetch(`https://api.mapbox.com/search/geocode/v6/forward?q=${encodeURIComponent(q)}&limit=1&access_token=${MAPBOX_TOKEN}`);
+      if (r.ok) {
+        const d = await r.json(); const f = d.features?.[0];
+        const [lon, lat] = f?.geometry?.coordinates ?? [];
+        if (typeof lon === "number") {
+          const placeType = f.properties?.feature_type ?? "place";
+          // Mapbox v6 returns an extent bbox [minLon,minLat,maxLon,maxLat] for most
+          // areal features. Frame the camera to the REAL extent (the accuracy win);
+          // only fall back to the placeType guess for points with no bbox.
+          const rawBbox = f.properties?.bbox ?? f.bbox ?? null;
+          const bbox: [number, number, number, number] | null =
+            Array.isArray(rawBbox) && rawBbox.length === 4 && rawBbox.every((n: any) => typeof n === "number")
+              ? [rawBbox[0], rawBbox[1], rawBbox[2], rawBbox[3]] : null;
+          const zoomBy: Record<string, number> = { country: 3.4, region: 5.5, district: 8, place: 9.5, locality: 11, neighborhood: 12.5, street: 14, address: 15.5 };
+          // Pads tuned per scale: areal features get more breathing room than points.
+          const zoom = bbox ? zoomForBbox(bbox, placeType === "country" || placeType === "region" ? 0.86 : 0.8) : (zoomBy[placeType] ?? 9);
+          out = { lon, lat, zoom, placeType, name: f.properties?.name ?? q, iso: f.properties?.context?.country?.country_code?.toUpperCase() ?? null, bbox };
+        }
       }
-    }
-  } catch { out = null; }
+    } catch { out = null; }
+  }
+  // Nominatim fallback — used when Mapbox token is absent or the request failed.
+  if (!out) out = await geocodeNominatim(q);
   if (GEO_CACHE.size > 2000) GEO_CACHE.clear();
   GEO_CACHE.set(key, out);
   return out;
@@ -405,16 +841,35 @@ function eachPlaceField(plan: Plan, visit: (get: () => string, set: (v: string) 
   }
 }
 
+/** Nominatim forward geocode — used as a fallback when Mapbox isn't configured. */
+async function geocodeNominatim(q: string): Promise<GeoResult | null> {
+  if (!q) return null;
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(q)}`;
+    const r = await fetch(url, { headers: { "User-Agent": "Mapanisy/1.0 (michaandguadi@gmail.com)" } });
+    if (!r.ok) return null;
+    const a = await r.json();
+    const f = a?.[0];
+    if (!f) return null;
+    const lon = parseFloat(f.lon), lat = parseFloat(f.lat);
+    if (!isFinite(lon) || !isFinite(lat)) return null;
+    const typeMap: Record<string, number> = { country: 3.4, state: 5.5, county: 7, city: 9.5, town: 10.5, village: 12, suburb: 12.5 };
+    const zoom = typeMap[f.type] ?? typeMap[f.addresstype ?? ""] ?? 9;
+    return { lon, lat, zoom, placeType: f.type ?? "place", name: f.display_name?.split(",")?.[0] ?? q, iso: null, bbox: null };
+  } catch { return null; }
+}
+
 /** AI repair: given names that resolved to the WRONG place (or nowhere), ask the
  *  model for the precise, unambiguous canonical name a geocoder will nail. */
 async function repairPlaces(bad: string[], ctx: string, cfg: AIConfig): Promise<Record<string, string | null>> {
   const sys = `You correct bad MAP place names. Each input failed to resolve to the right real-world location. For each, return the precise, UNAMBIGUOUS canonical name a geocoder will land on correctly — as "Place, Country" or "Place, Region, Country" (e.g. "Strait of Hormuz"→"Strait of Hormuz, Oman", "Naga"→"Naga, Camarines Sur, Philippines", "Georgia (country)"→"Tbilisi, Georgia"). If a name is FICTIONAL or not a real place, return null for it. Return STRICT JSON only: {"fixes":{"<input>":"<fixed name or null>"}}.`;
   const user = `Story context: """${ctx.slice(0, 500)}"""\nFix these place names:\n${bad.map((b) => `- ${b}`).join("\n")}`;
-  const { text } = await aiComplete(sys, user, cfg);
+  // Repair JSON is tiny — 600 tokens is more than enough.
+  const { text } = await aiComplete(sys, user, cfg, { maxTokens: 600 });
   if (!text) return {};
   try {
-    const j = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
-    const fixes = j?.fixes ?? {};
+    const j = extractJSON(text);
+    const fixes = (j as any)?.fixes ?? {};
     const out: Record<string, string | null> = {};
     for (const b of bad) { const v = fixes[b]; out[b] = typeof v === "string" && v.trim() ? v.trim() : null; }
     return out;
@@ -488,6 +943,136 @@ const STYLE_URL: Record<string, string> = {
   historical: "https://www.openhistoricalmap.org/map-styles/main/main.json",
 };
 
+/* ── NASA GIBS earth-observation tile helpers ────────────────────────────── */
+
+/* ── NASA GIBS earth-observation tile library ────────────────────────────────
+ * Free, no auth required, production-grade satellite/scientific imagery from
+ * NASA Earthdata Global Imagery Browse Services (GIBS). 500+ datasets — we
+ * curate the most useful for map journalism here.
+ *
+ * `maxzoom` = the highest zoom level the GIBS tile matrix supports.
+ *   MODIS (250m) → GoogleMapsCompatible_Level9  → maxzoom 9
+ *   VIIRS/Landsat → GoogleMapsCompatible_Level8 → maxzoom 8
+ *   Landsat high-res → GoogleMapsCompatible_Level12 → maxzoom 12
+ *   (MapLibre over-zooms from maxzoom when you go deeper — still looks great.)
+ *
+ * `static` = true for datasets with no meaningful date (served as one mosaic).
+ *   Pass any date for non-static; MapLibre will use the closest available.
+ */
+type GibsMeta = {
+  id: string; fmt: "jpg" | "png"; matrix: string; maxzoom: number;
+  label: string; attribution: string; static?: boolean;
+};
+const GIBS_LAYER: Record<string, GibsMeta> = {
+  // ── True-color daily composites (RGB satellite imagery) ────────────────────
+  "true-color": {
+    id: "MODIS_Terra_CorrectedReflectance_TrueColor", fmt: "jpg",
+    matrix: "GoogleMapsCompatible_Level9", maxzoom: 9,
+    label: "True Color (MODIS Terra)", attribution: "NASA Terra MODIS / Earthdata GIBS",
+  },
+  "true-color-aqua": {
+    id: "MODIS_Aqua_CorrectedReflectance_TrueColor", fmt: "jpg",
+    matrix: "GoogleMapsCompatible_Level9", maxzoom: 9,
+    label: "True Color (MODIS Aqua)", attribution: "NASA Aqua MODIS / Earthdata GIBS",
+  },
+  // Landsat is sharper (30m, max zoom 12) but annual composites only.
+  "landsat": {
+    id: "Landsat_WELD_CorrectedReflectance_TrueColor_Global_Annual", fmt: "jpg",
+    matrix: "GoogleMapsCompatible_Level12", maxzoom: 12,
+    label: "True Color — Landsat (Annual)", attribution: "NASA Landsat / Earthdata GIBS",
+  },
+  // ── Vegetation / environment ───────────────────────────────────────────────
+  "ndvi": {
+    id: "MODIS_Terra_NDVI_8Day", fmt: "png",
+    matrix: "GoogleMapsCompatible_Level9", maxzoom: 9,
+    label: "Vegetation Index — NDVI", attribution: "NASA Terra MODIS NDVI / Earthdata GIBS",
+  },
+  "evi": {
+    id: "MODIS_Terra_EVI_8Day", fmt: "png",
+    matrix: "GoogleMapsCompatible_Level9", maxzoom: 9,
+    label: "Enhanced Vegetation Index — EVI", attribution: "NASA Terra MODIS EVI / Earthdata GIBS",
+  },
+  // ── Fire / thermal ────────────────────────────────────────────────────────
+  "fire": {
+    id: "MODIS_Terra_Thermal_Anomalies_All", fmt: "png",
+    matrix: "GoogleMapsCompatible_Level9", maxzoom: 9,
+    label: "Active Fire / Thermal Hotspots", attribution: "NASA Terra MODIS Thermal Anomalies / Earthdata GIBS",
+  },
+  "fire-aqua": {
+    id: "MODIS_Aqua_Thermal_Anomalies_All", fmt: "png",
+    matrix: "GoogleMapsCompatible_Level9", maxzoom: 9,
+    label: "Active Fire (MODIS Aqua)", attribution: "NASA Aqua MODIS Thermal Anomalies / Earthdata GIBS",
+  },
+  // ── Nighttime lights — urban growth ───────────────────────────────────────
+  "nightlights": {
+    id: "VIIRS_SNPP_DayNightBand_ENCC", fmt: "png",
+    matrix: "GoogleMapsCompatible_Level8", maxzoom: 8,
+    label: "Nighttime City Lights — VIIRS", attribution: "NASA VIIRS SNPP Day-Night Band / Earthdata GIBS",
+  },
+  // ── Ocean / sea ───────────────────────────────────────────────────────────
+  "sea-temp": {
+    id: "MODIS_Aqua_Sea_Surface_Temp_Night", fmt: "png",
+    matrix: "GoogleMapsCompatible_Level9", maxzoom: 9,
+    label: "Sea Surface Temperature", attribution: "NASA Aqua MODIS SST / Earthdata GIBS",
+  },
+  "chlorophyll": {
+    id: "MODIS_Aqua_Chlorophyll_A", fmt: "png",
+    matrix: "GoogleMapsCompatible_Level9", maxzoom: 9,
+    label: "Ocean Chlorophyll-A", attribution: "NASA Aqua MODIS Chlorophyll / Earthdata GIBS",
+  },
+  // ── Ice & snow ────────────────────────────────────────────────────────────
+  "snow": {
+    id: "MODIS_Terra_Snow_Cover_Daily_L3_Global_500m", fmt: "png",
+    matrix: "GoogleMapsCompatible_Level9", maxzoom: 9,
+    label: "Snow & Ice Cover", attribution: "NASA Terra MODIS Snow Cover / Earthdata GIBS",
+  },
+  "sea-ice": {
+    id: "NSIDC_VIIRS_NOAA20_Sea_Ice_Concentration", fmt: "png",
+    matrix: "GoogleMapsCompatible_Level9", maxzoom: 9,
+    label: "Sea Ice Concentration", attribution: "NSIDC VIIRS / Earthdata GIBS",
+  },
+  // ── Atmosphere / air quality ──────────────────────────────────────────────
+  "aerosol": {
+    id: "MODIS_Terra_Aerosol_Optical_Depth", fmt: "png",
+    matrix: "GoogleMapsCompatible_Level9", maxzoom: 9,
+    label: "Aerosol & Smoke Opacity", attribution: "NASA Terra MODIS Aerosol / Earthdata GIBS",
+  },
+  // ── Precipitation ─────────────────────────────────────────────────────────
+  "rain": {
+    id: "GPM_L3_Half_Hourly_06", fmt: "png",
+    matrix: "GoogleMapsCompatible_Level5", maxzoom: 5,
+    label: "Precipitation — GPM", attribution: "NASA GPM / Earthdata GIBS",
+  },
+  // ── Static basemaps (no date needed) ─────────────────────────────────────
+  "blue-marble": {
+    id: "BlueMarble_NextGeneration", fmt: "jpg",
+    matrix: "GoogleMapsCompatible_Level8", maxzoom: 8,
+    label: "Blue Marble", attribution: "NASA Blue Marble / Earthdata GIBS",
+    static: true,
+  },
+};
+
+/** Resolve a date string → YYYY-MM-DD.
+ *  "latest" falls back to 2 days ago (GIBS near-real-time products lag ~1-2 days).
+ *  Static datasets (blue-marble etc.) always return an empty date. */
+function resolveGibsDate(date?: string, isStatic = false): string {
+  if (isStatic) return "";
+  if (!date || date === "latest") {
+    const d = new Date(); d.setDate(d.getDate() - 2);
+    return d.toISOString().slice(0, 10);
+  }
+  return date.slice(0, 10);
+}
+
+/** Build the MapLibre raster tile URL template for a GIBS dataset. */
+function gibsTileUrl(layerKey: string, date: string): string | null {
+  const meta = GIBS_LAYER[layerKey];
+  if (!meta) return null;
+  const d = resolveGibsDate(date, meta.static);
+  const datePart = d ? `/${d}` : "/default";
+  return `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${meta.id}/default${datePart}/${meta.matrix}/{z}/{y}/{x}.${meta.fmt}`;
+}
+
 /* ── Assemble a Project from a plan ──────────────────────────────────────── */
 /** Linearly interpolate between two CSS hex colours at t ∈ [0, 1]. */
 function lerpColor(low: string, high: string, t: number): string {
@@ -497,21 +1082,50 @@ function lerpColor(low: string, high: string, t: number): string {
   return `#${r(Math.round(a[0] + (b[0] - a[0]) * t))}${r(Math.round(a[1] + (b[1] - a[1]) * t))}${r(Math.round(a[2] + (b[2] - a[2]) * t))}`;
 }
 
-/** Auto-grade the colour of a scene based on its emotional content.
- *  Returns partial Look overrides to be merged into the scene's look. */
-function gradeFromEmotion(text: string): Record<string, unknown> {
-  const t = text.toLowerCase();
-  if (/tension|crisis|collaps|war|battle|invad|conflict|clash|attack|siege|massacre|catastroph/.test(t))
-    return { gradeShadow: "#3a0808", gradeShadowAmt: 0.32 };          // ominous blood-red shadow
-  if (/triumph|victory|liberat|celebrat|rise|dawn|break|resurrect|free/.test(t))
-    return { gradeHigh: "#fff3c0", gradeHighAmt: 0.22 };              // warm golden triumph
-  if (/fall|tragic|grief|mourn|death|doomed|end|perish|lost/.test(t))
-    return { gradeShadow: "#080d1a", gradeShadowAmt: 0.42, gradeMid: "#1a2a3a", gradeMidAmt: 0.18 }; // cold dark blue
-  if (/discover|reveal|hidden|secret|found|ancient|unearthed|mystery/.test(t))
-    return { gradeHigh: "#c0e8d0", gradeHighAmt: 0.16 };              // cool green revelation
-  if (/wealth|boom|gold|prosper|rich|trade|flourish/.test(t))
-    return { gradeHigh: "#f5e4a0", gradeHighAmt: 0.14 };              // warm amber prosperity
-  return {};
+/* ── Constrained color system ─────────────────────────────────────────────────
+ * The AI may art-direct colors, but inside a professional envelope: no neon,
+ * no washed-out saturated pastels, no invisible saturated near-blacks. Neutral
+ * colors (whites/blacks/grays, s≈0) pass through untouched — they're the
+ * backbone of the design system, not a risk. */
+function tameColor(hex: string): string {
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec((hex || "").trim());
+  if (!m) return hex;
+  const h6 = m[1].length === 3 ? m[1].split("").map((c) => c + c).join("") : m[1];
+  const r = parseInt(h6.slice(0, 2), 16) / 255, g = parseInt(h6.slice(2, 4), 16) / 255, b = parseInt(h6.slice(4, 6), 16) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let l = (max + min) / 2;
+  const d = max - min;
+  let s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+  let hDeg = 0;
+  if (d > 0) {
+    if (max === r) hDeg = 60 * (((g - b) / d) % 6);
+    else if (max === g) hDeg = 60 * ((b - r) / d + 2);
+    else hDeg = 60 * ((r - g) / d + 4);
+    if (hDeg < 0) hDeg += 360;
+  }
+  if (s < 0.12) return hex; // neutral — leave whites/blacks/grays alone
+  s = Math.min(s, 0.82);                       // cap saturation (no neon)
+  l = Math.min(0.82, Math.max(0.18, l));       // keep chromatic colors readable
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((hDeg / 60) % 2) - 1));
+  const m0 = l - c / 2;
+  const [r1, g1, b1] = hDeg < 60 ? [c, x, 0] : hDeg < 120 ? [x, c, 0] : hDeg < 180 ? [0, c, x]
+    : hDeg < 240 ? [0, x, c] : hDeg < 300 ? [x, 0, c] : [c, 0, x];
+  const to2 = (v: number) => Math.round((v + m0) * 255).toString(16).padStart(2, "0");
+  return `#${to2(r1)}${to2(g1)}${to2(b1)}`;
+}
+
+const COLOR_KEYS = ["fillColor", "color", "glowColor", "borderColor", "boundaryGlow", "landColor", "waterColor", "buildingColor", "tintColor", "bgColor", "gradeShadow", "gradeMid", "gradeHigh", "colorA", "colorB", "border"];
+
+/** Tame every recognised color field in a style/spec object (shallow). */
+function tameStyleColors<T extends Record<string, unknown> | undefined>(style: T): T {
+  if (!style) return style;
+  for (const k of COLOR_KEYS) {
+    if (typeof style[k] === "string" && (style[k] as string).startsWith("#")) {
+      (style as Record<string, unknown>)[k] = tameColor(style[k] as string);
+    }
+  }
+  return style;
 }
 
 /** Shift all coordinates in a GeoJSON by (dLon, dLat) — used for true-size overlays. */
@@ -522,99 +1136,6 @@ function offsetGeoJSON(geojson: any, dLon: number, dLat: number): any {
   if (geojson.type === "Feature") return { ...geojson, geometry: og(geojson.geometry) };
   if (geojson.type === "FeatureCollection") return { ...geojson, features: geojson.features.map((f: any) => ({ ...f, geometry: og(f.geometry) })) };
   return og(geojson);
-}
-
-/** Derive a camera style, pitch, and bearing from the narration text —
- *  so the camera MEANS something: push into tension, pull back for scale. */
-function motionFromSemantics(text: string): { style: string; pitch: number; bearing: number } {
-  const t = text.toLowerCase();
-  if (/tension|crisis|collaps|war|battle|attack|surge|spike|invaded|fell|struck/.test(t))
-    return { style: "push-in", pitch: 55, bearing: 0 };
-  if (/scale|spread|empire|region|across|global|world|all|entire|continent/.test(t))
-    return { style: "zoom-out", pitch: 12, bearing: 0 };
-  if (/journey|route|travel|migrat|march|fly|road|across|from .+ to/.test(t))
-    return { style: "fly-in", pitch: 32, bearing: -8 };
-  if (/orbit|around|circl|surround/.test(t))
-    return { style: "orbit", pitch: 35, bearing: 30 };
-  return { style: "push-in", pitch: 38, bearing: 0 };
-}
-
-/** Calculate an appropriate scene duration from its content.
- *  Narration at ~130 wpm sets the floor; visual complexity adds headroom. */
-function beatDuration(narration: string, layers: any[]): number {
-  const words = (narration || "").trim().split(/\s+/).filter(Boolean).length;
-  const narrationSec = words > 5 ? (words / 130) * 60 : 0;
-  const hasRoute = layers.some((l: any) => l.type === "route");
-  const hasCounter = layers.some((l: any) => l.type === "chart");
-  const hasBubble = layers.some((l: any) => l.type === "bubble");
-  const highlightCount = layers.filter((l: any) => l.type === "highlight").length;
-  const base = Math.max(narrationSec, 4);
-  const complexity = (hasRoute ? 2.5 : 0) + (hasCounter ? 1.5 : 0) + (hasBubble ? 1 : 0) + (highlightCount > 2 ? 1 : 0);
-  return Math.min(16, Math.round((base + complexity) * 10) / 10);
-}
-
-/** Split a finished story composition into one EDITABLE scene per geographic
- *  beat (the camera's start → waypoints → end), so a single prompt yields a
- *  multi-scene story the user can tweak beat-by-beat. Each scene re-frames on its
- *  beat (push-in) and shows only that beat's chapter title; shared context layers
- *  (route, highlights) carry through. Returns [] when there aren't ≥2 distinct
- *  beats (single-place stories stay one scene). */
-function splitStoryScenes(comp: any, dur: number, narration: string[]): any[] {
-  const cam = comp.layers.find((l: any) => l.type === "camera");
-  if (!cam) return [];
-  const raw = [cam.start, ...(Array.isArray(cam.waypoints) ? cam.waypoints : []), cam.end]
-    .filter((p: any) => p && isFinite(p.lon) && isFinite(p.lat));
-  // Collapse near-identical consecutive poses (a single-place push-in is 1 beat).
-  const beats: any[] = [];
-  for (const p of raw) { const last = beats[beats.length - 1]; if (!last || Math.hypot(last.lon - p.lon, last.lat - p.lat) > 0.05) beats.push(p); }
-  const n = beats.length;
-  if (n < 2) return [];
-
-  const scenes: any[] = [];
-  let prevCamEnd: any = null;          // geographic continuity — each scene starts where the last ended
-
-  for (let i = 0; i < n; i++) {
-    const b = beats[i];
-    const c = structuredClone(comp);
-    // Per-beat timing: driven by narration length + visual complexity.
-    const per = beatDuration(narration[i] ?? "", c.layers ?? []);
-    const cam2 = c.layers.find((l: any) => l.type === "camera");
-    if (cam2) {
-      const endZoom = Math.max(3.5, Math.min((b.zoom ?? 5) + 0.4, 7.5));
-      const mot = motionFromSemantics(narration[i] ?? "");
-      // Content guard: a beat that shows a DATA map (choropleth/bubble/flows) or a
-      // wide region must stay near top-down even if the narration sounds dramatic —
-      // a tilted data map distorts what it encodes. Flatten pitch + neutral bearing.
-      const flatBeat = (c.layers ?? []).some((l: any) => ["choropleth", "bubble"].includes(l.type))
-        || (c.layers ?? []).filter((l: any) => l.type === "highlight").length >= 3;
-      const pitch = flatBeat ? Math.min(mot.pitch, 12) : mot.pitch;
-      const bearing = flatBeat ? 0 : mot.bearing;
-      // Geographic match transition: each scene flies IN from the previous beat's
-      // endpoint — so the multi-scene story is one continuous journey, not cuts.
-      cam2.start = prevCamEnd
-        ? { ...prevCamEnd }
-        : { lon: b.lon, lat: b.lat, zoom: Math.max(2.2, endZoom - 2.2), pitch: Math.min(pitch, 12), bearing: 0 };
-      cam2.end = { lon: b.lon, lat: b.lat, zoom: endZoom, pitch, bearing };
-      cam2.waypoints = [];
-      // Between scenes always fly-in (camera is already somewhere); first scene
-      // uses the semantically-chosen motion.
-      cam2.style = prevCamEnd ? "fly-in" : mot.style;
-      cam2.smoothPath = false;
-      prevCamEnd = { ...cam2.end };
-    }
-    // Keep ONLY the i-th chapter title in this scene; show it for the whole beat.
-    let ti = 0;
-    c.layers = c.layers.filter((l: any) => { if (l.type !== "title") return true; const keep = ti === i; ti++; return keep; });
-    for (const l of c.layers) if (l.type === "title") (l as any).timing = { inSec: 0.3, outSec: null, enter: "slide-up", exit: "fade", easing: "easeInOut" };
-    c.durationSec = per;
-    c.narration = narration[i] ?? "";
-    if (c.narration) c.look = { ...c.look, showCaptions: true };
-    // Auto emotional grade: camera colour matches story beat emotion.
-    const grade = gradeFromEmotion(c.narration);
-    if (Object.keys(grade).length) c.look = { ...c.look, ...grade };
-    scenes.push({ id: newId(), name: `Beat ${i + 1}`, narration: narration[i] ?? "", transition: i === 0 ? "cut" : "fade", transitionDuration: 0.6, composition: c });
-  }
-  return scenes;
 }
 
 /* ── Composition intelligence: the right framing + style + look per story ─────
@@ -708,7 +1229,7 @@ function resolveLook(plan: Plan, kind: StoryKind, styleKey: string): Record<stri
   }
 }
 
-export async function buildFromPlan(plan: Plan, opts: { story?: boolean; split?: boolean } = {}): Promise<Project> {
+export async function buildFromPlan(plan: Plan, opts: { story?: boolean } = {}): Promise<Project> {
   const project = createDefaultProject(plan.title || "AI animation");
   // Quick animations stay punchy (≤12s); a STORY earns a longer runtime (≤60s,
   // the Storyboard Review's slider range) so multi-beat narratives can breathe.
@@ -744,10 +1265,34 @@ export async function buildFromPlan(plan: Plan, opts: { story?: boolean; split?:
   if (typeof plan.cameraPitch === "number") (cam as any).end.pitch = Math.max(0, Math.min(84, plan.cameraPitch));
   if (typeof plan.cameraBearing === "number") (cam as any).end.bearing = plan.cameraBearing;
 
-  // Multi-stop journey: fly THROUGH the cameraStops, ending at the focus. Use the
-  // journey framing (a moderate lean), and keep waypoints zoomed-out enough to
-  // read the route between beats.
-  if (plan.cameraStops?.length && focus) {
+  // AI-authored camera poses (Phase 2 output) — these carry full per-beat
+  // zoom/pitch/bearing as designed by the director, so use them directly.
+  // Falls back to cameraStops (name-only path), then single-focus heuristic.
+  if (plan.cameraPoses?.length) {
+    const poses = (await Promise.all(
+      plan.cameraPoses.slice(0, 8).map(async (cp) => {
+        const g = await geocode(cp.place);
+        if (!g) return null;
+        return {
+          lon: g.lon, lat: g.lat,
+          zoom: cp.zoom ?? Math.max(2, Math.min(14, g.zoom + (frame.zoomBias ?? 0))),
+          pitch: cp.pitch ?? frame.pitch,
+          bearing: cp.bearing ?? frame.bearing,
+        };
+      })
+    )).filter(Boolean) as { lon: number; lat: number; zoom: number; pitch: number; bearing: number }[];
+    if (poses.length >= 2) {
+      const motionFromPose = plan.cameraPoses[0]?.motion ?? "fly-in";
+      (cam as any).style = MOTIONS.includes(motionFromPose) ? motionFromPose : "fly-in";
+      (cam as any).smoothPath = true;
+      (cam as any).start = poses[0];
+      (cam as any).waypoints = poses.slice(1, -1);
+      (cam as any).end = poses[poses.length - 1];
+    }
+  } else if (plan.cameraStops?.length && focus) {
+    // Multi-stop journey: fly THROUGH the cameraStops, ending at the focus. Use the
+    // journey framing (a moderate lean), and keep waypoints zoomed-out enough to
+    // read the route between beats.
     const stops = (await Promise.all(plan.cameraStops.slice(0, 6).map((s) => geocode(s)))).filter(Boolean) as NonNullable<Awaited<ReturnType<typeof geocode>>>[];
     if (stops.length) {
       const travel = (g: { lon: number; lat: number; zoom: number }) => ({ lon: g.lon, lat: g.lat, zoom: Math.min(g.zoom, 6), pitch: Math.min(frame.pitch, 34), bearing: 0 });
@@ -783,7 +1328,10 @@ export async function buildFromPlan(plan: Plan, opts: { story?: boolean; split?:
   let withinBeatCount = 0;
 
   // Stagger overlay entrances across the scene for a composed reveal.
-  const overlays = plan.layers.slice(0, 7);
+  // Stories carry one layer-set for EVERY beat on a single timeline, so they
+  // need far more headroom than a quick single-shot animation — a 7-layer cap
+  // silently dropped later beats' titles/highlights (the #1 "beats missing" bug).
+  const overlays = plan.layers.slice(0, opts.story ? 18 : 10);
   const inAt = (): number => {
     if (nBeats <= 2) {
       // Single scene: classic sequential distribution (original behavior).
@@ -795,6 +1343,10 @@ export async function buildFromPlan(plan: Plan, opts: { story?: boolean; split?:
     return Math.round(Math.max(0.1, Math.min(beatStart + 0.5 + withinBeatCount * 0.25, dur * 0.92)) * 100) / 100;
   };
 
+  // Titles whose timing the AI authored explicitly — the story-mode slicer
+  // below must NOT clobber those windows (the AI already made them non-overlapping).
+  const aiTimedTitleIds = new Set<string>();
+
   let oi = 0;
   for (const pl of overlays) {
     // In multi-stop story mode, title layers mark beat transitions.
@@ -802,7 +1354,20 @@ export async function buildFromPlan(plan: Plan, opts: { story?: boolean; split?:
       currentBeat = Math.min(currentBeat + 1, nBeats - 1);
       withinBeatCount = 0;
     }
-    const timing = { inSec: inAt(), outSec: null as number | null, enter: "fade" as const, exit: "fade" as const, easing: "easeInOut" as const };
+    // Constrained color system: every AI-authored color is clamped into the
+    // professional envelope before it can touch a layer.
+    tameStyleColors(pl as unknown as Record<string, unknown>);
+    if (pl.style) tameStyleColors(pl.style as Record<string, unknown>);
+    // AI-authored timing takes priority — only fall back to heuristic inAt() when
+    // the AI didn't specify. This is the core of "AI builds the animation, not heuristics".
+    const hasAiTiming = typeof (pl as any).inSec === "number";
+    const timing: { inSec: number; outSec: number | null; enter: "fade" | "slide-up" | "scale" | "border-first"; exit: "fade" | "slide-down"; easing: "easeInOut" } = {
+      inSec: hasAiTiming ? (pl as any).inSec : inAt(),
+      outSec: (pl as any).outSec !== undefined ? ((pl as any).outSec as number | null) : null,
+      enter: (["fade", "slide-up", "scale", "border-first"].includes((pl as any).enter) ? (pl as any).enter : "fade"),
+      exit: (["fade", "slide-down"].includes((pl as any).exit) ? (pl as any).exit : "fade"),
+      easing: "easeInOut",
+    };
     try {
       if (pl.kind === "highlight") {
         const poly = await fetchPolygon(pl.place);
@@ -836,7 +1401,9 @@ export async function buildFromPlan(plan: Plan, opts: { story?: boolean; split?:
         const g = await geocode(pl.place); if (!g) continue;
         add(createLayer("flag", { iso: g.iso ?? "FR", anchor: { lon: g.lon, lat: g.lat }, timing, ...(pl.style ?? {}) }), pl.style);
       } else if (pl.kind === "title") {
-        add(createLayer("title", { text: (pl.text || plan.title).toUpperCase(), sub: pl.sub ?? plan.subtitle ?? "", template: (pl.template as any) ?? "impact", position: (pl.position as any) ?? "bottom", timing, ...(pl.style ?? {}) }), pl.style);
+        const tl = createLayer("title", { text: (pl.text || plan.title).toUpperCase(), sub: pl.sub ?? plan.subtitle ?? "", template: (pl.template as any) ?? "impact", position: (pl.position as any) ?? "bottom", timing, ...(pl.style ?? {}) });
+        if (hasAiTiming) aiTimedTitleIds.add(tl.id);
+        add(tl, pl.style);
       } else if (pl.kind === "chart") {
         add(createLayer("chart", { variant: pl.variant ?? "counter", value: pl.value ?? 0, prefix: pl.prefix ?? "", suffix: pl.suffix ?? "", name: pl.label ?? "stat", timing, ...(pl.style ?? {}) }), pl.style);
       } else if (pl.kind === "marker") {
@@ -863,6 +1430,36 @@ export async function buildFromPlan(plan: Plan, opts: { story?: boolean; split?:
       } else if (pl.kind === "spotlight") {
         const g = await geocode(pl.place); if (!g) continue;
         add(createLayer("spotlight", { name: `Spotlight ${pl.place}`, anchor: { lon: g.lon, lat: g.lat }, timing, ...(pl.style ?? {}) }), pl.style);
+      } else if (pl.kind === "radius") {
+        const g = await geocode(pl.place); if (!g) continue;
+        const rKm = Math.max(0.1, Math.min(20000, Number(pl.radiusKm) || 500));
+        add(createLayer("radius", {
+          name: `${pl.place} · ${rKm} km`, center: { lon: g.lon, lat: g.lat, name: g.name },
+          radiusKm: rKm, rings: Math.max(1, Math.min(5, pl.rings ?? 3)),
+          mode: pl.mode ?? "grow", ...(pl.color ? { color: tameColor(pl.color) } : {}),
+          labelUnit: pl.unit ?? "km", timing, ...(pl.style ?? {}),
+        }), pl.style);
+      } else if (pl.kind === "timestamp") {
+        const isCounter = pl.dayStart != null || pl.dayEnd != null;
+        add(createLayer("timestamp", {
+          name: "Timestamp",
+          mode: pl.text ? "fixed" : isCounter ? "day-counter" : "date-range",
+          ...(pl.start ? { startDate: pl.start } : {}), ...(pl.end ? { endDate: pl.end } : {}),
+          ...(pl.format ? { format: pl.format } : {}),
+          ...(pl.dayStart != null ? { dayStart: pl.dayStart } : {}), ...(pl.dayEnd != null ? { dayEnd: pl.dayEnd } : {}),
+          ...(pl.prefix ? { prefix: pl.prefix } : {}), ...(pl.text ? { fixedText: pl.text } : {}),
+          ...(pl.position ? { position: pl.position } : {}),
+          // The ticker should usually run the WHOLE scene, not enter late.
+          timing: { ...timing, inSec: Math.min(timing.inSec, 0.6) },
+          ...(pl.style ?? {}),
+        }), pl.style);
+      } else if (pl.kind === "atmosphere") {
+        add(createLayer("atmosphere", {
+          name: `Atmosphere · ${pl.effect}`, effect: pl.effect ?? "snow",
+          density: Math.max(0, Math.min(1, pl.density ?? 0.45)),
+          ...(pl.wind != null ? { wind: Math.max(-2, Math.min(2, pl.wind)) } : {}),
+          timing: { ...timing, inSec: 0.2 }, ...(pl.style ?? {}),
+        }), pl.style);
       } else if (pl.kind === "conflict") {
         // The headline composite: two countries, the real frontier, swords on it.
         const [pa, pb] = await Promise.all([fetchPolygon(pl.a), fetchPolygon(pl.b)]);
@@ -960,6 +1557,7 @@ export async function buildFromPlan(plan: Plan, opts: { story?: boolean; split?:
         if (!places.length || !values.length) continue;
         const maxVal = Math.max(...values.filter(isFinite));
         const color = pl.color ?? DEFAULT_ACCENT;
+        const stagger = pl.stagger ?? 0; // seconds between successive bubble reveals
         const geos = await Promise.all(places.map((p) => geocode(p)));
         const entries: unknown[] = geos.map((g, i) => ({
           place: places[i], value: values[i] ?? 0,
@@ -968,6 +1566,8 @@ export async function buildFromPlan(plan: Plan, opts: { story?: boolean; split?:
           // sqrt scaling: equal area = equal value (perceptually honest)
           sizePx: g ? Math.round(20 + 120 * Math.sqrt(Math.max(0, values[i] ?? 0) / Math.max(1, maxVal))) : 0,
           color,
+          // entryDelay drives per-bubble staggered reveal in BubbleView
+          entryDelay: stagger > 0 ? Math.round(stagger * i * 100) / 100 : 0,
         })).filter((e: any) => e.lon !== 0 && e.sizePx > 0);
         if (!entries.length) continue;
         add(createLayer("bubble", {
@@ -991,6 +1591,40 @@ export async function buildFromPlan(plan: Plan, opts: { story?: boolean; split?:
           color: pl.color ?? "#6E7BFF", width: 8, glow: 0.7, reveal: "draw", stagger: 0.4, dots: true, pulse: true,
           timing, ...(pl.style ?? {}),
         }), pl.style);
+      } else if (pl.kind === "earthlayer") {
+        // EARTH OBSERVATION — NASA GIBS WMTS raster overlay. Free, no auth required.
+        const dsKey = (pl.dataset ?? "true-color") as string;
+        const meta = GIBS_LAYER[dsKey];
+        if (!meta) continue;
+        const resolvedDate = resolveGibsDate(pl.date, meta.static);
+        const layerData: Record<string, unknown> = {
+          name: pl.label ?? meta.label,
+          datasetId: meta.id,
+          date: resolvedDate,
+          tileFormat: meta.fmt,
+          tileMatrix: meta.matrix,
+          maxzoom: meta.maxzoom,
+          opacity: Math.min(1, Math.max(0, pl.opacity ?? 0.75)),
+          label: pl.label ?? meta.label,
+          attribution: meta.attribution,
+          timing,
+          ...(pl.style ?? {}),
+        };
+        // Optional compare layer for before/after change detection.
+        if (pl.compareDataset) {
+          const cmKey = pl.compareDataset as string;
+          const cmMeta = GIBS_LAYER[cmKey];
+          if (cmMeta) {
+            layerData.compareDatasetId = cmMeta.id;
+            layerData.compareDate = resolveGibsDate(pl.compareDate, cmMeta.static);
+            layerData.compareMaxzoom = cmMeta.maxzoom;
+          }
+        }
+        add(createLayer("earthlayer", layerData), pl.style);
+        // Force satellite basemap — earth-obs data looks best over real imagery.
+        if (!plan.basemapStyle || plan.basemapStyle === "dark" || plan.basemapStyle === "light") {
+          plan.basemapStyle = "satellite";
+        }
       }
       withinBeatCount++;
       oi++;
@@ -1026,17 +1660,24 @@ export async function buildFromPlan(plan: Plan, opts: { story?: boolean; split?:
   // Kill redundant repeated text (no place named three times over).
   const deduped = dedupeText(layers);
 
-  // STORY MODE: sequence the chapter titles across the timeline so they play
-  // one after another as the camera journeys through the beats (each appears,
-  // holds, then yields to the next) — turning the fly-through into a narrative.
+  // STORY MODE: sequence the chapter titles across the SINGLE timeline so they
+  // play one after another as the camera journeys through the beats (each
+  // appears, holds, then yields to the next) — turning the fly-through into a
+  // narrative. When the AI authored EVERY title's timing window itself (per the
+  // T1/T4 doctrine those are already non-overlapping and camera-synced), trust
+  // it; only fall back to even slices when any title lacks explicit timing,
+  // because a mixed set could overlap.
   if (opts.story) {
     const titles = deduped.filter((l) => l.type === "title");
     const n = titles.length;
-    titles.forEach((t, i) => {
-      const start = 0.06 * dur + (i / Math.max(1, n)) * 0.86 * dur;
-      const end = 0.06 * dur + ((i + 1) / Math.max(1, n)) * 0.86 * dur;
-      (t as any).timing = { inSec: Math.round(start * 100) / 100, outSec: n > 1 ? Math.round((end - 0.4) * 100) / 100 : null, enter: "slide-up", exit: "fade", easing: "easeInOut" };
-    });
+    const allAiTimed = n > 0 && titles.every((t) => aiTimedTitleIds.has(t.id));
+    if (!allAiTimed) {
+      titles.forEach((t, i) => {
+        const start = 0.06 * dur + (i / Math.max(1, n)) * 0.86 * dur;
+        const end = 0.06 * dur + ((i + 1) / Math.max(1, n)) * 0.86 * dur;
+        (t as any).timing = { inSec: Math.round(start * 100) / 100, outSec: n > 1 ? Math.round((end - 0.4) * 100) / 100 : null, enter: "slide-up", exit: "fade", easing: "easeInOut" };
+      });
+    }
   }
 
   // Art-direct the whole piece: pick a cohesive palette+font theme from the
@@ -1065,7 +1706,9 @@ export async function buildFromPlan(plan: Plan, opts: { story?: boolean; split?:
   }
   // INVENTED 3D world — the AI art-directs a bespoke look (overrides any preset).
   // Buildings auto-enable so the custom colours actually show at city scale.
-  const m3dc = (plan as any).map3dCustom;
+  // Colors pass through the constrained-color clamp first (no neon worlds).
+  const m3dc = tameStyleColors((plan as any).map3dCustom);
+  if (plan.look) tameStyleColors(plan.look as Record<string, unknown>);
   if (m3dc && typeof m3dc === "object") {
     const bmPatch: Record<string, unknown> = { style3d: "custom" };
     for (const k of ["landColor", "waterColor", "buildingColor", "buildingOpacity", "buildingHeightMult", "buildingGradient", "boundaryGlow", "terrain", "terrainStrength"]) {
@@ -1100,20 +1743,33 @@ export async function buildFromPlan(plan: Plan, opts: { story?: boolean; split?:
     return st ? ({ ...themed, ...st } as Layer) : themed;
   });
 
-  // MULTI-SCENE: when this is a story with distinct beats, emit one editable
-  // scene per beat (the user can tweak each), instead of one continuous shot.
-  // Robust: falls back to the single composition if splitting yields < 2 scenes.
-  if (opts.split) {
-    try {
-      const narration = Array.isArray((plan as any).narration) ? (plan as any).narration : [];
-      const scenes = splitStoryScenes(project.composition, dur, narration);
-      if (scenes.length >= 2) {
-        project.scenes = scenes;
-        project.composition = scenes[0].composition;
-        (project as any).activeSceneId = scenes[0].id;
-      }
-    } catch { /* keep the single-scene composition */ }
+  // For single-scene animations with multiple AI-authored narration beats,
+  // store each beat's text + start time so the renderer can show them one at a
+  // time as the camera arrives — Vox-style beat-timed documentary captions.
+  const narrationArr: string[] = Array.isArray((plan as any).narration)
+    ? (plan as any).narration.filter(Boolean) : [];
+  if (narrationArr.length > 1) {
+    // Derive beat start times from title layers (sorted by inSec) — these are the
+    // beat markers the AI placed; fall back to even distribution if titles are scarce.
+    const sortedTitles = project.composition.layers
+      .filter((l) => l.type === "title")
+      .slice()
+      .sort((a, b) => ((a as any).timing?.inSec ?? 0) - ((b as any).timing?.inSec ?? 0));
+    const beatStarts: number[] = sortedTitles.slice(0, narrationArr.length)
+      .map((l) => (l as any).timing?.inSec ?? 0);
+    // Pad with even distribution if the AI put fewer titles than narration lines.
+    while (beatStarts.length < narrationArr.length) {
+      beatStarts.push(Math.round((beatStarts.length / narrationArr.length) * dur * 10) / 10);
+    }
+    (project.composition as any).narrationLines = narrationArr.map((text, i) => ({
+      text, startSec: beatStarts[i] ?? 0,
+    }));
+    project.composition.look.showCaptions = true;
   }
+
+  // A story is ONE continuous timeline — beats are sequenced INSIDE this single
+  // composition (titles sliced, beat-arrival layer timing, narrationLines).
+  // Never auto-split into scenes; the user adds scenes manually when they want.
   return ProjectSchema.parse(project);
 }
 
@@ -1166,8 +1822,8 @@ function heuristicPlan(idea: string): Plan {
 
   // 2) clash between two places → conflict composite (highlights + border + swords)
   const conflictWord = /\b(conflict|war|invasion|clash|tension|dispute|fighting|frontline|standoff|civil war|military)\b/.test(t);
-  const pair = idea.match(/between\s+([\w'’-]+(?:\s+[\w'’-]+){0,2}?)\s+and\s+([\w'’-]+(?:\s+[\w'’-]+){0,2})/i)
-    || idea.match(/\b([\w'’-]+(?:\s+[\w'’-]+){0,2}?)\s+(?:vs\.?|versus)\s+([\w'’-]+(?:\s+[\w'’-]+){0,2})/i);
+  const pair = idea.match(/between\s+([\w''-]+(?:\s+[\w''-]+){0,2}?)\s+and\s+([\w''-]+(?:\s+[\w''-]+){0,2})/i)
+    || idea.match(/\b([\w''-]+(?:\s+[\w''-]+){0,2}?)\s+(?:vs\.?|versus)\s+([\w''-]+(?:\s+[\w''-]+){0,2})/i);
   if (conflictWord && pair) {
     const a = titleCase(pair[1]), b = titleCase(pair[2]);
     return { title: "FRONTLINE", subtitle: `${a} – ${b}`, durationSec: 9, aspect: "16:9", basemapStyle: "dark", focus: a, mood: "conflict", motion: "zoom-out", palette: "Conflict Red", priority: "highlight",
@@ -1178,7 +1834,7 @@ function heuristicPlan(idea: string): Plan {
   // ── EXPANSION / CONTRACTION → a highlight that GROWS (or shrinks) from origin ──
   const arch0 = matchArchetype(idea);
   if (arch0 && (arch0.name.startsWith("Expansion") || arch0.name.startsWith("Contraction"))) {
-    const capsX = (idea.match(/\b([A-Z][\w'’-]+(?:\s+[A-Z][\w'’-]+){0,2})\b/g) || []).filter((c) => !/^(The|In|Of|And|At|On|How|Show|Why|When|Map|Rise)$/.test(c));
+    const capsX = (idea.match(/\b([A-Z][\w''-]+(?:\s+[A-Z][\w''-]+){0,2})\b/g) || []).filter((c) => !/^(The|In|Of|And|At|On|How|Show|Why|When|Map|Rise)$/.test(c));
     const place = (capsX.sort((a, b) => b.length - a.length)[0] || idea.split(/[.,;\n]/)[0]).trim().slice(0, 50);
     const growing = arch0.name.startsWith("Expansion");
     return {
@@ -1200,8 +1856,8 @@ function heuristicPlan(idea: string): Plan {
     : /election|vote|politic|parliament/.test(t) ? "political"
     : /climate|arctic|ice|warming|glacier/.test(t) ? "arctic"
     : "neutral";
-  const m = idea.match(/\b(?:in|of|about|over|across|through|from)\s+([A-Z][\w'’-]+(?:\s+[A-Z][\w'’-]+){0,3})/);
-  const caps = idea.match(/[A-Z][\w'’-]+(?:\s+[A-Z][\w'’-]+){0,3}/g) || [];
+  const m = idea.match(/\b(?:in|of|about|over|across|through|from)\s+([A-Z][\w''-]+(?:\s+[A-Z][\w''-]+){0,3})/);
+  const caps = idea.match(/[A-Z][\w''-]+(?:\s+[A-Z][\w''-]+){0,3}/g) || [];
   const focus = (m?.[1] || caps.sort((a, b) => b.length - a.length)[0] || idea.split(/[.,;\n]/)[0]).trim().slice(0, 50);
 
   // 3) growth / economy → a highlight + a line chart trending UP
@@ -1220,7 +1876,7 @@ function heuristicPlan(idea: string): Plan {
   }
 
   // ── MOVEMENT / journey / invasion / migration → a route that DRAWS on ──
-  const jp = idea.match(/\bfrom\s+([A-Z][\w'’-]+(?:\s+[A-Z][\w'’-]+){0,2})\s+to\s+([A-Z][\w'’-]+(?:\s+[A-Z][\w'’-]+){0,2})/);
+  const jp = idea.match(/\bfrom\s+([A-Z][\w''-]+(?:\s+[A-Z][\w''-]+){0,2})\s+to\s+([A-Z][\w''-]+(?:\s+[A-Z][\w''-]+){0,2})/);
   if (jp || (arch0 && arch0.name.startsWith("Movement"))) {
     const from = jp ? titleCase(jp[1]) : (caps[0] || focus);
     const to = jp ? titleCase(jp[2]) : (caps[1] || focus);
@@ -1246,12 +1902,38 @@ function heuristicPlan(idea: string): Plan {
       layers: [{ kind: "spotlight", place: focus } as PlanLayer, { kind: "marker", place: focus, icon: "target", style: { sizePx: 120 } } as PlanLayer, { kind: "title", text: focus.toUpperCase(), sub, template: "impact", position: "bottom" }] };
   }
 
-  // 5) default — a mood-styled highlight (varies basemap + look by mood, terrain
-  //    auto-on for mountainous subjects) so different ideas look different.
+  // 5) default — a mood-styled, cinematically composed highlight.
+  //    Every default still has: an opening wide shot establishing context,
+  //    a main geographic element (flag or solid highlight), and a clean title.
+  //    Terrain auto-on for mountainous subjects; satellite for cities/coast.
   const sm = styleForMood(mood);
-  const isCountry = caps.length <= 2 && !/\b(city|town|valley|range|mountain|lake|river|desert|sea|gulf|bay|island)\b/.test(t);
-  return { title: focus.toUpperCase().slice(0, 30), subtitle: sub, durationSec: 8, aspect: "16:9", basemapStyle: sm.basemapStyle as any, terrain: /mountain|alps|himalaya|andes|rockies|peak|range|valley|volcano|highland/.test(t), focus, mood, palette: MOOD_THEME[mood], priority: "highlight", look: sm.look as any,
-    layers: [{ kind: "highlight", place: focus, fill: isCountry ? "flag" : "solid", mood }, { kind: "title", text: focus.toUpperCase(), sub, template: "impact", position: "bottom" }] };
+  const hasMountain = /mountain|alps|himalaya|andes|rockies|peak|range|valley|volcano|highland|fjord|glacier/.test(t);
+  const hasCity = /city|town|downtown|skyline|neighborhood|district|quarter|bay|harbour|harbor/.test(t);
+  const isCountry = caps.length <= 2 && !hasCity && !/\b(city|town|valley|range|mountain|lake|river|desert|sea|gulf|bay|island|strait|canal)\b/.test(t);
+  const basemap: string = hasCity ? "satellite" : sm.basemapStyle;
+  const terrain = hasMountain || (hasCity && /mountain|hill|coast/.test(t));
+  // Decide the most cinematic motion: push-in for intimacy, zoom-out for scale, orbit for 3D
+  const motion = hasCity ? "push-in" : hasMountain ? "orbit" : mood === "historical" ? "push-in" : "zoom-out";
+  const pitch = hasCity ? 55 : hasMountain ? 42 : 12;
+  // A brief context annotation when the subject has well-known significance
+  const hasAnnotation = /strait|canal|chokepoint|border|capital|headquarter|base|hub/.test(t);
+  const annotationLayers: PlanLayer[] = hasAnnotation
+    ? [{ kind: "annotation", place: focus, text: focus.toUpperCase().slice(0, 24), side: "auto" } as PlanLayer]
+    : [];
+  const layers: PlanLayer[] = [
+    { kind: "highlight", place: focus, fill: isCountry ? "flag" : "solid", mood,
+      style: { enter: "border-first" } } as PlanLayer,
+    ...annotationLayers,
+    { kind: "title", text: focus.toUpperCase().slice(0, 30), sub, template: "impact", position: "bottom",
+      style: { inSec: 1.4 } } as PlanLayer,
+  ];
+  return {
+    title: focus.toUpperCase().slice(0, 30), subtitle: sub,
+    durationSec: hasCity ? 10 : hasMountain ? 12 : 8,
+    aspect: "16:9", basemapStyle: basemap as any, terrain, focus, mood,
+    motion, cameraPitch: pitch, palette: MOOD_THEME[mood] ?? "Default",
+    priority: "highlight", look: sm.look as any, layers,
+  };
 }
 
 /* ── Heuristic STORY plan (no API key) — a real multi-beat fly-through ───────
@@ -1281,7 +1963,7 @@ function heuristicStoryPlan(idea: string): Plan {
     };
   }
   const sentences = idea.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter((s) => s.length > 6).slice(0, 6);
-  const placeRe = /\b([A-Z][\w'’-]+(?:\s+(?:of\s+)?[A-Z][\w'’-]+){0,3})\b/g;
+  const placeRe = /\b([A-Z][\w''-]+(?:\s+(?:of\s+)?[A-Z][\w''-]+){0,3})\b/g;
   const STOP = /^(The|In|On|At|And|But|Both|Search|It|He|She|They|His|Her|Their|A|An|After|Then|When|While|By)$/;
   const beats: { place: string; line: string }[] = [];
   for (const s of (sentences.length ? sentences : [idea])) {
@@ -1378,6 +2060,16 @@ function applyInterview(project: Project, iv: any) {
 }
 
 export async function POST(req: NextRequest) {
+  // Defense-in-depth: enforce auth at the handler level (Clerk middleware is the
+  // primary gate, but this prevents accidental misconfiguration from leaving the
+  // most expensive endpoint open).
+  const { userId: clerkId } = await auth();
+  if (!clerkId) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+  // 10 AI generations per minute per user — generous for real usage, blocks abuse.
+  if (!rateLimit("generate", clerkId, { maxRequests: 10, windowSec: 60 })) {
+    return NextResponse.json({ error: "Too many requests — max 10 generations per minute." }, { status: 429 });
+  }
+
   let body: { idea?: string; plan?: Plan; ai?: any; mode?: string; style?: string; interview?: any; interviewText?: string; arc?: ArcContext };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Bad JSON" }, { status: 400 }); }
   const idea = (body.idea ?? "").trim();
@@ -1422,39 +2114,118 @@ export async function POST(req: NextRequest) {
     "Rules: keep the EXACT SAME visual style as the other sequences (it is locked). Maintain geographic + narrative continuity — reuse the same places/framing where they recur. You MAY build on, extend, or REMOVE/REFINE elements introduced earlier (e.g. \"remove the unethical spots\" = filter down the places shown before, do not restart). Advance the story by exactly this one chapter.",
   ].filter(Boolean).join("\n") : "";
 
-  // The AI sees: the idea + interview constraints + the DIRECTOR FRAMEWORK (the
-  // determined storyboard it must fill) + any arc continuity. So the model
-  // researches facts and writes narration, but the structure + style stay
-  // consistent per the framework, and chapters cohere into one film.
-  const ideaForAI = [
-    idea,
-    ivText ? `Director constraints (honor these):\n${ivText}` : "",
-    framework && aiCfg ? frameworkInstruction(framework) : "",
+  // TWO-PHASE AI PIPELINE:
+  // Phase 1 — Story Director: translates the raw idea into a structured story script
+  //   (what to show per beat, how to animate, what camera moves). Fast, focused call.
+  // Phase 2 — Animation Composer: receives the Director's Script + the full layer
+  //   schema, outputs the complete Plan JSON with timing, colors, animations specified.
+  //   Heuristics are NOT responsible for creative decisions — they're fallback only.
+
+  // INTENT GATE: simple, direct prompts ("route from Paris to Rome", "highlight
+  // Japan") skip the Director phase AND the research doctrine entirely — one
+  // fast Composer call, minimal layers, no documentary expansion. Deep research
+  // is reserved for stories and prompts that actually ask for it.
+  const simpleIntent = !directPlan && !arc && !isStory
+    && isSimpleIntent(idea, framework?.interpretation?.locations?.length ?? 0);
+
+  // Phase 1: Director call (skip for direct plans, arcs with full spec, no-AI
+  // mode, and simple requests — the arc/simple context needs no story script).
+  const shouldRunDirector = !directPlan && !!aiCfg && !arc && !simpleIntent;
+
+  // Pre-inject interpretation + archetype into the Director's user prompt.
+  // The Director gets verified places, detected route, and archetype recipe BEFORE
+  // it starts designing, so it never has to guess them from scratch — which is the
+  // main cause of place hallucinations and wrong story archetypes.
+  const directorInput = (() => {
+    if (!shouldRunDirector || !idea) return idea;
+    const it = framework?.interpretation;
+    const arch = matchArchetype(idea);
+    const ctx: string[] = [];
+    if (it?.locations.length) ctx.push(`Verified locations in prompt: ${it.locations.join(", ")}`);
+    if (it?.route) ctx.push(`Route: ${it.route.from} → ${it.route.via.length ? it.route.via.join(" → ") + " → " : ""}${it.route.to}`);
+    if (it?.action && it.action !== "unknown") ctx.push(`Action type: ${it.action}`);
+    if (arch) ctx.push(`Matched story archetype: ${arch.name}.\nRecipe: ${arch.recipe.slice(0, 220)}`);
+    if (ivText) ctx.push(`User director constraints: ${ivText}`);
+    if (!ctx.length) return idea;
+    return `${idea}\n\n## ENGINE PRE-ANALYSIS — trust and use this:\n${ctx.join("\n")}`;
+  })();
+
+  // GEOCODING PRE-WARM: fire geocode requests for places detected by interpret()
+  // in parallel with the Director call. By the time Composer finishes and we hit
+  // groundPlaces(), these results are already cached — zero extra latency.
+  const prewarmGeo = framework?.interpretation?.locations?.length
+    ? framework.interpretation.locations.map((p: string) => geocode(p))
+    : [];
+  const [dirScript] = await Promise.all([
+    shouldRunDirector ? directorCall(directorInput, aiCfg!) : Promise.resolve(null),
+    Promise.allSettled(prewarmGeo), // warm the cache; results go straight to GEO_CACHE
+  ]);
+
+  // Phase 2: Composer call. When the director produced a script, feed it as context
+  // so the composer focuses purely on technical animation — not story structure.
+  const composerInput = [
+    dirScript ? scriptToComposerContext(dirScript) : idea,
+    // Framework instruction still shapes structure when no director script (arc mode).
+    !dirScript && framework && aiCfg ? frameworkInstruction(framework) : "",
+    // Interview constraints always flow through.
+    !dirScript && ivText ? `Director constraints (honor these):\n${ivText}` : "",
+    // Arc continuity context.
     arcText && aiCfg ? arcText : "",
   ].filter(Boolean).join("\n\n");
-  const ai = (directPlan || !aiCfg) ? { plan: null as Plan | null } : await aiPlan(ideaForAI, aiCfg, withDoctrine(isStory ? STORY_SYSTEM : SYSTEM));
+
+  const composerSystem = simpleIntent ? `${SYSTEM}${SIMPLE_MODE}` : withDoctrine(isStory ? STORY_SYSTEM : SYSTEM);
+  const ai = (directPlan || !aiCfg) ? { plan: null as Plan | null, warning: undefined as string | undefined, tokensUsed: 0 } : await aiPlan(composerInput, aiCfg, composerSystem);
   const llmPlan = ai.plan;
 
-  // STRICT AI MODE: when the user chose AI-directed, NEVER silently degrade to
-  // the built-in heuristic parser — fail loudly so they can fix the key/model.
-  // The heuristic is the engine ONLY when the user explicitly picks "Smart (no
-  // AI)" (aiRequested=false) or supplies a finished template plan (directPlan).
-  if (aiRequested && !directPlan) {
-    if (!aiCfg) {
-      return NextResponse.json({
-        error: "AI-directed mode is on, but no AI provider is connected. Add your API key in Settings, or switch the engine to “Smart (no AI)”.",
-        aiConfigured: false,
-      }, { status: 400 });
-    }
-    if (!llmPlan) {
-      return NextResponse.json({
-        error: `AI-directed mode is on and the model didn't return a usable plan: ${ai.error ?? "unknown error"}. Not falling back to the built-in parser — check your key/model in Settings, then try again.`,
-        aiConfigured: true,
-      }, { status: 502 });
-    }
+  // AI RESULT HANDLING:
+  // • No key configured (aiCfg=null): gracefully fall through to the built-in
+  //   heuristic director. The response includes aiConfigured:false so the UI can
+  //   show a non-blocking "connect a key for AI research" nudge without blocking.
+  // • Key configured but model failed: surface the error so the user can fix it
+  //   (wrong key, rate-limit, etc.). We do NOT silently fall back here because
+  //   that would mask a real config problem the user needs to know about.
+  if (aiRequested && !directPlan && aiCfg && !llmPlan) {
+    return NextResponse.json({
+      error: `AI returned no usable plan: ${ai.error ?? "unknown error"}. Check your API key and model in Settings, then try again.`,
+      aiConfigured: true,
+    }, { status: 502 });
   }
 
   const plan = directPlan ?? llmPlan ?? (isStory ? heuristicStoryPlan(idea) : heuristicPlan(idea));
+
+  // If the Director produced a script but the Composer didn't include narration,
+  // inject the director's narration lines so storyboard review has content.
+  if (dirScript?.beats?.length && !Array.isArray((plan as any).narration)) {
+    (plan as any).narration = dirScript.beats.map((b) => b.narration).filter(Boolean);
+  }
+  // Inject director thesis as the editorial brief thesis when the Composer missed it.
+  if (dirScript?.thesis && !(plan as any).brief) {
+    (plan as any).brief = { thesis: dirScript.thesis, angle: "", archetype: "", facts: [], caveats: [], disputed: [] };
+  }
+
+  // ── ENRICH PLAN: recover Composer omissions from the Director script ──────
+  // The Composer is explicitly told to include "cameraPoses" (per-beat camera
+  // framing) but frequently omits it. Without it, buildFromPlan falls back to
+  // cameraStops (place-name only, no per-beat zoom/pitch/bearing/motion) which
+  // produces much flatter multi-beat stories. Synthesize from Director beats
+  // when the Composer dropped the field.
+  if (dirScript?.beats?.length && !Array.isArray((plan as any).cameraPoses)) {
+    (plan as any).cameraPoses = dirScript.beats.map((b: any) => ({
+      place: b.focus,
+      zoom: b.zoom ?? undefined,
+      pitch: b.pitch ?? undefined,
+      bearing: b.bearing ?? 0,
+      motion: b.motion ?? (plan as any).motion ?? "fly-in",
+    }));
+    // Align cameraStops with the beats when empty (gives multi-stop camera path).
+    if (!Array.isArray((plan as any).cameraStops) || !(plan as any).cameraStops.length) {
+      (plan as any).cameraStops = dirScript.beats.map((b: any) => b.focus);
+    }
+    // Honour the Director's total duration when the Composer didn't set one.
+    if (!((plan as any).durationSec > 0) && (dirScript as any).totalSec > 0) {
+      (plan as any).durationSec = (dirScript as any).totalSec;
+    }
+  }
 
   // ── PLACE GROUNDING (accuracy superpower) ──
   // Verify every place the plan pins actually resolves to the RIGHT spot, and
@@ -1485,10 +2256,10 @@ export async function POST(req: NextRequest) {
     if (sig.basemapStyle && plan.basemapStyle !== "historical") plan.basemapStyle = sig.basemapStyle;
   }
   try {
-    // Split a multi-beat story into editable per-beat scenes (the builder no-ops
-    // the split when there aren't ≥2 distinct geographic beats, so single-place
-    // animations stay one scene).
-    const project = await buildFromPlan(plan, { story: isStory, split: isStory && ((framework?.multiScene ?? false) || !!directPlan) });
+    // A story is built as ONE continuous timeline (beats sequenced inside a
+    // single composition) — never auto-split into scenes. Users add scenes
+    // manually in the editor when they want chapters.
+    const project = await buildFromPlan(plan, { story: isStory });
     // Camera energy + length from the interview shape the result on every path.
     if (iv && !directPlan) applyInterview(project, iv);
     return NextResponse.json({
@@ -1503,6 +2274,10 @@ export async function POST(req: NextRequest) {
       narration: Array.isArray((plan as any).narration) ? (plan as any).narration : [],
       // The determined storyboard (pattern + beats) — for a "here's the plan" preview.
       storyboard: framework ? { pattern: framework.storyboard.pattern, scenes: framework.storyboard.scenes, notes: framework.storyboard.notes } : null,
+      // The Director's editorial script (Phase 1) — beat titles, narration and focus
+      // locations as the Director planned them, shown in StoryboardReview so the user
+      // sees the editorial intent before the Composer's animation is opened.
+      dirScript: dirScript ? { thesis: dirScript.thesis, arc: dirScript.arc, inputType: dirScript.inputType, beats: dirScript.beats.map((b) => ({ title: b.title, narration: b.narration, focus: b.focus, energy: b.energy, pacing: b.pacing, cameraIntent: b.cameraIntent })) } : null,
       // Surface WHY the AI wasn't used (wrong key/model, rate limit, …) instead
       // of silently degrading to the heuristic — so the user can fix it.
       aiError: !directPlan && !llmPlan && aiCfg ? (ai.error ?? "AI unavailable") : undefined,
@@ -1516,6 +2291,14 @@ export async function POST(req: NextRequest) {
       addons: Array.isArray((plan as any).addons)
         ? (plan as any).addons.map((a: unknown) => normalizeAddon(a)).filter(Boolean)
         : [],
+      // Meta: token usage + any warnings (e.g. truncation) the UI should surface.
+      _meta: {
+        tokensUsed: ai.tokensUsed ?? 0,
+        warning: ai.warning ?? null,
+        // Which pipeline handled it: "simple" = lightweight one-call path (no
+        // Director, no research doctrine), "story"/"rich" = full two-phase.
+        intent: directPlan ? "template" : simpleIntent ? "simple" : isStory ? "story" : "rich",
+      },
     });
   } catch (e: any) {
     return NextResponse.json({ error: "Failed to assemble project", detail: String(e?.message ?? e) }, { status: 500 });

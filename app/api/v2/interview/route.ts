@@ -12,6 +12,8 @@
  * to /api/v2/generate as `interview` and shape the plan.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
+import { rateLimit } from "@/lib/rateLimit";
 import { aiComplete, resolveAIConfig, configFromUser } from "@/lib/ai/providers";
 import { matchArchetype } from "@/lib/ai/directorDoctrine";
 
@@ -92,6 +94,12 @@ function sanitize(qs: any): IVQuestion[] | null {
 }
 
 export async function POST(req: NextRequest) {
+  const { userId: clerkId } = await auth();
+  if (!clerkId) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+  if (!rateLimit("interview", clerkId, { maxRequests: 20, windowSec: 60 })) {
+    return NextResponse.json({ error: "Too many requests — max 20 per minute." }, { status: 429 });
+  }
+
   let body: any;
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Bad JSON" }, { status: 400 }); }
   const idea = (body?.idea ?? "").toString().trim();
@@ -101,9 +109,11 @@ export async function POST(req: NextRequest) {
 
   if (aiCfg) {
     try {
-      const { text } = await aiComplete(IV_SYSTEM, `Idea: """${idea.slice(0, 600)}"""`, aiCfg);
+      // Interview JSON is small (~400 tokens) — 800 is plenty and keeps cost low.
+      const { text } = await aiComplete(IV_SYSTEM, `Idea: """${idea.slice(0, 600)}"""`, aiCfg, { maxTokens: 800 });
       if (text) {
-        const json = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
+        const s = text.replace(/^```[a-z]*\n?/m, "").replace(/\n?```\s*$/m, "").trim();
+        const json = JSON.parse(s.slice(s.indexOf("{"), s.lastIndexOf("}") + 1));
         const questions = sanitize(json?.questions);
         if (questions) return NextResponse.json({ questions, provider: "ai", thesisHint: (json?.thesisHint ?? "").toString().slice(0, 200) });
       }

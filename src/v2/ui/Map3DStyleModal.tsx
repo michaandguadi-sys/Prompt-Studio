@@ -4,7 +4,8 @@ import React from "react";
 import { createPortal } from "react-dom";
 import { X, Boxes, RotateCcw, Sliders, Globe2 } from "lucide-react";
 import { useEditor } from "../store/editor";
-import { MAP3D_STYLES } from "@/lib/presets/map3dStyles";
+import { MAP3D_STYLES, map3dStyleById } from "@/lib/presets/map3dStyles";
+import { PRO_MAP_STYLES } from "@/lib/presets/proMapStyles";
 import { loadGoogleKey } from "./SettingsModal";
 
 /**
@@ -22,7 +23,7 @@ export const Map3DStyleModal: React.FC<{ open: boolean; onClose: () => void }> =
   const activeId = (comp.basemap as any).style3d || "";
 
   const apply = (id: string) => {
-    const style = MAP3D_STYLES.find((s) => s.id === id);
+    const style = map3dStyleById(id);
     if (!style) return;
     patchComposition({
       basemap: { ...comp.basemap, ...style.basemap, style3d: style.id } as any,
@@ -57,33 +58,17 @@ export const Map3DStyleModal: React.FC<{ open: boolean; onClose: () => void }> =
 
         <div className="max-h-[74vh] overflow-y-auto px-5 py-4">
           <p className="mb-3 text-[12px] leading-relaxed text-graphite/55">
-            One click reimagines the whole map as a 3D world — recoloured land &amp; water, art-directed 3D buildings, glowing edges, relief and grade. Tweak any of it after in the inspector.
+            One click restyles the whole map — recoloured land &amp; water, relief, grade, and (for the creative worlds) art-directed 3D buildings. Tweak any of it after in the inspector.
           </p>
+
+          <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-graphite/45">Documentary &amp; professional</div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {MAP3D_STYLES.map((s) => {
-              const on = activeId === s.id;
-              return (
-                <button key={s.id} onClick={() => apply(s.id)}
-                  className={`group relative overflow-hidden rounded-xl border text-left transition-all hover:-translate-y-0.5 ${on ? "border-[#6E7BFF] ring-1 ring-[#6E7BFF]/50" : "border-line hover:border-[#6E7BFF]/40"}`}>
-                  {/* Swatch preview — a tiny 3D-map motif from the style's palette */}
-                  <div className="relative h-20 w-full overflow-hidden" style={{ background: s.swatches[0] }}>
-                    <div className="absolute inset-0" style={{ background: `radial-gradient(120% 90% at 50% 120%, ${s.swatches[1]}55, transparent 60%)` }} />
-                    {/* faux extruded blocks */}
-                    <div className="absolute bottom-2 left-3 h-7 w-3 rounded-sm" style={{ background: s.swatches[1], opacity: 0.85, boxShadow: `0 0 10px ${s.swatches[2]}` }} />
-                    <div className="absolute bottom-2 left-7 h-10 w-3 rounded-sm" style={{ background: s.swatches[1], opacity: 0.95, boxShadow: `0 0 12px ${s.swatches[2]}` }} />
-                    <div className="absolute bottom-2 left-11 h-5 w-3 rounded-sm" style={{ background: s.swatches[1], opacity: 0.8 }} />
-                    <div className="absolute bottom-2 right-3 h-8 w-3 rounded-sm" style={{ background: s.swatches[2], opacity: 0.9, boxShadow: `0 0 12px ${s.swatches[2]}` }} />
-                    {/* horizon glow line */}
-                    <div className="absolute bottom-2 left-0 right-0 h-px" style={{ background: s.swatches[2], opacity: 0.5 }} />
-                  </div>
-                  <div className="px-2.5 py-2">
-                    <div className={`text-[12px] font-semibold ${on ? "text-iris" : "text-graphite/80"}`}>{s.name}</div>
-                    <div className="mt-0.5 truncate text-[10px] text-graphite/45">{s.tagline}</div>
-                  </div>
-                  {on && <span className="absolute right-2 top-2 rounded-full bg-[#6E7BFF] px-1.5 py-0.5 text-[8px] font-bold text-white">ACTIVE</span>}
-                </button>
-              );
-            })}
+            {PRO_MAP_STYLES.map((s) => <StyleCard key={s.id} s={s} on={activeId === s.id} onApply={apply} />)}
+          </div>
+
+          <div className="mb-2 mt-5 text-[10px] font-semibold uppercase tracking-[0.22em] text-graphite/45">Creative worlds</div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {MAP3D_STYLES.map((s) => <StyleCard key={s.id} s={s} on={activeId === s.id} onApply={apply} />)}
           </div>
           {/* ── Super-adjustable fine-tune — every 3D knob, live ───────────── */}
           <FineTune comp={comp} patchComposition={patchComposition} layers={layers} patchLayer={patchLayer} />
@@ -95,6 +80,27 @@ export const Map3DStyleModal: React.FC<{ open: boolean; onClose: () => void }> =
     document.body,
   );
 };
+
+/* ── One style card (shared by both collections) ──────────────────────────── */
+const StyleCard: React.FC<{ s: { id: string; name: string; tagline: string; swatches: [string, string, string] }; on: boolean; onApply: (id: string) => void }> = ({ s, on, onApply }) => (
+  <button onClick={() => onApply(s.id)}
+    className={`group relative overflow-hidden rounded-xl border text-left transition-all hover:-translate-y-0.5 ${on ? "border-[#6E7BFF] ring-1 ring-[#6E7BFF]/50" : "border-line hover:border-[#6E7BFF]/40"}`}>
+    {/* Swatch preview — a tiny map motif from the style's palette */}
+    <div className="relative h-20 w-full overflow-hidden" style={{ background: s.swatches[0] }}>
+      <div className="absolute inset-0" style={{ background: `radial-gradient(120% 90% at 50% 120%, ${s.swatches[1]}55, transparent 60%)` }} />
+      <div className="absolute bottom-2 left-3 h-7 w-3 rounded-sm" style={{ background: s.swatches[1], opacity: 0.85, boxShadow: `0 0 10px ${s.swatches[2]}` }} />
+      <div className="absolute bottom-2 left-7 h-10 w-3 rounded-sm" style={{ background: s.swatches[1], opacity: 0.95, boxShadow: `0 0 12px ${s.swatches[2]}` }} />
+      <div className="absolute bottom-2 left-11 h-5 w-3 rounded-sm" style={{ background: s.swatches[1], opacity: 0.8 }} />
+      <div className="absolute bottom-2 right-3 h-8 w-3 rounded-sm" style={{ background: s.swatches[2], opacity: 0.9, boxShadow: `0 0 12px ${s.swatches[2]}` }} />
+      <div className="absolute bottom-2 left-0 right-0 h-px" style={{ background: s.swatches[2], opacity: 0.5 }} />
+    </div>
+    <div className="px-2.5 py-2">
+      <div className={`text-[12px] font-semibold ${on ? "text-iris" : "text-graphite/80"}`}>{s.name}</div>
+      <div className="mt-0.5 truncate text-[10px] text-graphite/45">{s.tagline}</div>
+    </div>
+    {on && <span className="absolute right-2 top-2 rounded-full bg-[#6E7BFF] px-1.5 py-0.5 text-[8px] font-bold text-white">ACTIVE</span>}
+  </button>
+);
 
 /* ── Live fine-tune controls for the active 3D world ──────────────────────── */
 const FineTune: React.FC<{ comp: any; patchComposition: (p: any) => void; layers: any[]; patchLayer: (id: string, p: any) => void }> = ({ comp, patchComposition, layers, patchLayer }) => {

@@ -32,18 +32,35 @@ export const ML_BASE_STYLES: { id: string; label: string; url: string; tone: "da
   { id: "outdoors", label: "Outdoors", url: ML_STYLES.outdoors, tone: "outdoors" },
 ];
 
-/** Inline raster style for satellite (ESRI World Imagery — free, no key). */
-export function satelliteStyle(): Record<string, unknown> {
+/**
+ * Inline raster style for satellite (ESRI World Imagery — free, no key).
+ *
+ * Tiles are routed through our own `/api/sat/{z}/{x}/{y}` proxy so the headless
+ * Remotion render agent always gets proper CORS headers and benefits from Next.js's
+ * `force-cache` deduplication. Direct ArcGIS fetches from a headless Chrome can
+ * be throttled/blocked in bulk; the proxy is stable and fast.
+ *
+ * `origin` param: pass `window.location.origin` in the browser, or the server's
+ * base URL (e.g. `process.env.NEXT_PUBLIC_APP_URL`) in the render agent.
+ * Defaults to relative path (works in any same-origin context).
+ */
+export function satelliteStyle(origin = ""): Record<string, unknown> {
   return {
     version: 8,
     glyphs: "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
     sources: {
       esri: {
         type: "raster",
-        tiles: ["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+        // Proxy through our own server — avoids throttle / CORS / user-agent blocks
+        // from ArcGIS when a headless Chrome fires 50+ parallel tile requests.
+        tiles: [`${origin}/api/sat/{z}/{x}/{y}`],
         tileSize: 256,
         maxzoom: 19,
-        attribution: "Esri, Maxar, Earthstar Geographics",
+        // Allow MapLibre to request tiles up to 2 zoom levels beyond what the
+        // camera shows — eliminates blurry scaled-up parent tiles at high zoom.
+        maxOverzooming: 2,
+        maxUnderzooming: 0,
+        attribution: "© Esri, Maxar, Earthstar Geographics",
       },
     },
     // raster-fade-duration:0 → tiles don't cross-fade as the camera moves, which
@@ -56,12 +73,12 @@ export function satelliteStyle(): Record<string, unknown> {
  * Translate any style id / legacy `mapbox://styles/...` URL into a MapLibre
  * style URL or inline spec. Unknown → the dark default.
  */
-export function resolveMapStyle(styleUrl?: string): string | Record<string, unknown> {
+export function resolveMapStyle(styleUrl?: string, origin = ""): string | Record<string, unknown> {
   const u = (styleUrl || "").toLowerCase();
   if (!u || u === "custom") return DEFAULT_ML_STYLE;
   // Already a MapLibre/OHM style JSON URL — pass through untouched.
   if (u.startsWith("http")) return styleUrl as string;
-  if (u === "satellite" || u.includes("satellite")) return satelliteStyle();
+  if (u === "satellite" || u.includes("satellite")) return satelliteStyle(origin);
   // "grid" → the dark VECTOR base (so we keep real coastlines/boundaries); the
   // blueprint recolour + graticule overlay are added at render time.
   if (u === "grid") return ML_STYLES.dark;

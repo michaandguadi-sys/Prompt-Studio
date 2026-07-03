@@ -12,6 +12,8 @@
  * which the client applies through the normal undoable store mutations.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
+import { rateLimit } from "@/lib/rateLimit";
 import { aiComplete, resolveAIConfig, configFromUser } from "@/lib/ai/providers";
 
 type Patch = Record<string, unknown>;
@@ -124,6 +126,9 @@ const TYPE_WORDS: Record<string, string[]> = {
   annotation: ["annotation", "callout", "leader", "note"],
   image: ["image", "photo", "picture", "logo"],
   camera: ["camera", "shot", "view", "framing"],
+  radius: ["radius", "range", "rings", "range rings", "coverage", "blast radius", "epicenter"],
+  timestamp: ["timestamp", "date", "ticker", "day counter", "clock"],
+  atmosphere: ["atmosphere", "weather", "snow", "rain", "fog", "embers", "dust", "particles"],
 };
 
 /** Resolve a free-text reference to a concrete layer id (or null). */
@@ -277,6 +282,17 @@ function heuristicEdits(cmd: string, ctx: Ctx): EditOp[] | null {
       } else if (has(/\b(annotation|callout|leader line|note)\b/)) {
         const textM = c.match(/["“]([^"”]+)["”]/);
         ops.push({ op: "addLayer", layerType: "annotation", at: "center", props: textM ? { text: textM[1].slice(0, 60) } : {} });
+      } else if (has(/\b(range rings?|radius|blast radius|coverage|within \d+\s?(?:km|mi|miles|kilometers)|epicenter)\b/)) {
+        // "add a 500 km radius around Moscow" / "show the blast radius at Hiroshima"
+        const kmM = lc.match(/(\d+(?:[.,]\d+)?)\s?(km|kilometers?|mi|miles?)/);
+        const km = kmM ? parseFloat(kmM[1].replace(",", ".")) * (kmM[2].startsWith("mi") ? 1.60934 : 1) : 500;
+        const atRef = c.match(/\b(?:around|at|on|over|from)\s+(?:the\s+)?([A-Z][\w'’\- ]+)\s*$/);
+        ops.push({ op: "addLayer", layerType: "radius", at: atRef ? atRef[1].trim() : "center", props: { radiusKm: km, mode: has(/\b(epicenter|shockwave|pulse|sonar)\b/) ? "ripple" : "grow" } });
+      } else if (has(/\b(timestamp|date ticker|day counter|dates? (?:that )?advance)\b/)) {
+        ops.push({ op: "addLayer", layerType: "timestamp", props: {} });
+      } else if (has(/\b(snow(?:fall)?|rain|fog|mist|embers?|sparks?|dust|sandstorm|weather|atmosphere)\b/)) {
+        const effect = has(/\brain\b/) ? "rain" : has(/\b(fog|mist)\b/) ? "fog" : has(/\b(embers?|sparks?)\b/) ? "embers" : has(/\b(dust|sand)/) ? "dust" : "snow";
+        ops.push({ op: "addLayer", layerType: "atmosphere", props: { effect } });
       } else if (has(/\b(title|heading)\b/) && !L.some((l) => l.type === "title")) {
         const textM = c.match(/["“]([^"”]+)["”]/) || c.match(/\b(?:titled|title|saying|that says)\s+(.+?)\s*$/i);
         ops.push({ op: "addLayer", layerType: "title", props: textM ? { text: textM[1].slice(0, 60).toUpperCase() } : {} });
@@ -440,7 +456,7 @@ const SYS = `You are a precise MAP-ANIMATION scene editor. The user wants to ADJ
 
 Ops:
 {"op":"patchLayer","target":"<layer id>","patch":{...changed fields only...}}
-{"op":"addLayer","layerType":"marker|flag|label|annotation|spotlight|title|highlight|route|chart|connections|image","props":{...},"at":"<place name or 'center'>"}
+{"op":"addLayer","layerType":"marker|flag|label|annotation|spotlight|radius|timestamp|atmosphere|title|highlight|route|chart|connections|image","props":{...},"at":"<place name or 'center'>"}
 {"op":"removeLayer","target":"<layer id>"}
 {"op":"patchLook","patch":{...}}        // vignette,letterbox,grain(0-1); texture:"none|paper|halftone|scanlines|grid|noise"; mapFilter:"none|sepia|antique|noir|cool|warm|blueprint|duotone"; mapFilterAmount,tintOpacity(0-1); tintColor,bgColor(hex)
 {"op":"patchBasemap","patch":{...}}     // terrain(bool),terrainStrength(0-5),landColor,waterColor(hex or ""),showStreets,showLabels(bool),mapYear("YYYY")
@@ -471,6 +487,12 @@ async function aiEdits(cmd: string, ctx: Ctx, cfg: any): Promise<EditOp[] | null
 }
 
 export async function POST(req: NextRequest) {
+  const { userId: clerkId } = await auth();
+  if (!clerkId) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+  if (!rateLimit("edit", clerkId, { maxRequests: 30, windowSec: 60 })) {
+    return NextResponse.json({ error: "Too many requests — max 30 edits per minute." }, { status: 429 });
+  }
+
   let body: { command?: string; context?: Ctx; ai?: any; useAI?: boolean };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Bad JSON" }, { status: 400 }); }
   const command = (body.command ?? "").trim();

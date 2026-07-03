@@ -29,12 +29,13 @@ export type QuotaResult = {
 };
 
 export async function checkQuota(userId: string): Promise<QuotaResult> {
-  if (!db) {
-    // DB not configured (local dev without Supabase) — allow everything.
+  // Dev/testing bypass: add BYPASS_QUOTA=true to .env.local to unlock all tiers.
+  // Never set this in production — it disables all metering.
+  if (process.env.BYPASS_QUOTA === "true" || !db) {
     return {
       allowed: true, usedMinutes: 0, limitMinutes: 9999,
       usedRenders: 0, maxRenders: null, unit: "minute",
-      tier: "free", periodStart: new Date(), fraction: 0,
+      tier: "teams", periodStart: new Date(), fraction: 0,
     };
   }
 

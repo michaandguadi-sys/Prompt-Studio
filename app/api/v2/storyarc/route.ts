@@ -12,6 +12,8 @@
  * to the deterministic `buildArc` when no AI provider is configured.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
+import { rateLimit } from "@/lib/rateLimit";
 import { aiComplete, resolveAIConfig, configFromUser } from "@/lib/ai/providers";
 import { buildArc, pickLockedStyle, type StoryArc } from "@/lib/parse";
 
@@ -39,6 +41,12 @@ interface ArchPlan {
 }
 
 export async function POST(req: NextRequest) {
+  const { userId: clerkId } = await auth();
+  if (!clerkId) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+  if (!rateLimit("storyarc", clerkId, { maxRequests: 10, windowSec: 60 })) {
+    return NextResponse.json({ error: "Too many requests — max 10 per minute." }, { status: 429 });
+  }
+
   let body: { ideas?: string[]; style?: string; ai?: any; useAI?: boolean };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Bad JSON" }, { status: 400 }); }
 
@@ -54,11 +62,15 @@ export async function POST(req: NextRequest) {
 
   const user = `These ${ideas.length} sequences form one film. Plan the arc.\n` +
     ideas.map((s, i) => `Sequence ${i + 1}: ${s}`).join("\n");
-  const { text } = await aiComplete(SYSTEM, user, aiCfg);
+  // Arc JSON is moderate-sized (~600-900 tokens) — 1500 is enough with room to spare.
+  const { text } = await aiComplete(SYSTEM, user, aiCfg, { maxTokens: 1500, temperature: 0.3 });
   if (!text) return NextResponse.json(base); // AI failed → deterministic arc
 
   let plan: ArchPlan | null = null;
-  try { plan = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)) as ArchPlan; } catch { /* keep base */ }
+  try {
+    const s = text.replace(/^```[a-z]*\n?/m, "").replace(/\n?```\s*$/m, "").trim();
+    plan = JSON.parse(s.slice(s.indexOf("{"), s.lastIndexOf("}") + 1)) as ArchPlan;
+  } catch { /* keep base */ }
   if (!plan || !Array.isArray(plan.sequences) || plan.sequences.length !== ideas.length) {
     return NextResponse.json(base);
   }

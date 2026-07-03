@@ -179,6 +179,7 @@ export function applyEditOps(ops: EditOp[]): { applied: number; labels: string[]
           if (["marker", "flag", "spotlight"].includes(op.layerType)) props.anchor = { lon, lat };
           else if (["label", "image"].includes(op.layerType)) props.anchor = { kind: "coord", lon, lat };
           else if (op.layerType === "annotation") props.anchor = { lon, lat };
+          else if (op.layerType === "radius") props.center = { lon, lat };
           st.addLayer(op.layerType as LayerType, props);
           applied++; break;
         }

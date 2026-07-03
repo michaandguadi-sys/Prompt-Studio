@@ -343,6 +343,8 @@ export const BubbleEntry = z.object({
   /** Pre-computed size in px (sqrt-scaled for equal area). Set by buildFromPlan. */
   sizePx: z.number().default(40),
   color: z.string().default("#6E7BFF"),
+  /** Seconds after the layer's inSec at which THIS bubble appears (staggered reveal). */
+  entryDelay: z.number().default(0),
 });
 
 export const BubbleLayer = z.object({
@@ -419,6 +421,48 @@ export const HeatmapLayer = z.object({
   colorHigh: z.string().default("#ff3d00"),
   showLegend: z.boolean().default(false),
   transform: Transform.default({}),
+});
+
+// ── Layer: EarthLayer (NASA GIBS / Earth-observation WMTS raster overlay) ──────
+
+/** Supported NASA GIBS earth-observation datasets — all free, no auth required.
+ *  Additional datasets: any valid GIBS layer id works as `datasetId`. */
+export const GIBS_DATASETS = [
+  "MODIS_Terra_CorrectedReflectance_TrueColor",
+  "MODIS_Terra_NDVI_8Day",
+  "VIIRS_SNPP_DayNightBand_ENCC",
+  "MODIS_Terra_Thermal_Anomalies_All",
+  "MODIS_Aqua_Sea_Surface_Temp_Night",
+  "MODIS_Terra_Snow_Cover_Daily_L3_Global_500m",
+  "MODIS_Terra_Aerosol_Optical_Depth",
+  "BlueMarble_NextGeneration",
+] as const;
+export type GibsDataset = (typeof GIBS_DATASETS)[number] | string;
+
+export const EarthLayer = z.object({
+  ...layerBase,
+  type: z.literal("earthlayer"),
+  timing: Timing,
+  /** GIBS dataset id — e.g. "MODIS_Terra_NDVI_8Day". Use presets or any valid GIBS layer. */
+  datasetId: z.string().default("MODIS_Terra_CorrectedReflectance_TrueColor"),
+  /** Reference date YYYY-MM-DD for the tile fetch. "latest" uses today's date. */
+  date: z.string().default("latest"),
+  /** Tile format: jpg for true-color/RGB imagery; png for index/thematic layers. */
+  tileFormat: z.enum(["jpg", "png"]).default("jpg"),
+  /** GIBS tile matrix set — GoogleMapsCompatible_Level9 covers most datasets. */
+  tileMatrix: z.string().default("GoogleMapsCompatible_Level9"),
+  /** Max zoom level this GIBS dataset supports (MODIS=9, Landsat=12, VIIRS=8). */
+  maxzoom: z.number().min(1).max(15).default(9),
+  /** Animated max opacity (0–1). The timing controls fade-in/out on top of this. */
+  opacity: z.number().min(0).max(1).default(0.75),
+  /** Human-readable label shown as an in-map legend chip. */
+  label: z.string().default(""),
+  /** Attribution shown in the bottom-right corner of the map. */
+  attribution: z.string().default("Imagery: NASA GIBS / Earthdata"),
+  /** Optional second dataset for animated A→B change detection (same bounds, diff date/product). */
+  compareDatasetId: z.string().optional(),
+  compareDate: z.string().optional(),
+  compareMaxzoom: z.number().min(1).max(15).optional(),
 });
 
 // ── Layer: Image (custom png/svg/jpg pin or overlay) ─────────────────────────
@@ -524,6 +568,78 @@ export const SpotlightLayer = z.object({
   pulse: z.boolean().default(false),
 });
 
+// ── Layer: Radius (range rings — "within 500 km", coverage, epicenter) ───────
+// True GEODESIC circles: ring points are computed on the sphere and projected
+// per frame, so they stay accurate under any zoom, pitch and bearing.
+
+export const RadiusLayer = z.object({
+  ...layerBase,
+  type: z.literal("radius"),
+  timing: Timing,
+  center: LonLat.extend({ name: z.string().optional() }),
+  /** Outer radius in kilometres (rings are evenly spaced inside it). */
+  radiusKm: z.number().min(0.1).max(20000).default(500),
+  rings: z.number().min(1).max(5).default(3),
+  color: z.string().default("#6E7BFF"),
+  /** Fill tint inside the OUTER ring (0 = lines only). */
+  fillOpacity: z.number().min(0).max(1).default(0.07),
+  width: z.number().min(0.5).max(20).default(3),
+  dashed: z.boolean().default(false),
+  showLabels: z.boolean().default(true),
+  labelUnit: z.enum(["km", "mi"]).default("km"),
+  /** grow: rings expand once (staggered inner-first) · ripple: endless sonar
+   *  pulses · static: always at full size. */
+  mode: z.enum(["grow", "ripple", "static"]).default("grow"),
+  growSec: z.number().min(0.3).max(10).default(2),
+  /** ripple only: seconds between successive pulses. */
+  intervalSec: z.number().min(0.5).max(10).default(1.8),
+  /** Mark the centre with a pulsing dot. */
+  centerDot: z.boolean().default(true),
+});
+
+// ── Layer: Timestamp (animated date / day counter — the documentary ticker) ──
+
+export const TimestampLayer = z.object({
+  ...layerBase,
+  type: z.literal("timestamp"),
+  timing: Timing,
+  /** date-range: interpolates startDate→endDate across the layer's visible
+   *  window · day-counter: counts dayStart→dayEnd ("DAY 37") · fixed: static. */
+  mode: z.enum(["date-range", "day-counter", "fixed"]).default("date-range"),
+  startDate: z.string().default("2020-01-01"), // ISO yyyy-mm-dd
+  endDate: z.string().default("2024-12-31"),
+  format: z.enum(["year", "month-year", "full"]).default("month-year"),
+  dayStart: z.number().default(1),
+  dayEnd: z.number().default(100),
+  /** day-counter prefix ("DAY", "JOUR", …). */
+  prefix: z.string().default("DAY"),
+  fixedText: z.string().default(""),
+  position: z.enum(["top-left", "top-center", "top-right", "bottom-left", "bottom-center", "bottom-right"]).default("top-right"),
+  style: z.enum(["chip", "minimal"]).default("chip"),
+  /** Text size as % of frame height. */
+  sizeVh: z.number().min(1).max(14).default(3.2),
+  accent: z.string().default("#6E7BFF"),
+  color: z.string().default("#ffffff"),
+});
+
+// ── Layer: Atmosphere (cinematic weather — deterministic seeded particles) ───
+// Every particle's position is a pure function of the frame number, so the
+// preview, the export and the headless render are pixel-identical.
+
+export const AtmosphereLayer = z.object({
+  ...layerBase,
+  type: z.literal("atmosphere"),
+  timing: Timing,
+  effect: z.enum(["snow", "rain", "embers", "dust", "fog"]).default("snow"),
+  density: z.number().min(0).max(1).default(0.5),
+  speed: z.number().min(0.1).max(3).default(1),
+  /** Horizontal drift: negative = leftward, positive = rightward. */
+  wind: z.number().min(-2).max(2).default(0.3),
+  /** Empty = the effect's natural colour (white snow, orange embers, …). */
+  color: z.string().default(""),
+  opacity: z.number().min(0).max(1).default(0.7),
+});
+
 // ── Layer: Track (an imported GPS/GPX flythrough) ────────────────────────────
 // A real recorded track from any device/app. The raw file is parsed + smoothed +
 // resampled OFF this object (src/v2/track) into the normalized form below — the
@@ -619,12 +735,16 @@ export const Layer = z.discriminatedUnion("type", [
   BubbleLayer,
   FlowLayer,
   HeatmapLayer,
+  EarthLayer,
   ImageLayer,
   MarkerLayer,
   AnnotationLayer,
   ConnectionsLayer,
   SpotlightLayer,
   TrackLayer,
+  RadiusLayer,
+  TimestampLayer,
+  AtmosphereLayer,
 ]);
 export type Layer = z.infer<typeof Layer>;
 export type LayerType = Layer["type"];
@@ -643,11 +763,15 @@ export type FlowLayer = z.infer<typeof FlowLayer>;
 export type FlowEntry = z.infer<typeof FlowEntry>;
 export type HeatmapLayer = z.infer<typeof HeatmapLayer>;
 export type HeatEntry = z.infer<typeof HeatEntry>;
+export type EarthLayer = z.infer<typeof EarthLayer>;
 export type ImageLayer = z.infer<typeof ImageLayer>;
 export type MarkerLayer = z.infer<typeof MarkerLayer>;
 export type AnnotationLayer = z.infer<typeof AnnotationLayer>;
 export type ConnectionsLayer = z.infer<typeof ConnectionsLayer>;
 export type SpotlightLayer = z.infer<typeof SpotlightLayer>;
+export type RadiusLayer = z.infer<typeof RadiusLayer>;
+export type TimestampLayer = z.infer<typeof TimestampLayer>;
+export type AtmosphereLayer = z.infer<typeof AtmosphereLayer>;
 
 // ── Composition + Project ────────────────────────────────────────────────────
 
@@ -766,6 +890,14 @@ export const Composition = z.object({
   /** Journalism-grade in-frame source citations (e.g. "World Bank 2024", "UN OCHA").
    *  Auto-populated from the AI brief's fact sources; displayed as a subtle corner overlay. */
   citations: z.array(z.string()).default([]),
+  /** AI-generated TTS voiceover — a data URL (base64 MP3) or object-storage URL.
+   *  When present, played during Remotion render so the exported video includes audio. */
+  voiceover: z.object({
+    url: z.string(),
+    durationSec: z.number(),
+    voice: z.string().optional(),
+    text: z.string().optional(),
+  }).optional(),
 });
 export type Composition = z.infer<typeof Composition>;
 

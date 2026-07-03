@@ -40,6 +40,10 @@ type EditorState = {
   patchLayer: (id: string, patch: Record<string, unknown>) => void;
   patchTiming: (id: string, patch: Partial<Timing>) => void;
   patchComposition: (patch: Partial<Composition>) => void;
+  /** Change the scene duration AND proportionally rescale every layer's timing
+   *  (in/out points, narration beats, choreography spans) so the whole film
+   *  keeps its rhythm at the new length — "fit my story to 30s" in one click. */
+  retimeScene: (newDurationSec: number) => void;
   /** Set just the theme (fonts/colours). `recolor` also repaints every layer. */
   setTheme: (patch: Partial<Theme>, recolor?: boolean) => void;
   rename: (name: string) => void;
@@ -191,6 +195,42 @@ export const useEditor = create<EditorState>()(
         }),
 
         patchComposition: (patch) => commit((p) => { p.composition = { ...p.composition, ...patch }; }),
+
+        retimeScene: (newDurationSec) => commit((p) => {
+          const old = p.composition.durationSec;
+          const dur = Math.min(60, Math.max(1, newDurationSec));
+          if (!old || Math.abs(dur - old) < 0.01) return;
+          const f = dur / old;
+          const clampR = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+          p.composition.durationSec = dur;
+          for (const l of p.composition.layers as any[]) {
+            if (l.timing) {
+              l.timing = {
+                ...l.timing,
+                inSec: clampR(l.timing.inSec * f, 0, dur),
+                outSec: l.timing.outSec == null ? null : clampR(l.timing.outSec * f, 0, dur),
+              };
+            }
+            // Layer-specific choreography spans scale too (clamped to schema
+            // ranges) so a highlight's fill or a route's draw keeps its pacing.
+            if (typeof l.fillDelaySec === "number") l.fillDelaySec = clampR(l.fillDelaySec * f, 0.2, 5);
+            if (typeof l.growSpanSec === "number") l.growSpanSec = clampR(l.growSpanSec * f, 0.5, 20);
+            if (typeof l.countSec === "number") l.countSec = clampR(l.countSec * f, 0.2, 12);
+            // Route stopovers: the dwell at each via-point scales with the film.
+            if (Array.isArray(l.via)) {
+              l.via = l.via.map((v: any) =>
+                typeof v?.pauseSec === "number" ? { ...v, pauseSec: clampR(v.pauseSec * f, 0, 10) } : v,
+              );
+            }
+          }
+          // Timed narration captions ride along with their beats.
+          const lines = (p.composition as any).narrationLines;
+          if (Array.isArray(lines)) {
+            (p.composition as any).narrationLines = lines.map((ln: any) => ({
+              ...ln, startSec: clampR((ln.startSec ?? 0) * f, 0, dur),
+            }));
+          }
+        }),
 
         setTheme: (patch, recolor) => commit((p) => {
           const theme = { ...p.composition.theme, ...patch };

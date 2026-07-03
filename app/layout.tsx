@@ -44,7 +44,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <link rel="preconnect" href="https://fonts.googleapis.com" />
           <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
           {/* eslint-disable-next-line @next/next/google-font-display, @next/next/no-page-custom-font */}
-          <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Anton&family=Montserrat:wght@400;700;800&family=Poppins:wght@400;600;800&family=Space+Grotesk:wght@400;700&family=Playfair+Display:wght@500;700;800&family=Archivo+Black&family=DM+Serif+Display&family=Permanent+Marker&family=Newsreader:opsz,wght@6..72,400;500;600&display=swap" />
+          <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Anton&family=Montserrat:wght@400;700;800&family=Poppins:wght@400;600;800&family=Space+Grotesk:wght@400;700&family=Playfair+Display:wght@500;700;800&family=Archivo+Black&family=DM+Serif+Display&family=Permanent+Marker&family=Newsreader:opsz,wght@6..72,400;500;600&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" />
         </head>
         <body>{children}</body>
       </html>

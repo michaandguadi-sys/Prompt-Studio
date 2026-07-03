@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { rateLimit } from "@/lib/rateLimit";
 
 /**
  * DEM tile proxy — re-serves the free AWS terrarium elevation tiles WITH CORS so
@@ -8,7 +9,12 @@ import { NextRequest, NextResponse } from "next/server";
  * are validated as integers, so there's no SSRF surface. Public (the render agent
  * has no Clerk session) — see middleware isPublic.
  */
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ z: string; x: string; y: string }> }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ z: string; x: string; y: string }> }) {
+  const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? req.headers.get("x-real-ip") ?? "unknown";
+  if (!rateLimit("dem-tile", clientIp, { maxRequests: 500, windowSec: 60 })) {
+    return new NextResponse("rate limit exceeded", { status: 429 });
+  }
+
   const { z, x, y } = await params;
   const Z = Number(z), X = Number(x), Y = Number((y || "").replace(/\.png$/i, ""));
   if (![Z, X, Y].every((n) => Number.isInteger(n) && n >= 0) || Z > 16 || X > 2 ** Z || Y > 2 ** Z) {

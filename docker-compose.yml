@@ -1,0 +1,48 @@
+# Mapanisy on a VPS (Hostinger KVM4: 4 vCPU / 16 GB) — production compose.
+#
+# One-time setup on the VPS:
+#   1. Put BUILD-time publics in a `.env` file next to this compose file:
+#        NEXT_PUBLIC_MAPBOX_TOKEN=pk.xxx
+#        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_xxx
+#        NEXT_PUBLIC_APP_URL=https://your-domain.com
+#   2. Put RUNTIME secrets in `.env.production` (never committed):
+#        CLERK_SECRET_KEY=sk_live_xxx
+#        ANTHROPIC_API_KEY=sk-ant-xxx        # server-wide AI director (recommended)
+#        DATABASE_URL=postgres://…           # optional; file/dev store without it
+#        STRIPE_SECRET_KEY=…                 # when billing goes live
+#   3. Create the data dirs owned by the container user (uid 1000):
+#        mkdir -p data/projects data/renders data/dev && chown -R 1000:1000 data
+#   4. docker compose up -d --build
+#
+# Put a reverse proxy (Caddy/nginx/Traefik) with TLS in front of port 3030.
+
+services:
+  mapanisy:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_MAPBOX_TOKEN: ${NEXT_PUBLIC_MAPBOX_TOKEN}
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+    ports:
+      - "3030:3030"
+    env_file:
+      - .env.production
+    restart: unless-stopped
+    # Chromium composites 4K frames in /dev/shm — the 64 MB default crashes it.
+    shm_size: 2gb
+    volumes:
+      - ./data/projects:/app/projects-v2
+      - ./data/renders:/app/.renders
+      - ./data/dev:/app/.dev-data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3030/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    # Renders are CPU-bound; leave one core for the web server under load.
+    deploy:
+      resources:
+        limits:
+          memory: 12g
