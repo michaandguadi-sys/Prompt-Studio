@@ -54,10 +54,20 @@ const satelliteNightStyle = (origin: string): Record<string, unknown> => ({
  * geo coordinates through the live map — no React re-renders per frame.
  */
 
+/** A tap-to-preview restyle of the living map: raster grade + accent palette
+ *  for arcs/pins. Lets the landing's style cards recolour the world LIVE. */
+export type MapGrade = {
+  tint: string;                       // wash colour drawn over the frame
+  accents: [string, string, string];  // arc / pin / hub palette
+  saturation?: number;                // raster-saturation (-1..1)
+  brightness?: number;                // raster-brightness-max (0..1)
+};
+
 type Props = {
   stops: GeoStop[];
   hoverStops?: GeoStop[] | null;
   generating?: boolean;
+  grade?: MapGrade | null;
 };
 
 /* Ambient world hubs — the idle "airline network" show. */
@@ -78,7 +88,7 @@ const IRIS = "#6E7BFF", CYAN = "#2FE0FF", VIOLET = "#B57BFF", AMBER = "#FFB86E";
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const eio = (t: number) => (t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t);
 
-export const LiveStoryMap: React.FC<Props> = ({ stops, hoverStops, generating }) => {
+export const LiveStoryMap: React.FC<Props> = ({ stops, hoverStops, generating, grade }) => {
   const mapStyle = useMemo(
     () => satelliteNightStyle(typeof window !== "undefined" ? window.location.origin : ""),
     [],
@@ -94,11 +104,23 @@ export const LiveStoryMap: React.FC<Props> = ({ stops, hoverStops, generating })
   const stopsRef = useRef(stops);
   const hoverRef = useRef(hoverStops);
   const genRef = useRef(!!generating);
+  const gradeRef = useRef(grade);
   // Pin bloom: remember when each stop label first appeared, for the pop-in.
   const bornRef = useRef(new Map<string, number>());
   stopsRef.current = stops;
   hoverRef.current = hoverStops;
   genRef.current = !!generating;
+  gradeRef.current = grade;
+
+  /* Tap-to-restyle: regrade the satellite raster live (no style reload). */
+  useEffect(() => {
+    const m = mapRef.current?.getMap() as any;
+    if (!m || !loadedRef.current) return;
+    try {
+      m.setPaintProperty("sat", "raster-saturation", grade?.saturation ?? -0.45);
+      m.setPaintProperty("sat", "raster-brightness-max", grade?.brightness ?? 0.6);
+    } catch { /* style mid-load — cosmetic */ }
+  }, [grade]);
 
   /* ── Camera choreography: react to stops / hover / generate ──────────────── */
   const camKey = useMemo(
@@ -224,10 +246,12 @@ export const LiveStoryMap: React.FC<Props> = ({ stops, hoverStops, generating })
       };
 
       const busy = !!(stopsRef.current.length || hoverRef.current?.length);
+      // Accent palette — retinted live when a style card is tapped.
+      const [AC1, AC2, AC3] = gradeRef.current?.accents ?? [IRIS, CYAN, VIOLET];
 
       // 1 · Ambient airline network — dimmed while a real story is on stage.
       const ambAlpha = busy ? 0.10 : 0.30;
-      const colors = [IRIS, CYAN, VIOLET];
+      const colors = [AC1, AC2, AC3];
       AMBIENT.forEach(([fi, ti, dur, phase], i) => {
         const p = ((t + phase) % dur) / dur;
         const a = proj(HUBS[fi][0], HUBS[fi][1]);
@@ -243,7 +267,7 @@ export const LiveStoryMap: React.FC<Props> = ({ stops, hoverStops, generating })
         if (!onScreen(p)) return;
         const tw = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(t * 1.6 + i * 2.1));
         ctx.globalAlpha = (busy ? 0.18 : 0.5) * tw;
-        ctx.fillStyle = i % 3 ? IRIS : CYAN;
+        ctx.fillStyle = i % 3 ? AC1 : AC2;
         ctx.beginPath(); ctx.arc(p![0], p![1], 1.7, 0, Math.PI * 2); ctx.fill();
         ctx.globalAlpha = 1;
       });
@@ -275,7 +299,7 @@ export const LiveStoryMap: React.FC<Props> = ({ stops, hoverStops, generating })
           const a = proj(ss[i].lon, ss[i].lat), b = proj(ss[i + 1].lon, ss[i + 1].lat);
           if (onScreen(a) && onScreen(b)) {
             const traveller = ((t * 0.45 + i * 0.33) % 1);
-            drawArc(a, b, IRIS, 2.6, 0.95, traveller);
+            drawArc(a, b, AC1, 2.6, 0.95, traveller);
           }
         }
         ss.forEach((s, i) => {
@@ -289,11 +313,11 @@ export const LiveStoryMap: React.FC<Props> = ({ stops, hoverStops, generating })
           // breathing outer ring
           const ring = 9 + 4 * Math.sin(t * 2.2 + i * 1.4);
           ctx.globalAlpha = 0.5 * pop;
-          ctx.strokeStyle = CYAN; ctx.lineWidth = 1.4;
+          ctx.strokeStyle = AC2; ctx.lineWidth = 1.4;
           ctx.beginPath(); ctx.arc(x, y, ring * pop, 0, Math.PI * 2); ctx.stroke();
           // core pin
           ctx.globalAlpha = pop;
-          ctx.fillStyle = "#fff"; ctx.shadowColor = IRIS; ctx.shadowBlur = 16;
+          ctx.fillStyle = "#fff"; ctx.shadowColor = AC1; ctx.shadowBlur = 16;
           ctx.beginPath(); ctx.arc(x, y, 4 * pop, 0, Math.PI * 2); ctx.fill();
           ctx.shadowBlur = 0;
           // label chip
@@ -345,6 +369,15 @@ export const LiveStoryMap: React.FC<Props> = ({ stops, hoverStops, generating })
       {/* Cinematic grade — the satellite already carries the texture; these
           keep it a BACKDROP: cool tint wash, readability fades, firm vignette. */}
       <div className="pointer-events-none absolute inset-0" style={{ background: "rgba(6,9,22,0.38)" }} />
+      {/* Style-card tint — the tap-to-preview wash, cross-fading between looks */}
+      <div
+        className="pointer-events-none absolute inset-0 transition-opacity duration-700"
+        style={{
+          opacity: grade ? 1 : 0,
+          background: grade ? `linear-gradient(180deg, ${grade.tint}30 0%, transparent 38%, ${grade.tint}24 100%)` : "transparent",
+          mixBlendMode: "soft-light" as any,
+        }}
+      />
       <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(75% 55% at 50% 0%, rgba(110,123,255,0.10), transparent 62%)" }} />
       <div className="pointer-events-none absolute inset-0" style={{ background: "linear-gradient(to bottom, rgba(4,6,16,0.62) 0%, transparent 28%, transparent 58%, rgba(4,6,16,0.82) 100%)" }} />
       <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(120% 90% at 50% 46%, transparent 40%, rgba(4,6,16,0.5) 100%)" }} />

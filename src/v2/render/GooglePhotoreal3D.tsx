@@ -31,9 +31,16 @@ const GooglePhotoreal3D: React.FC<{ apiKey: string; onAttribution?: (s: string) 
     () =>
       new Tile3DLayer({
         id: "google-photoreal-3d",
-        data: "https://tile.googleapis.com/v1/3dtiles/root.json",
+        // Key in BOTH places: query param (the form Google's docs use — some
+        // gateway paths ignore the header) AND the header (covers child-tile
+        // fetches that loaders.gl issues without re-appending query params).
+        data: `https://tile.googleapis.com/v1/3dtiles/root.json?key=${encodeURIComponent(apiKey)}`,
         loader: Tiles3DLoader,
         loadOptions: { fetch: { headers: { "X-GOOG-API-KEY": apiKey } } },
+        onTileError: (err: unknown) => {
+          // Surface auth/quota failures — a silent black overlay is undebuggable.
+          console.warn("[photoreal3d] tile error (check key restrictions / Map Tiles API enabled):", err);
+        },
         // Draw + occlude against the map so labels/overlays sit correctly.
         operation: "terrain+draw",
         // Receive + cast the sun's shadows (the Google-Earth time-of-day look).

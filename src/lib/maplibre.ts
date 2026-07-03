@@ -30,6 +30,11 @@ export const ML_BASE_STYLES: { id: string; label: string; url: string; tone: "da
   { id: "streets", label: "Streets", url: ML_STYLES.streets, tone: "light" },
   { id: "satellite", label: "Satellite", url: "satellite", tone: "satellite" },
   { id: "outdoors", label: "Outdoors", url: ML_STYLES.outdoors, tone: "outdoors" },
+  // ── Design variants — same free key-less sources, different characters ──
+  { id: "dark-nolabels", label: "Dark · clean (no labels)", url: "https://basemaps.cartocdn.com/gl/dark-matter-nolabels-gl-style/style.json", tone: "dark" },
+  { id: "light-nolabels", label: "Light · clean (no labels)", url: "https://basemaps.cartocdn.com/gl/positron-nolabels-gl-style/style.json", tone: "light" },
+  { id: "voyager-nolabels", label: "Streets · clean (no labels)", url: "https://basemaps.cartocdn.com/gl/voyager-nolabels-gl-style/style.json", tone: "light" },
+  { id: "bright", label: "Bright city", url: "https://tiles.openfreemap.org/styles/bright", tone: "light" },
 ];
 
 /**

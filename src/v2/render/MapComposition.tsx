@@ -581,7 +581,11 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
         //    of popping — a much nicer editing experience.
         preserveDrawingBuffer={isRendering || !!capturing}
         fadeDuration={isRendering || capturing ? 0 : 250}
-        maxParallelImageRequests={isRendering ? 64 : 16}
+        // 64 parallel tile fetches in the PREVIEW too (default is 16) — the
+        // editor camera crosses many zoom levels, and satellite tiles through
+        // the proxy were bottlenecked four-deep per host. This is the single
+        // biggest "satellite feels slow in the editor" fix.
+        maxParallelImageRequests={64}
         onLoad={() => {
           setMapReady(true);
           const m = mapRef.current?.getMap();

@@ -4,9 +4,33 @@ import React from "react";
 import { createPortal } from "react-dom";
 import { X, Boxes, RotateCcw, Sliders, Globe2 } from "lucide-react";
 import { useEditor } from "../store/editor";
+import { recordTaste } from "@/lib/taste";
+import { createLayer } from "../doc/factory";
 import { MAP3D_STYLES, map3dStyleById } from "@/lib/presets/map3dStyles";
 import { PRO_MAP_STYLES } from "@/lib/presets/proMapStyles";
 import { loadGoogleKey } from "./SettingsModal";
+
+/** LIVE EARTH — real NASA data as one-click looks. Each entry swaps the base
+ *  style and lays a GIBS raster (date: "latest") over it — the planet as it
+ *  actually is today: city lights, active fires, vegetation, ocean heat. */
+const LIVE_EARTH: {
+  key: string; name: string; tagline: string; swatches: [string, string, string];
+  base: string; opacity: number;
+  cfg: { datasetId: string; tileFormat: string; tileMatrix: string; maxzoom: number; label: string; attribution: string };
+}[] = [
+  { key: "live-satellite", name: "Earth Today", tagline: "Today's real satellite imagery", swatches: ["#0a1b2e", "#2e5f4e", "#c2b48a"], base: "dark", opacity: 0.92,
+    cfg: { datasetId: "MODIS_Terra_CorrectedReflectance_TrueColor", tileFormat: "jpg", tileMatrix: "GoogleMapsCompatible_Level9", maxzoom: 9, label: "Earth today — NASA MODIS", attribution: "NASA GIBS / Earthdata" } },
+  { key: "night-lights", name: "Earth at Night", tagline: "Live city lights (VIIRS)", swatches: ["#02030a", "#1a1f3a", "#ffd9a0"], base: "dark", opacity: 0.95,
+    cfg: { datasetId: "VIIRS_SNPP_DayNightBand_ENCC", tileFormat: "png", tileMatrix: "GoogleMapsCompatible_Level8", maxzoom: 8, label: "Nighttime lights — VIIRS", attribution: "NASA VIIRS / Earthdata GIBS" } },
+  { key: "wildfires", name: "Active Fires", tagline: "Thermal hotspots, near-real-time", swatches: ["#140a06", "#7a2410", "#ff7a30"], base: "satellite", opacity: 0.9,
+    cfg: { datasetId: "MODIS_Terra_Thermal_Anomalies_All", tileFormat: "png", tileMatrix: "GoogleMapsCompatible_Level9", maxzoom: 9, label: "Active fires — MODIS", attribution: "NASA MODIS Thermal / Earthdata GIBS" } },
+  { key: "vegetation", name: "Living Earth", tagline: "Vegetation index (NDVI)", swatches: ["#08140c", "#1e5a30", "#8fd06a"], base: "dark", opacity: 0.88,
+    cfg: { datasetId: "MODIS_Terra_NDVI_8Day", tileFormat: "png", tileMatrix: "GoogleMapsCompatible_Level9", maxzoom: 9, label: "Vegetation — NDVI", attribution: "NASA MODIS NDVI / Earthdata GIBS" } },
+  { key: "ocean-heat", name: "Ocean Heat", tagline: "Sea-surface temperature", swatches: ["#040a18", "#0c3a6e", "#ff5a44"], base: "dark", opacity: 0.9,
+    cfg: { datasetId: "MODIS_Aqua_Sea_Surface_Temp_Night", tileFormat: "png", tileMatrix: "GoogleMapsCompatible_Level9", maxzoom: 9, label: "Sea temperature — MODIS", attribution: "NASA MODIS SST / Earthdata GIBS" } },
+  { key: "snow-ice", name: "Snow & Ice", tagline: "Live snow cover", swatches: ["#0a1420", "#3c5a78", "#e8f2ff"], base: "satellite", opacity: 0.85,
+    cfg: { datasetId: "MODIS_Terra_Snow_Cover_Daily_L3_Global_500m", tileFormat: "png", tileMatrix: "GoogleMapsCompatible_Level9", maxzoom: 9, label: "Snow & ice — MODIS", attribution: "NASA MODIS Snow / Earthdata GIBS" } },
+];
 
 /**
  * Creative 3D Map Styles — one click turns the whole map into a distinctive 3D
@@ -18,13 +42,30 @@ export const Map3DStyleModal: React.FC<{ open: boolean; onClose: () => void }> =
   const patchComposition = useEditor((s) => s.patchComposition);
   const layers = useEditor((s) => s.project.composition.layers);
   const patchLayer = useEditor((s) => s.patchLayer);
+  const addLayers = useEditor((s) => s.addLayers);
+  const removeLayer = useEditor((s) => s.removeLayer);
   if (!open || typeof document === "undefined") return null;
+
+  /** Apply a LIVE EARTH look: swap the base style and (re)lay the GIBS raster. */
+  const applyLiveEarth = (le: (typeof LIVE_EARTH)[number]) => {
+    recordTaste("style", le.key);
+    // One live layer at a time — replace any existing earth observation layer.
+    for (const l of layers) if (l.type === "earthlayer") removeLayer(l.id);
+    patchComposition({ basemap: { ...comp.basemap, styleUrl: le.base, style3d: "" } as any });
+    addLayers([
+      createLayer("earthlayer", {
+        name: le.name, ...le.cfg, date: "latest", opacity: le.opacity,
+        timing: { inSec: 0.2, outSec: null, enter: "fade", exit: "fade", easing: "easeInOut" },
+      }),
+    ]);
+  };
 
   const activeId = (comp.basemap as any).style3d || "";
 
   const apply = (id: string) => {
     const style = map3dStyleById(id);
     if (!style) return;
+    recordTaste("style", id); // the taste engine learns which looks you keep choosing
     patchComposition({
       basemap: { ...comp.basemap, ...style.basemap, style3d: style.id } as any,
       look: { ...comp.look, ...style.look } as any,
@@ -64,6 +105,25 @@ export const Map3DStyleModal: React.FC<{ open: boolean; onClose: () => void }> =
           <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-graphite/45">Documentary &amp; professional</div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {PRO_MAP_STYLES.map((s) => <StyleCard key={s.id} s={s} on={activeId === s.id} onApply={apply} />)}
+          </div>
+
+          {/* ── LIVE EARTH — the planet as real NASA data, one click ── */}
+          <div className="mb-2 mt-5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-graphite/45">
+            Live Earth
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/12 px-1.5 py-0.5 text-[8.5px] font-bold tracking-[0.1em] text-emerald-600">
+              <span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-70" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" /></span>
+              REAL DATA · NASA
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {LIVE_EARTH.map((le) => (
+              <StyleCard
+                key={le.key}
+                s={{ id: le.key, name: le.name, tagline: le.tagline, swatches: le.swatches }}
+                on={layers.some((l) => l.type === "earthlayer" && (l as any).datasetId === le.cfg.datasetId)}
+                onApply={() => applyLiveEarth(le)}
+              />
+            ))}
           </div>
 
           <div className="mb-2 mt-5 text-[10px] font-semibold uppercase tracking-[0.22em] text-graphite/45">Creative worlds</div>

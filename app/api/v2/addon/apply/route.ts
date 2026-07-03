@@ -8,7 +8,11 @@
  * into the current scene — turning an invented feature into a one-click block.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { buildFromPlan, type Plan } from "../../generate/route";
+// Side-effect import: the generate route registers its buildFromPlan in the
+// plan-builder registry (route modules must not export values to each other).
+import "../../generate/route";
+import type { Plan } from "../../generate/route";
+import { getPlanBuilder } from "@/lib/planBuilder";
 import { normalizeAddon, expandAddon } from "@/lib/addons";
 
 export async function POST(req: NextRequest) {
@@ -34,10 +38,10 @@ export async function POST(req: NextRequest) {
   } as unknown as Plan;
 
   try {
-    const project = await buildFromPlan(plan, {});
+    const project = await getPlanBuilder()(plan, {});
     // Return everything EXCEPT the camera — the add-on contributes content layers
     // to the user's existing scene; their camera/framing stays in control.
-    const layers = project.composition.layers.filter((l) => l.type !== "camera");
+    const layers = (project.composition.layers as Array<{ type: string }>).filter((l) => l.type !== "camera");
     if (!layers.length) return NextResponse.json({ error: "Could not resolve the add-on's places." }, { status: 422 });
     return NextResponse.json({ layers, look: expanded.look ?? null, focus: expanded.focus || null });
   } catch (e: any) {

@@ -45,7 +45,10 @@ export const GenerateExperience: React.FC = () => {
   const [mode, setMode] = useState<"film" | "still">(() => {
     try { return localStorage.getItem("mapanisy-mode") === "still" ? "still" : "film"; } catch { return "film"; }
   });
-  useEffect(() => { try { localStorage.setItem("mapanisy-mode", mode); } catch {} }, [mode]);
+  useEffect(() => {
+    try { localStorage.setItem("mapanisy-mode", mode); } catch {}
+    import("@/lib/taste").then(({ recordTaste }) => recordTaste("mode", mode)).catch(() => {});
+  }, [mode]);
   const [hoverStops, setHoverStops] = useState<GeoStop[] | null>(null);
   const [generating, setGenerating] = useState(false);
   const [dragOver, setDragOver] = useState(false);

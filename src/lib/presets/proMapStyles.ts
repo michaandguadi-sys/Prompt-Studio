@@ -137,6 +137,49 @@ export const PRO_MAP_STYLES: Map3DStyle[] = [
     look: { vignette: 0.14, grain: 0.02, mapFilter: "noir", mapFilterAmount: 0.85, bgColor: "#f4f4f4" },
     pitch: 0,
   },
+  // ── The colour & city expansion (2026-07) — more design characters ─────────
+  {
+    id: "metro-night", name: "Metro Night", tagline: "City lights, vivid streets",
+    swatches: ["#0a0c16", "#1d2440", "#ffb020"],
+    basemap: { styleUrl: STREETS, landColor: "#10131f", waterColor: "#070910", buildingColor: "#252c48", buildingOpacity: 0.85, buildings3d: true, boundaryGlow: "#ffb020", terrain: false },
+    look: { vignette: 0.3, grain: 0.05, gradeShadow: "#0a0c1a", gradeShadowAmt: 0.4, gradeHigh: "#ffc86e", gradeHighAmt: 0.3, bgColor: "#06070d" },
+    pitch: 52,
+  },
+  {
+    id: "pastel-city", name: "Pastel City", tagline: "Soft candy town, friendly",
+    swatches: ["#fdf3ee", "#cfe6e3", "#f2a2b8"],
+    basemap: { styleUrl: STREETS, landColor: "#fdf3ee", waterColor: "#cfe6e3", buildingColor: "#f2c9d4", buildingOpacity: 0.75, buildings3d: true, terrain: false },
+    look: { vignette: 0.08, grain: 0, tintColor: "#ffd9e2", tintOpacity: 0.06, bgColor: "#fbeee8" },
+    pitch: 46,
+  },
+  {
+    id: "nordic-light", name: "Nordic Light", tagline: "Cold, calm, Scandinavian",
+    swatches: ["#eef2f5", "#c9d9e4", "#4a7fa5"],
+    basemap: { styleUrl: LIGHT, landColor: "#eef2f5", waterColor: "#c9d9e4", boundaryGlow: "#4a7fa5", terrain: true, terrainStrength: 1.1, buildings3d: false },
+    look: { vignette: 0.1, grain: 0.02, gradeHigh: "#dcebf5", gradeHighAmt: 0.3, bgColor: "#e9eef2" },
+    pitch: 30,
+  },
+  {
+    id: "crimson-atlas", name: "Crimson Atlas", tagline: "Bold red editorial statement",
+    swatches: ["#f6efe8", "#e2d5c4", "#c0392b"],
+    basemap: { styleUrl: LIGHT, landColor: "#f6efe8", waterColor: "#ddd0bd", boundaryGlow: "#c0392b", terrain: false, buildings3d: false },
+    look: { vignette: 0.16, grain: 0.05, texture: "paper", textureOpacity: 0.25, gradeShadow: "#5e2a20", gradeShadowAmt: 0.2, bgColor: "#f1e9df" },
+    pitch: 0,
+  },
+  {
+    id: "deep-ocean", name: "Deep Ocean", tagline: "Abyssal blues, bioluminescent",
+    swatches: ["#03101e", "#0a2c46", "#2fe0ff"],
+    basemap: { styleUrl: DARK, landColor: "#0a1826", waterColor: "#03101e", boundaryGlow: "#2fe0ff", terrain: false, buildings3d: false },
+    look: { vignette: 0.34, grain: 0.06, tintColor: "#04263c", tintOpacity: 0.14, gradeHigh: "#7fe9ff", gradeHighAmt: 0.25, bgColor: "#020a12" },
+    pitch: 24,
+  },
+  {
+    id: "sunrise-terrain", name: "Sunrise Terrain", tagline: "First-light peaks, rose gold",
+    swatches: ["#1a1420", "#6e4258", "#ffb27a"],
+    basemap: { styleUrl: SAT, terrain: true, terrainStrength: 1.7, buildings3d: false, landColor: "", waterColor: "" },
+    look: { vignette: 0.3, grain: 0.08, gradeShadow: "#2a1a30", gradeShadowAmt: 0.4, gradeHigh: "#ffb27a", gradeHighAmt: 0.5, mapFilter: "warm", mapFilterAmount: 0.35, bgColor: "#120d16" },
+    pitch: 58,
+  },
 ];
 
 export const proMapStyleById = (id: string): Map3DStyle | undefined => PRO_MAP_STYLES.find((s) => s.id === id);

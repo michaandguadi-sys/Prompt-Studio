@@ -1,17 +1,19 @@
 "use client";
 
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Video, Globe2, Plane, MapPin, Flag, Type, BarChart3, Image as ImageIcon,
   Swords, MessageSquare, Share2, Sun, Eye, EyeOff, ChevronUp, ChevronDown, Trash2, Plus, Copy, Route, Loader2, CircleDot, X, Spline, Flame,
-  Radar, CalendarClock, CloudSnow, Satellite,
+  Radar, CalendarClock, CloudSnow, Satellite, Bookmark, Star,
 } from "lucide-react";
 import { useEditor } from "../store/editor";
 import { LAYER_REGISTRY } from "../layers/registry";
 import type { LayerType } from "../doc/schema";
 import { parseTrackFile } from "../track";
 import { STYLE_PRESETS, VARIANT_PRESETS } from "../track/presets";
+import { loadElements, saveElement, removeElement, type SavedElement } from "@/lib/elements";
+import { recordTaste } from "@/lib/taste";
 
 const ICONS: Record<string, React.ReactNode> = {
   Video: <Video size={14} />, Globe2: <Globe2 size={14} />, Plane: <Plane size={14} />,
@@ -44,8 +46,18 @@ export const LayersPanel: React.FC = () => {
   const duplicateLayer = useEditor((s) => s.duplicateLayer);
   const moveLayer = useEditor((s) => s.moveLayer);
   const addLayer = useEditor((s) => s.addLayer);
+  const addLayers = useEditor((s) => s.addLayers);
   const patchComposition = useEditor((s) => s.patchComposition);
   const [addOpen, setAddOpen] = useState(false);
+  // My Elements — the personal library, reloaded whenever the menu opens so
+  // saves from other projects/tabs show up immediately.
+  const [elements, setElements] = useState<SavedElement[]>([]);
+  useEffect(() => { if (addOpen) setElements(loadElements()); }, [addOpen]);
+  const saveAsElement = (l: (typeof allLayers)[number]) => {
+    const name = prompt("Save to My Elements as:", l.name || LAYER_REGISTRY[l.type].label);
+    if (name === null) return;
+    saveElement(name || l.name || l.type, l as unknown as Record<string, unknown>);
+  };
   const fileRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
 
@@ -111,6 +123,41 @@ export const LayersPanel: React.FC = () => {
                   <button onClick={() => setAddOpen(false)} className="rounded-md p-1 text-graphite-muted transition-colors hover:bg-graphite/[0.08] hover:text-graphite"><X size={15} /></button>
                 </div>
                 <div className="max-h-[58vh] overflow-y-auto p-3">
+                  {/* My Elements — saved building blocks, reusable in EVERY project */}
+                  {elements.length > 0 && (
+                    <div className="mb-3">
+                      <div className="mb-1.5 flex items-center gap-1.5 px-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-500/90">
+                        <Star size={10} /> My elements
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {elements.map((el) => (
+                          <div key={el.id} className="group relative">
+                            <button
+                              onClick={() => { addLayers([el.layer as any]); setAddOpen(false); }}
+                              className="flex w-full items-start gap-2.5 rounded-lg border border-amber-400/25 bg-amber-400/[0.05] p-2.5 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-amber-400/60 hover:bg-amber-400/10"
+                            >
+                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-amber-400/15 text-amber-500">
+                                {iconFor(el.layerType as LayerType) ?? <Star size={14} />}
+                              </span>
+                              <span className="min-w-0">
+                                <span className="block truncate text-[13px] font-medium text-graphite">{el.name}</span>
+                                <span className="block text-[10px] leading-tight text-graphite-muted/80">
+                                  Saved {LAYER_REGISTRY[el.layerType as LayerType]?.label?.toLowerCase() ?? el.layerType}
+                                </span>
+                              </span>
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setElements(removeElement(el.id)); }}
+                              title="Remove from My Elements"
+                              className="absolute right-1.5 top-1.5 rounded p-0.5 text-graphite/25 opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {ADD_CATEGORIES.map((cat) => (
                     <div key={cat.label} className="mb-3 last:mb-0">
                       <div className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-iris/80">{cat.label}</div>
@@ -120,7 +167,7 @@ export const LayersPanel: React.FC = () => {
                           return (
                             <button
                               key={t}
-                              onClick={() => { addLayer(t); setAddOpen(false); }}
+                              onClick={() => { recordTaste("layer", t); addLayer(t); setAddOpen(false); }}
                               className="group flex items-start gap-2.5 rounded-lg border border-line/60 bg-paper/50 p-2.5 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-iris/45 hover:bg-iris/10"
                             >
                               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-graphite/[0.08] text-iris transition-colors group-hover:bg-iris/20">{iconFor(t)}</span>
@@ -172,7 +219,8 @@ export const LayersPanel: React.FC = () => {
                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button onClick={(e) => { e.stopPropagation(); moveLayer(l.id, -1); }} disabled={i === 0} className="p-0.5 text-graphite/30 hover:text-graphite disabled:opacity-20"><ChevronUp size={12} /></button>
                   <button onClick={(e) => { e.stopPropagation(); moveLayer(l.id, 1); }} disabled={i === layers.length - 1} className="p-0.5 text-graphite/30 hover:text-graphite disabled:opacity-20"><ChevronDown size={12} /></button>
-                  <button onClick={(e) => { e.stopPropagation(); duplicateLayer(l.id); }} className="p-0.5 text-graphite/30 hover:text-iris"><Copy size={11} /></button>
+                  <button onClick={(e) => { e.stopPropagation(); duplicateLayer(l.id); }} className="p-0.5 text-graphite/30 hover:text-iris" title="Duplicate"><Copy size={11} /></button>
+                  <button onClick={(e) => { e.stopPropagation(); saveAsElement(l); }} className="p-0.5 text-graphite/30 hover:text-amber-500" title="Save to My Elements — reuse in any project"><Bookmark size={11} /></button>
                   <button onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${l.name || l.type}"?`)) removeLayer(l.id); }} className="p-0.5 text-graphite/30 hover:text-red-400"><Trash2 size={11} /></button>
                 </div>
               )}

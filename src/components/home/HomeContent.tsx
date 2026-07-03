@@ -63,7 +63,7 @@ export const HomeContent: React.FC = () => {
           <div className="grid gap-4 sm:grid-cols-3">
             {[
               { icon: <Clapperboard size={15} />, title: "Directed, not templated", body: "The AI plans the story, camera and timing like a documentary editor — one continuous cinematic take." },
-              { icon: <Palette size={15} />, title: "17 professional map styles", body: "From Earth Documentary to Vintage Atlas — balanced palettes and cinematic grades, one click each." },
+              { icon: <Palette size={15} />, title: "23 professional map styles", body: "From Earth Documentary to Vintage Atlas — balanced palettes and cinematic grades, one click each." },
               { icon: <Route size={15} />, title: "One-click 4K render", body: "Render in the cloud or on your machine, with live progress and a queue — landscape, vertical or square." },
             ].map((f) => (
               <div key={f.title} className="rounded-2xl border border-white/[0.08] bg-white/[0.04] p-5 backdrop-blur-sm">

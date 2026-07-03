@@ -19,7 +19,7 @@ import { loadAddons, removeAddon as removeAddonStore, type Addon } from "@/lib/a
 import { useTier } from "@/hooks/useTier";
 import { TimingControls } from "./TimingControls";
 import { ThemePanel } from "./ThemePanel";
-import { FONT_CHOICES } from "../doc/themes";
+import { FONT_CHOICES, FONT_GROUPS } from "../doc/themes";
 import { LAYER_REGISTRY } from "../layers/registry";
 import type { Layer, Look } from "../doc/schema";
 
@@ -103,12 +103,17 @@ const TransformControls: React.FC<{ t: any; onChange: (tf: any) => void; kf?: an
   );
 };
 
-/** Font picker shared by text layers — "Theme default" falls back to the project font. */
+/** Font picker shared by text layers — the full grouped family catalogue
+ *  (Sans / Serif / Display / Condensed / Handwritten / Mono). */
 const FontField: React.FC<{ value: string | null; onChange: (v: string | null) => void }> = ({ value, onChange }) => (
   <Field label="Font" hint="Overrides the theme font">
     <Select value={value ?? ""} onChange={(e) => onChange(e.target.value || null)}>
       <option value="">Theme default</option>
-      {FONT_CHOICES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+      {FONT_GROUPS.map((g) => (
+        <optgroup key={g} label={g}>
+          {FONT_CHOICES.filter((f) => f.group === g).map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+        </optgroup>
+      ))}
     </Select>
   </Field>
 );

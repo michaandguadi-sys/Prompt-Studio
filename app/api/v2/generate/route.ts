@@ -23,6 +23,7 @@ import { resolveRegion, detectRegion, cameraForBbox } from "@/lib/geoRegions";
 import { signatureStyleById } from "@/lib/presets/signatureStyles";
 import { map3dStyleById } from "@/lib/presets/map3dStyles";
 import { aiComplete, resolveAIConfig, configFromUser, type AIConfig } from "@/lib/ai/providers";
+import { _registerPlanBuilder } from "@/lib/planBuilder";
 import { DIRECTOR_PRINCIPLES, SOURCE_AND_VERIFY, COHESION_LAW, ARCHETYPES, matchArchetype } from "@/lib/ai/directorDoctrine";
 import { interpret, planStory, buildFramework, frameworkInstruction, type ArcContext } from "@/lib/parse";
 import { normalizeAddon } from "@/lib/addons";
@@ -138,7 +139,10 @@ type PlanLayer =
   // the documentary ticker ("SEP 1939 → MAY 1945", "DAY 1 → DAY 872").
   | ({ kind: "timestamp"; start?: string; end?: string; format?: "year" | "month-year" | "full"; dayStart?: number; dayEnd?: number; prefix?: string; text?: string; position?: string } & Styled & Timed)
   // CINEMATIC WEATHER: deterministic particles over the whole frame.
-  | ({ kind: "atmosphere"; effect: "snow" | "rain" | "embers" | "dust" | "fog"; density?: number; wind?: number } & Styled & Timed);
+  | ({ kind: "atmosphere"; effect: "snow" | "rain" | "embers" | "dust" | "fog"; density?: number; wind?: number } & Styled & Timed)
+  // AI-DRAWN STICKER: the model authors ORIGINAL inline-SVG art (b-roll) —
+  // rendered via <img src=data:>, so scripts can never execute by construction.
+  | ({ kind: "sticker"; svg: string; place?: string; sizePx?: number; label?: string } & Styled & Timed);
 export type Plan = {
   title: string; subtitle?: string; durationSec: number; aspect?: "16:9" | "9:16" | "1:1";
   basemapStyle?: string; terrain?: boolean; buildings3d?: boolean; focus: string; mood?: string; motion?: string;
@@ -184,7 +188,7 @@ const MOTIONS = ["fly-in", "zoom-out", "orbit", "push-in", "pan", "hold"];
 const SYSTEM = `You are the director of "Mapanisy", a cinematic MAP-animation studio (Vox / Johnny Harris style). Translate the user's idea into ONE finished, well-composed, art-directed map animation. Think like an editor: what is the single visual story, where does the eye go, what's the one focal point?
 
 Output ONLY minified JSON (no prose, no markdown) of EXACTLY this shape:
-{"title":str(≤30),"subtitle":str(≤48),"durationSec":num(5-12),"aspect":"16:9"|"9:16"|"1:1","basemapStyle":"dark"|"light"|"satellite"|"streets"|"outdoors"|"historical","mapYear":"1880 (start era, historical only)","mapYearEnd":"1920 (end era — animates year sweep + on-screen counter; historical only)","terrain":bool,"focus":str,"motion":"fly-in"|"zoom-out"|"orbit"|"push-in"|"pan"|"hold","cameraStops":[str],"mood":"conflict"|"historical"|"trade"|"empire"|"political"|"arctic"|"neutral","palette":"Default"|"Vox Editorial"|"Arctic Cold"|"Conflict Red"|"Trade Green"|"Political Violet"|"Classic Mono","priority":"camera"|"route"|"highlight","map3dStyle":"(optional look) PRO: clean-minimal|apple-light|apple-dark|earth-documentary|natgeo|satellite-cinematic|adventure|hiking|luxury-travel|editorial|filmic|midnight|desert|winter|ocean|vintage-atlas|modern-monochrome · CREATIVE: holographic|neon-noir|miniature|blueprint|obsidian|molten|aurora|crystal-ice|papercraft|war-room|sakura|emerald|golden-hour|monochrome","map3dCustom":{"(optional — INVENT a bespoke 3D world when no preset fits)":"","landColor":"#hex","waterColor":"#hex","buildingColor":"#hex","buildingOpacity":0-1,"buildingHeightMult":0.2-8,"buildingGradient":bool,"boundaryGlow":"#hex","terrain":bool,"terrainStrength":0-5,"bgColor":"#hex","tintColor":"#hex","tintOpacity":0-1,"vignette":0-0.7,"pitch":0-84},"look":{"vignette":0-0.7,"grain":0-0.3,"texture":"none"|"paper","mapFilter":"none"|"antique"|"noir"|"sepia"},"layers":[...]}
+{"title":str(≤30),"subtitle":str(≤48),"durationSec":num(5-12),"aspect":"16:9"|"9:16"|"1:1","basemapStyle":"dark"|"light"|"satellite"|"streets"|"outdoors"|"historical","mapYear":"1880 (start era, historical only)","mapYearEnd":"1920 (end era — animates year sweep + on-screen counter; historical only)","terrain":bool,"focus":str,"motion":"fly-in"|"zoom-out"|"orbit"|"push-in"|"pan"|"hold","cameraStops":[str],"mood":"conflict"|"historical"|"trade"|"empire"|"political"|"arctic"|"neutral","palette":"Default"|"Vox Editorial"|"Arctic Cold"|"Conflict Red"|"Trade Green"|"Political Violet"|"Classic Mono","priority":"camera"|"route"|"highlight","map3dStyle":"(optional look) PRO: clean-minimal|apple-light|apple-dark|earth-documentary|natgeo|satellite-cinematic|adventure|hiking|luxury-travel|editorial|filmic|midnight|desert|winter|ocean|vintage-atlas|modern-monochrome|metro-night|pastel-city|nordic-light|crimson-atlas|deep-ocean|sunrise-terrain · CREATIVE: holographic|neon-noir|miniature|blueprint|obsidian|molten|aurora|crystal-ice|papercraft|war-room|sakura|emerald|golden-hour|monochrome","map3dCustom":{"(optional — INVENT a bespoke 3D world when no preset fits)":"","landColor":"#hex","waterColor":"#hex","buildingColor":"#hex","buildingOpacity":0-1,"buildingHeightMult":0.2-8,"buildingGradient":bool,"boundaryGlow":"#hex","terrain":bool,"terrainStrength":0-5,"bgColor":"#hex","tintColor":"#hex","tintOpacity":0-1,"vignette":0-0.7,"pitch":0-84},"look":{"vignette":0-0.7,"grain":0-0.3,"texture":"none"|"paper","mapFilter":"none"|"antique"|"noir"|"sepia"},"layers":[...]}
 
 layer kinds (refer to places by NAME — coords are resolved for you):
  {"kind":"highlight","place":"France","fill":"flag"|"solid"|"hatch"|"crosshatch"|"stripes"|"dots","mood":"conflict","label":"optional ON-MAP text"}
@@ -206,6 +210,7 @@ layer kinds (refer to places by NAME — coords are resolved for you):
  {"kind":"flows","hub":"London, UK","places":["New York","Mumbai","Sydney"],"weights":[450,320,180],"mode":"hub"}  ← WEIGHTED FLOWS: arc thickness = volume. Use when quantities differ significantly (trade $450B vs $180B). Shows MAGNITUDE not just connection. Add "pulse":true style for live-trade feel.
  {"kind":"radius","place":"Pyongyang, North Korea","radiusKm":1500,"rings":3,"mode":"grow","color":"#ff5a44"}  ← GEODESIC RANGE RINGS: true distance circles ("within 500 km"). ALWAYS use for: missile/radar/weapon range, blast radius, evacuation zone, earthquake epicenter (mode:"ripple" = endless sonar pulses), airport/port coverage, "everything within X km/hours". The most journalistic way to show REACH and PROXIMITY. Labels show real distances on each ring.
  {"kind":"timestamp","start":"1939-09-01","end":"1945-05-08","format":"month-year","position":"top-right"}  ← ANIMATED DATE TICKER: the date ADVANCES with the film — the documentary time-passing device. ALWAYS add for: wars, pandemics, expeditions, empire rise/fall, any story spanning months/years. Day-counter variant: {"kind":"timestamp","dayStart":1,"dayEnd":872,"prefix":"DAY"} for sieges/disasters ("DAY 872 of the siege"). One per composition.
+ {"kind":"sticker","svg":"<svg viewBox='0 0 100 100'>…</svg>","place":"Lisbon","sizePx":150,"label":"caravel"}  ← DRAW YOUR OWN B-ROLL: when NO existing primitive captures the story's soul, you may AUTHOR original flat vector art as inline SVG (≤1800 chars, viewBox required, flat 2-4 colour shapes, no text) and place it on the map — a caravel for an age-of-discovery story, a compass rose, a mammoth, an oil derrick, a paper plane. This is your creative free will: invent the perfect visual instead of settling. Use AT MOST one per composition, and only when it genuinely elevates the story.
  {"kind":"atmosphere","effect":"snow","density":0.5,"wind":0.3}  ← CINEMATIC WEATHER over the frame: "snow" (winter campaigns, arctic), "rain" (monsoon, storms), "embers" (war zones, wildfires — pairs with marker icon:"fire"), "dust" (deserts, drought), "fog" (mystery, dawn battles). Sets MOOD instantly; use ONE, subtle (density 0.3-0.6), when the story has a strong environmental character.
  {"kind":"earthlayer","dataset":"ndvi","date":"2024-01-01","opacity":0.75,"label":"Vegetation 2024"}  ← EARTH OBSERVATION: overlays real NASA satellite data on the map. ALWAYS use for: deforestation, glaciers melting, wildfires, urban sprawl, drought, sea-level, biodiversity, land cover change. Datasets: "true-color" (daily satellite imagery), "ndvi" (vegetation index — green=healthy forest, brown=lost/dry), "nightlights" (city light growth, urbanization), "fire" (thermal hotspots), "sea-temp" (ocean warming), "snow" (ice/snow extent), "aerosol" (pollution/smoke). For before/after change detection add compareDataset+compareDate (different year). Date format: YYYY-MM-DD. Pairs with basemapStyle:"satellite" and terrain:true for maximum realism. This makes environmental map journalism genuinely data-driven, not illustrative.
 ANY layer may add "style":{...} to art-direct exact fields — e.g. highlight {"fillColor":"#c0392b","extrude":18,"glowColor":"#ff4030"}, route {"color":"#e67e22","dashStyle":"dashed","glow":0.8}, marker {"color":"#ff3030","sizePx":150}.
@@ -542,6 +547,21 @@ function extractJSON(text: string): Record<string, unknown> | null {
   }
   const repaired = partial + stack.reverse().join("");
   try { return JSON.parse(repaired) as Record<string, unknown>; } catch { return null; }
+}
+
+/** Sanitize AI-authored sticker SVG: size cap, must be a bare <svg> with a
+ *  viewBox, and NO active content (scripts, handlers, external refs, CSS). The
+ *  result only ever renders inside <img src="data:…">, where scripts can't run
+ *  anyway — this keeps the stored document clean too. Returns null to reject. */
+function sanitizeStickerSvg(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const s = raw.trim();
+  if (s.length < 20 || s.length > 4000) return null;
+  if (!/^<svg[\s>]/i.test(s) || !/<\/svg>\s*$/i.test(s)) return null;
+  if (!/viewBox\s*=/i.test(s)) return null;
+  const banned = /<\s*(script|foreignObject|iframe|embed|object|use|image|animate|set)\b|on[a-z]+\s*=|javascript:|href\s*=|xlink:href|url\s*\(|@import|<\s*style\b/i;
+  if (banned.test(s)) return null;
+  return s;
 }
 
 async function directorCall(idea: string, cfg: AIConfig): Promise<DirectorScript | null> {
@@ -1229,7 +1249,7 @@ function resolveLook(plan: Plan, kind: StoryKind, styleKey: string): Record<stri
   }
 }
 
-export async function buildFromPlan(plan: Plan, opts: { story?: boolean } = {}): Promise<Project> {
+async function buildFromPlan(plan: Plan, opts: { story?: boolean } = {}): Promise<Project> {
   const project = createDefaultProject(plan.title || "AI animation");
   // Quick animations stay punchy (≤12s); a STORY earns a longer runtime (≤60s,
   // the Storyboard Review's slider range) so multi-beat narratives can breathe.
@@ -1459,6 +1479,20 @@ export async function buildFromPlan(plan: Plan, opts: { story?: boolean } = {}):
           density: Math.max(0, Math.min(1, pl.density ?? 0.45)),
           ...(pl.wind != null ? { wind: Math.max(-2, Math.min(2, pl.wind)) } : {}),
           timing: { ...timing, inSec: 0.2 }, ...(pl.style ?? {}),
+        }), pl.style);
+      } else if (pl.kind === "sticker") {
+        // AI-authored SVG b-roll → an image layer with a data URL. Rendered via
+        // <img>, so script execution is impossible; the sanitizer is belt-and-
+        // braces against active content and external fetches.
+        const svg = sanitizeStickerSvg(pl.svg);
+        if (!svg) continue;
+        const g = pl.place ? await geocode(pl.place) : null;
+        const anchor = g ? { kind: "coord", lon: g.lon, lat: g.lat } : { kind: "screen", pos: "center" };
+        add(createLayer("image", {
+          name: pl.label ? `✦ ${pl.label}` : "✦ AI sticker",
+          url: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
+          anchor, sizePx: Math.max(60, Math.min(420, pl.sizePx ?? 150)), rounded: false,
+          timing, ...(pl.style ?? {}),
         }), pl.style);
       } else if (pl.kind === "conflict") {
         // The headline composite: two countries, the real frontier, swords on it.
@@ -2070,11 +2104,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Too many requests — max 10 generations per minute." }, { status: 429 });
   }
 
-  let body: { idea?: string; plan?: Plan; ai?: any; mode?: string; style?: string; interview?: any; interviewText?: string; arc?: ArcContext };
+  let body: { idea?: string; plan?: Plan; ai?: any; mode?: string; style?: string; interview?: any; interviewText?: string; arc?: ArcContext; taste?: string };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Bad JSON" }, { status: 400 }); }
   const idea = (body.idea ?? "").trim();
   const iv = body.interview && typeof body.interview === "object" ? body.interview : null;
   const ivText = (body.interviewText ?? "").toString().slice(0, 400);
+  // TASTE PROFILE — the client's learned preference summary. Biases the AI's
+  // look/palette/pacing choices toward what this user keeps choosing; the
+  // brief always wins on conflict. Never fed to the rule-based parser.
+  const taste = (body.taste ?? "").toString().slice(0, 400);
   // ARC: this generate call is ONE chapter of a larger multi-sequence film.
   const arc = body.arc && typeof body.arc === "object" ? body.arc : null;
 
@@ -2146,6 +2184,7 @@ export async function POST(req: NextRequest) {
     if (it?.action && it.action !== "unknown") ctx.push(`Action type: ${it.action}`);
     if (arch) ctx.push(`Matched story archetype: ${arch.name}.\nRecipe: ${arch.recipe.slice(0, 220)}`);
     if (ivText) ctx.push(`User director constraints: ${ivText}`);
+    if (taste) ctx.push(`User taste profile (learned from their past choices — bias style/palette/pacing toward it unless the brief says otherwise): ${taste}`);
     if (!ctx.length) return idea;
     return `${idea}\n\n## ENGINE PRE-ANALYSIS — trust and use this:\n${ctx.join("\n")}`;
   })();
@@ -2171,6 +2210,8 @@ export async function POST(req: NextRequest) {
     !dirScript && ivText ? `Director constraints (honor these):\n${ivText}` : "",
     // Arc continuity context.
     arcText && aiCfg ? arcText : "",
+    // Learned user taste — a nudge for the composer's map3dStyle/palette/fonts.
+    taste && aiCfg ? `USER TASTE PROFILE (bias look & palette toward this unless the brief contradicts it): ${taste}` : "",
   ].filter(Boolean).join("\n\n");
 
   const composerSystem = simpleIntent ? `${SYSTEM}${SIMPLE_MODE}` : withDoctrine(isStory ? STORY_SYSTEM : SYSTEM);
@@ -2304,3 +2345,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Failed to assemble project", detail: String(e?.message ?? e) }, { status: 500 });
   }
 }
+
+// Registry: exposes buildFromPlan to sibling routes (addon apply) without a
+// route-module export, which Next's route typegen forbids.
+_registerPlanBuilder(buildFromPlan);

@@ -7,7 +7,62 @@ import { TIERS } from "@/lib/tiers";
 import { useUser } from "@clerk/nextjs";
 import { SettingsModal, loadAISettings, type AISettings } from "@/v2/ui/SettingsModal";
 import { ProjectLibrary } from "@/components/dashboard/ProjectLibrary";
+import { tasteProfile, clearTaste, type TasteProfile } from "@/lib/taste";
+import { loadElements } from "@/lib/elements";
 import Link from "next/link";
+
+/** ── Creative DNA — what the studio has learned about your taste ─────────
+ * Fed by the taste engine (styles you apply, fonts you pick, formats you
+ * render). The same profile rides with every generation, so the AI director
+ * personalises toward it. One click forgets everything. */
+const CreativeDNA: React.FC = () => {
+  const [p, setP] = useState<TasteProfile | null>(null);
+  const [elCount, setElCount] = useState(0);
+  useEffect(() => { setP(tasteProfile()); setElCount(loadElements().length); }, []);
+  if (!p) return null;
+  const rows: [string, string][] = [];
+  if (p.styles.length) rows.push(["Favourite looks", p.styles.join(" · ")]);
+  if (p.fonts.length) rows.push(["Fonts", p.fonts.join(" · ")]);
+  if (p.aspect) rows.push(["Usual format", p.aspect]);
+  if (p.mode) rows.push(["Creates mostly", p.mode === "still" ? "still images" : "films"]);
+  if (p.layers.length) rows.push(["Go-to elements", p.layers.join(" · ")]);
+  if (elCount) rows.push(["Saved elements", `${elCount} in My Elements`]);
+  return (
+    <div className="rounded-2xl border border-line bg-white/[0.02] p-6">
+      <div className="mb-1 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-iris/15 text-iris"><Sparkles size={14} /></span>
+          <div className="text-sm font-semibold text-graphite">Creative DNA</div>
+        </div>
+        {p.events > 0 && (
+          <button
+            onClick={() => { if (confirm("Forget everything the studio has learned about your taste?")) { clearTaste(); setP(tasteProfile()); } }}
+            className="text-[11px] text-graphite/40 transition-colors hover:text-red-400"
+          >
+            Reset
+          </button>
+        )}
+      </div>
+      <p className="mb-4 text-[12px] text-graphite/50">
+        The studio learns your taste from every choice and quietly feeds it to the AI director — so each film starts closer to <em>yours</em>.
+      </p>
+      {rows.length ? (
+        <div className="space-y-2">
+          {rows.map(([k, v]) => (
+            <div key={k} className="flex items-baseline justify-between gap-3 text-[12.5px]">
+              <span className="shrink-0 text-graphite/45">{k}</span>
+              <span className="truncate text-right font-medium text-graphite/85">{v}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-lg border border-dashed border-line px-3 py-4 text-center text-[12px] text-graphite/40">
+          Nothing learned yet — make a few films and watch this fill up.
+        </div>
+      )}
+    </div>
+  );
+};
 
 type AgentStatus = { online: boolean; machine?: string };
 
@@ -306,6 +361,9 @@ export default function DashboardPage() {
 
         {/* ── Project library ────────────────────────────────────────── */}
         <ProjectLibrary />
+
+        {/* ── Creative DNA — the studio's learned taste profile ────────── */}
+        <CreativeDNA />
 
         {/* ── AI engine · which mode you're in ───────────────────────── */}
         <div className="rounded-xl border border-line/60 bg-paper-100 overflow-hidden anim-fade-up" style={{ animationDelay: "300ms" }}>

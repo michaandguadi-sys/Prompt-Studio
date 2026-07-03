@@ -23,7 +23,7 @@ import { dimsFor } from "../doc/schema";
  */
 
 type Tool = "brush" | "marker" | "arrow" | "rect" | "ellipse" | "text" | "eraser";
-type Fmt = "png" | "jpeg" | "webp" | "svg" | "pdf";
+type Fmt = "png" | "jpeg" | "webp" | "pdf";
 
 type Stroke =
   | { kind: "path"; tool: "brush" | "marker" | "eraser"; color: string; size: number; pts: [number, number][] }
@@ -229,12 +229,6 @@ export const StillStudio: React.FC<{ open: boolean; onClose: () => void }> = ({ 
         });
         if (!r.ok) throw new Error("PDF render failed");
         saveBlob(await r.blob(), "pdf");
-      } else if (fmt === "svg") {
-        // Scalable wrapper embedding the full-res raster — drops into any blog.
-        const cv = await composite();
-        const dataUrl = cv.toDataURL("image/png");
-        const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${cv.width}" height="${cv.height}" viewBox="0 0 ${cv.width} ${cv.height}"><image width="${cv.width}" height="${cv.height}" xlink:href="${dataUrl}"/></svg>`;
-        saveBlob(new Blob([svg], { type: "image/svg+xml" }), "svg");
       } else {
         const cv = await composite();
         const mime = fmt === "png" ? "image/png" : fmt === "jpeg" ? "image/jpeg" : "image/webp";
@@ -399,8 +393,8 @@ export const StillStudio: React.FC<{ open: boolean; onClose: () => void }> = ({ 
             {/* Export */}
             <div className="border-t border-line pt-4">
               <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-graphite/45">Export</div>
-              <div className="grid grid-cols-5 gap-1">
-                {(["png", "jpeg", "webp", "svg", "pdf"] as Fmt[]).map((f) => {
+              <div className="grid grid-cols-4 gap-1">
+                {(["png", "jpeg", "webp", "pdf"] as Fmt[]).map((f) => {
                   const disabled = f === "pdf" && strokes.length > 0;
                   return (
                     <button key={f} onClick={() => !disabled && setFmt(f)} disabled={disabled}

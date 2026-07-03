@@ -71,11 +71,25 @@ export const LabelView: React.FC<LV<LabelLayer>> = ({ layer: l, frame, fps, tota
     );
   }
 
-  // banner
+  // banner — a broadcast-style CENTERED band, never an edge-to-edge slab:
+  // capped width, glass backdrop with soft fade-out edges, accent rules above
+  // and below, and type that scales DOWN as the text gets longer.
+  const bannerFit = Math.min(1, 26 / Math.max(10, l.text.length)); // long text → smaller
+  const bSz = sz * (0.72 + 0.38 * bannerFit);
   return (
-    <div style={{ position: "absolute", left: 0, right: 0, top: "50%", transform: `translateY(-50%) ${timingTransform(tr)}`, opacity: tr.opacity, pointerEvents: "none", textAlign: "center", background: `${l.accent}cc`, padding: `${sz * 0.4}px 0`, fontFamily: font }}>
-      <div style={{ fontSize: sz * 1.1, fontWeight: 900, color: l.color, letterSpacing: 4, textTransform: "uppercase", ...outlineStyle(l.outline, sz * 0.04) }}>{l.text}</div>
-      {l.sub && <div style={{ fontSize: sz * 0.55, color: "rgba(255,255,255,0.82)", marginTop: sz * 0.12 }}>{l.sub}</div>}
+    <div style={{ position: "absolute", left: "50%", top: "50%", transform: `translate(-50%,-50%) ${timingTransform(tr)}`, opacity: tr.opacity, pointerEvents: "none", textAlign: "center", maxWidth: "78%", fontFamily: font }}>
+      <div
+        style={{
+          padding: `${bSz * 0.45}px ${bSz * 1.4}px`,
+          background: "linear-gradient(90deg, transparent 0%, rgba(6,8,15,0.82) 12%, rgba(6,8,15,0.82) 88%, transparent 100%)",
+          backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)",
+        }}
+      >
+        <div style={{ height: Math.max(2, bSz * 0.05), width: bSz * 2.4, margin: `0 auto ${bSz * 0.3}px`, background: l.accent, borderRadius: 99, boxShadow: `0 0 14px ${l.accent}aa` }} />
+        <div style={{ fontSize: bSz, fontWeight: 800, color: l.color, lineHeight: 1.12, letterSpacing: bSz * 0.14, textTransform: "uppercase", textWrap: "balance" as any, textShadow: "0 2px 18px rgba(0,0,0,0.55)", ...outlineStyle(l.outline, bSz * 0.04) }}>{l.text}</div>
+        {l.sub && <div style={{ fontSize: bSz * 0.42, fontWeight: 600, letterSpacing: bSz * 0.09, textTransform: "uppercase", color: l.accent, marginTop: bSz * 0.22 }}>{l.sub}</div>}
+        <div style={{ height: Math.max(2, bSz * 0.05), width: bSz * 2.4, margin: `${bSz * 0.3}px auto 0`, background: l.accent, borderRadius: 99, boxShadow: `0 0 14px ${l.accent}aa` }} />
+      </div>
     </div>
   );
 };

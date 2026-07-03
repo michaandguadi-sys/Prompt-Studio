@@ -21,7 +21,7 @@ import {
   MapPin, Sparkles, ArrowRight, Wand2, Globe2, Route as RouteIcon,
   BarChart3, Mic2, Film, Check, ChevronDown, Mountain, Play,
 } from "lucide-react";
-import { LiveStoryMap } from "@/components/home/LiveStoryMap";
+import { LiveStoryMap, type MapGrade } from "@/components/home/LiveStoryMap";
 import { interpret } from "@/lib/parse";
 import { coordsFor, isLikelyPlaceName, type GeoStop } from "@/components/home/worldCoords";
 import { PRO_MAP_STYLES } from "@/lib/presets/proMapStyles";
@@ -84,6 +84,19 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
   const [phIdx, setPhIdx] = useState(0);
   const [focused, setFocused] = useState(false);
   const glowRef = useRef<HTMLDivElement>(null);
+  // Tap a style card → the whole world regrades live (works logged-out).
+  const [styleId, setStyleId] = useState<string | null>(null);
+  const grade = useMemo<MapGrade | null>(() => {
+    const s = PRO_MAP_STYLES.find((x) => x.id === styleId);
+    if (!s) return null;
+    return {
+      tint: s.swatches[1],
+      accents: [s.swatches[2], s.swatches[1], s.swatches[2]],
+      // light styles brighten the satellite; dark ones crush it further
+      brightness: /^#[c-f]/i.test(s.swatches[0]) ? 0.85 : 0.5,
+      saturation: -0.55,
+    };
+  }, [styleId]);
 
   /* Live understanding — the same engine the app runs, right on the sales page.
      Offline coords only (no geocoder): instant, and never a wrong pin. */
@@ -130,7 +143,7 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
     { name: "Free", price: "$0", suffix: "forever", tagline: "Try the whole studio", featured: false, cta: "Start free",
       features: ["3 animations / month", "Full AI Director & editor", "All scene types", "1080p export, small watermark", "GPX / KML / FIT import"] },
     { name: "Creator", price: "$19", suffix: "/month", tagline: "Unlimited 4K, no watermark", featured: true, cta: "Get Creator",
-      features: ["Unlimited 4K renders", "No watermark", "All 17 pro styles + looks", "GPS track flythroughs", "Public share links"] },
+      features: ["Unlimited 4K renders", "No watermark", `All ${PRO_MAP_STYLES.length} pro styles + looks`, "GPS track flythroughs", "Public share links"] },
     { name: "Pro", price: "$39", suffix: "/month", tagline: "For serious storytellers", featured: false, cta: "Get Pro",
       features: ["Everything in Creator", "AI Director (premium model)", "Story arcs — multi-scene films", "Brand kits + FCPXML export", "Priority render queue"] },
   ];
@@ -181,7 +194,7 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
 
       {/* ── HERO — the product, live, before a single click ── */}
       <section className="relative overflow-hidden" style={{ minHeight: "100svh" }}>
-        <LiveStoryMap stops={stops} />
+        <LiveStoryMap stops={stops} grade={grade} />
         <div ref={glowRef} className="pointer-events-none absolute inset-0 z-[5]" aria-hidden />
 
         <div className="relative z-10 mx-auto flex max-w-3xl flex-col items-center justify-center px-6 text-center" style={{ minHeight: "100svh", paddingTop: 86, paddingBottom: 120 }}>
@@ -265,7 +278,24 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
             <span className="inline-flex items-center gap-1.5"><Check size={12} className="text-iris" /> No credit card</span>
             <span className="inline-flex items-center gap-1.5"><Check size={12} className="text-iris" /> 4K export</span>
             <span className="inline-flex items-center gap-1.5"><Check size={12} className="text-iris" /> GPX import</span>
-            <span className="inline-flex items-center gap-1.5"><Check size={12} className="text-iris" /> 17 pro styles</span>
+            <span className="inline-flex items-center gap-1.5"><Check size={12} className="text-iris" /> {PRO_MAP_STYLES.length} pro styles</span>
+          </div>
+
+          {/* Tap-a-look strip — regrades the whole world behind, live */}
+          <div className="mt-5 flex flex-col items-center gap-2" style={{ animation: "landRise 0.9s ease 440ms both" }}>
+            <span className="text-[9.5px] font-bold uppercase tracking-[0.28em] text-white/28">Tap a look — the world changes</span>
+            <div className="flex flex-wrap items-center justify-center gap-1.5">
+              {PRO_MAP_STYLES.slice(0, 9).map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => setStyleId(styleId === s.id ? null : s.id)}
+                  title={`${s.name} — ${s.tagline}`}
+                  className={`h-7 w-7 rounded-full ring-2 transition-all hover:scale-110 ${styleId === s.id ? "scale-110 ring-white/80" : "ring-white/15"}`}
+                  style={{ background: `conic-gradient(from 40deg, ${s.swatches[0]}, ${s.swatches[1]}, ${s.swatches[2]}, ${s.swatches[0]})` }}
+                  aria-label={`Preview the ${s.name} style`}
+                />
+              ))}
+            </div>
           </div>
         </div>
 
@@ -349,7 +379,7 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
           <div className="mx-auto max-w-6xl px-6 text-center">
             <p className="text-[11px] font-bold uppercase tracking-[0.3em] text-iris">The looks</p>
             <h2 className="mt-3 text-[clamp(1.9rem,4vw,3rem)] font-medium tracking-tight" style={{ fontFamily: SERIF }}>
-              17 professional map styles. <span className="text-white/40">One click each.</span>
+              {PRO_MAP_STYLES.length} professional map styles. <span className="text-white/40">One click each.</span>
             </h2>
             <p className="mx-auto mt-3 max-w-md text-[14px] text-white/45">
               Earth Documentary to Vintage Atlas — balanced palettes, cinematic grades, broadcast-safe.
@@ -361,7 +391,14 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
           <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-28" style={{ background: "linear-gradient(to left,#04060f,transparent)" }} />
           <div className="mq-r flex w-max gap-3 py-1">
             {[...PRO_MAP_STYLES, ...PRO_MAP_STYLES].map((s, i) => (
-              <div key={`${s.id}-${i}`} className="w-[172px] shrink-0 overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.03] transition-all hover:-translate-y-1 hover:border-iris/40">
+              <div
+                key={`${s.id}-${i}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => { setStyleId(s.id); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                onKeyDown={(e) => { if (e.key === "Enter") { setStyleId(s.id); window.scrollTo({ top: 0, behavior: "smooth" }); } }}
+                title={`Tap to preview ${s.name} on the world above`}
+                className={`w-[172px] shrink-0 cursor-pointer overflow-hidden rounded-xl border bg-white/[0.03] transition-all hover:-translate-y-1 ${styleId === s.id ? "border-white/60" : "border-white/[0.08] hover:border-iris/40"}`}>
                 <div className="relative h-[86px]" style={{ background: s.swatches[0] }}>
                   <div className="absolute inset-0" style={{ background: `radial-gradient(130% 100% at 50% 130%, ${s.swatches[1]}66, transparent 60%)` }} />
                   <div className="absolute bottom-2 left-3 h-8 w-2.5 rounded-sm" style={{ background: s.swatches[1], boxShadow: `0 0 10px ${s.swatches[2]}` }} />
@@ -397,7 +434,7 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
 
         <Reveal delay={120}>
           <div className="mt-12 grid grid-cols-2 gap-6 rounded-2xl border border-iris/20 bg-gradient-to-r from-iris/[0.08] to-transparent px-8 py-7 text-center sm:grid-cols-4">
-            {[["4K", "3840 × 2160 export"], ["17", "professional styles"], ["< 10s", "idea → storyboard"], ["∞", "free previews"]].map(([v, l]) => (
+            {[["4K", "3840 × 2160 export"], [String(PRO_MAP_STYLES.length), "professional styles"], ["< 10s", "idea → storyboard"], ["∞", "free previews"]].map(([v, l]) => (
               <div key={l}>
                 <div className="text-[26px] font-bold text-white" style={{ fontFamily: SERIF }}>{v}</div>
                 <div className="mt-0.5 text-[10.5px] uppercase tracking-[0.14em] text-white/40">{l}</div>

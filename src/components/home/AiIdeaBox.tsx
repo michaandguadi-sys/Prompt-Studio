@@ -12,6 +12,7 @@ import { GeneratingOverlay } from "./GeneratingOverlay";
 import { buildArc, summarizeSequence, type StoryArc, type ArcContext } from "@/lib/parse";
 import { addAddon, type Addon } from "@/lib/addons";
 import { useAiEngine } from "@/lib/aiEngine";
+import { recordTaste, tasteSummary } from "@/lib/taste";
 
 const EXAMPLES = [
   "The fall of the Berlin Wall, 1989",
@@ -138,7 +139,7 @@ export const AiIdeaBox: React.FC<{
   const genOne = async (idea: string, mode?: "story", interview?: { answers: Record<string, string>; text: string }, opts?: { style?: string; arc?: ArcContext }) => {
     const res = await fetch("/api/v2/generate", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ idea, mode, style: opts?.style ?? styleArg, ai: useAI ? ai() : undefined, useAI, interview: interview?.answers, interviewText: interview?.text, arc: opts?.arc }),
+      body: JSON.stringify({ idea, mode, style: opts?.style ?? styleArg, ai: useAI ? ai() : undefined, useAI, interview: interview?.answers, interviewText: interview?.text, arc: opts?.arc, taste: tasteSummary() || undefined }),
     });
     const d = await res.json();
     try { if (Array.isArray(d?.addons)) for (const a of d.addons as Addon[]) if (a?.name) addAddon(a); } catch { /* registry full / SSR */ }
@@ -196,6 +197,7 @@ export const AiIdeaBox: React.FC<{
   const runGenerate = async () => {
     if (loading || filled.length === 0) return;
     onGenerateStart?.();
+    if (styleId !== "auto") recordTaste("signature", styleId);
     setStep({ current: 1, total: filled.length });
     setLoading(true); setError(null); setProgress(null); setAiNudge(false); setGenerationWarning(null);
     if (filled.length === 1 && useAI) {
