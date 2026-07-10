@@ -1,0 +1,26 @@
+name: Daily job pipeline
+
+on:
+  schedule:
+    - cron: '0 6 * * *' # every day 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # No npm install needed — the pipeline is dependency-free.
+      - name: Run pipeline
+        env:
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          NOTION_JOBS_DB_ID: ${{ secrets.NOTION_JOBS_DB_ID }}
+          NOTION_OUTREACH_DB_ID: ${{ secrets.NOTION_OUTREACH_DB_ID }}
+        run: node job-pipeline/run.mjs

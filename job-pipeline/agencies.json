@@ -1,0 +1,9 @@
+[
+  {
+    "name": "Example Creative Agency",
+    "website": "https://example.com",
+    "email": "hello@example.com",
+    "niche": ["Short-form", "Social"],
+    "notes": "Replace this file's entries with real agencies/studios you want to pitch. The pipeline creates a Notion row per agency (Status: Not contacted) and flags follow-ups automatically once you log a 'Last contacted' date or Status in Notion."
+  }
+]

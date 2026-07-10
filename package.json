@@ -8,6 +8,8 @@
     "build:agent-bundle": "node scripts/build-bundle.mjs",
     "start": "next start -p 3030",
     "lint": "next lint",
+    "jobs:run": "node job-pipeline/run.mjs",
+    "jobs:setup": "node job-pipeline/run.mjs --setup",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",

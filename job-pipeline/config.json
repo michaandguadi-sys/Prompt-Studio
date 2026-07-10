@@ -1,0 +1,62 @@
+{
+  "notion": {
+    "jobsDatabaseId": "",
+    "outreachDatabaseId": ""
+  },
+  "search": {
+    "queries": ["video editor", "video editing", "post production"],
+    "maxNewJobsPerRun": 40,
+    "minScore": 30
+  },
+  "sources": {
+    "remotive": true,
+    "remoteok": true,
+    "weworkremotely": true,
+    "jobicy": true
+  },
+  "scoring": {
+    "titleKeywords": {
+      "video editor": 40,
+      "video editing": 35,
+      "post-production": 30,
+      "post production": 30,
+      "editor": 20,
+      "motion graphics": 25,
+      "videographer": 18,
+      "content editor": 15
+    },
+    "descriptionKeywords": {
+      "premiere": 6,
+      "davinci": 6,
+      "resolve": 4,
+      "after effects": 6,
+      "final cut": 5,
+      "color grading": 5,
+      "colour grading": 5,
+      "motion graphics": 5,
+      "sound design": 3,
+      "youtube": 4,
+      "short-form": 4,
+      "short form": 4,
+      "documentary": 3,
+      "storytelling": 3
+    },
+    "descriptionKeywordsCap": 25,
+    "negativeKeywords": {
+      "unpaid": -100,
+      "intern": -20,
+      "internship": -30,
+      "photo editor": -25,
+      "copy editor": -40,
+      "text editor": -40,
+      "newsletter editor": -30
+    },
+    "salaryPresentBonus": 8,
+    "remoteBonus": 10,
+    "recency": { "within2Days": 10, "within7Days": 5 },
+    "tiers": { "hot": 70, "good": 50, "maybe": 30 }
+  },
+  "outreach": {
+    "followUpDays": 7
+  }
+}
