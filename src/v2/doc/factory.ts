@@ -109,6 +109,7 @@ export function createDefaultProject(name = "Untitled animation"): Project {
       }),
     ],
     narration: "",
+    narrationLines: [],
     citations: [],
   };
   const now = Date.now();

@@ -29,15 +29,6 @@ const TONE: IVQuestion = {
     { label: "Epic & sweeping", value: "epic" },
   ],
 };
-const ENERGY: IVQuestion = {
-  id: "energy", question: "How should the camera move?",
-  options: [
-    { label: "Smooth & elegant", value: "smooth", recommended: true },
-    { label: "Dynamic chase", value: "dynamic" },
-    { label: "Punchy & fast", value: "punchy" },
-    { label: "Locked-off & still", value: "locked" },
-  ],
-};
 const LENGTH: IVQuestion = {
   id: "length", question: "How long?",
   options: [
@@ -65,13 +56,15 @@ function focusQuestion(idea: string): IVQuestion {
   return { id: "focus", question: "What's the heart of the story?", options: opts };
 }
 
+// SHORT by design: exactly 3 taps between idea and film. Camera energy is
+// derived from tone downstream (generate/applyInterview), so we don't spend a
+// question on it — focus (the story's heart) is the one that matters most.
 function heuristicQuestions(idea: string): IVQuestion[] {
-  return [TONE, ENERGY, focusQuestion(idea), LENGTH];
+  return [TONE, focusQuestion(idea), LENGTH];
 }
 
-const IV_SYSTEM = `You are a documentary map director's assistant (Vox / Johnny Harris style). Given a one-line idea for an animated map, ask the 3–4 highest-leverage questions to nail the creative vision BEFORE building it. Cover, in this order, using EXACTLY these ids:
+const IV_SYSTEM = `You are a documentary map director's assistant (Vox / Johnny Harris style). Given a one-line idea for an animated map, ask EXACTLY 3 quick questions — the highest-leverage creative decisions BEFORE building it. Every answer becomes a BINDING directive for the story director, so options must be real directorial choices. Cover, in this order, using EXACTLY these ids:
 - "tone": the emotional feel.
-- "energy": how the camera should move.
 - "focus": the SPECIFIC narrative heart — tailor the options to THIS idea (name real, concrete choices a director would weigh, not generic ones).
 - "length": duration.
 Each question has 3–4 short options (≤5 words each) with a stable lowercase "value" and exactly ONE marked "recommended": true (your expert default). Return ONLY JSON: {"questions":[{"id","question","options":[{"label","value","recommended"?}]}],"thesisHint":"a one-line guess at the single point the map should make"}. No prose.`;
@@ -79,7 +72,7 @@ Each question has 3–4 short options (≤5 words each) with a stable lowercase 
 function sanitize(qs: any): IVQuestion[] | null {
   if (!Array.isArray(qs)) return null;
   const out: IVQuestion[] = [];
-  for (const q of qs.slice(0, 4)) {
+  for (const q of qs.slice(0, 3)) {
     if (!q?.id || !q?.question || !Array.isArray(q.options)) continue;
     const options = q.options.slice(0, 4).map((o: any) => ({
       label: String(o?.label ?? "").slice(0, 40),

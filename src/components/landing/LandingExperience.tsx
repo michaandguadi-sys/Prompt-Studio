@@ -19,18 +19,30 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   MapPin, Sparkles, ArrowRight, Wand2, Globe2, Route as RouteIcon,
-  BarChart3, Mic2, Film, Check, ChevronDown, Mountain, Play,
+  BarChart3, Mic2, Film, Check, ChevronDown, Mountain,
 } from "lucide-react";
-import { LiveStoryMap, flavorForPrompt, type MapGrade, type PreviewFlavor } from "@/components/home/LiveStoryMap";
+import { LiveStoryMap, flavorForPrompt, type PreviewFlavor } from "@/components/home/LiveStoryMap";
 import { interpret } from "@/lib/parse";
 import { coordsFor, isLikelyPlaceName, type GeoStop } from "@/components/home/worldCoords";
-import { PRO_MAP_STYLES } from "@/lib/presets/proMapStyles";
+import { PRO_MAP_STYLES, proMapStyleById } from "@/lib/presets/proMapStyles";
+import { map3dStyleById } from "@/lib/presets/map3dStyles";
 import { FAQ } from "./FAQ";
 import { Pricing } from "./Pricing";
 import { FinalCTA } from "./FinalCTA";
 import { Reveal } from "./Reveal";
+import { BuildFlow } from "./BuildFlow";
 
 const SERIF = "Newsreader, 'Playfair Display', Georgia, serif";
+
+/** Hero style tap → the BuildFlow "look" value it pre-selects, so the visitor's
+ *  tapped look flows through the funnel into the generated film's style. */
+const STYLEID_TO_LOOK: Record<string, string> = {
+  "satellite-night": "satellite",
+  cartograph: "3D terrain",
+  "dark-editorial": "dark editorial",
+  "sunrise-terrain": "3D terrain",
+  "apple-light": "clean simple map",
+};
 
 /* ── Hero demo placeholder reel ─────────────────────────────────────────────── */
 const DEMO_IDEAS = [
@@ -42,13 +54,30 @@ const DEMO_IDEAS = [
   "Highlight every country I've visited: France, Italy, Japan, Brazil",
 ];
 
-/** Tappable idea chips — one per PREVIEW FLAVOR, so visitors instantly see
- *  routes, glowing highlights AND heat scatters without typing a word. */
-const IDEA_CHIPS: { emoji: string; label: string; prompt: string }[] = [
-  { emoji: "🚁", label: "Route", prompt: "Fly from New York to Iceland with smooth camera moves" },
-  { emoji: "⛵", label: "Sea journey", prompt: "Sailing from Barcelona to Athens across the Mediterranean" },
-  { emoji: "🌍", label: "Highlights", prompt: "Highlight every country I've visited: France, Italy, Japan, Brazil" },
-  { emoji: "🔥", label: "Heat map", prompt: "Earthquake hotspots across Japan, Chile and Turkey this decade" },
+/** Tappable idea chips — each demonstrates ONE real behavior. The preview is
+ *  driven by the chip's EXPLICIT `flavor` + `stops`, never by re-parsing the
+ *  prompt text: the intent parser mangles trailing style phrases ("…with smooth
+ *  camera moves") and would silently drop the route. `stops` are place names
+ *  resolved through worldCoords; `prompt` is only what seeds the real studio. */
+type IdeaChip = { emoji: string; label: string; prompt: string; flavor: PreviewFlavor; stops: string[]; styleId?: string };
+const IDEA_CHIPS: IdeaChip[] = [
+  { emoji: "🚁", label: "Route", flavor: "route", stops: ["New York", "Reykjavik"], prompt: "Fly from New York to Reykjavik, smooth cinematic camera" },
+  { emoji: "⛵", label: "Sea journey", flavor: "sea", stops: ["Barcelona", "Athens"], prompt: "Sailing from Barcelona to Athens, serene dawn light" },
+  { emoji: "🌍", label: "Highlights", flavor: "highlight", stops: ["France", "Italy", "Japan", "Brazil"], prompt: "Highlight the countries I've visited: France, Italy, Japan, Brazil" },
+  { emoji: "🔥", label: "Heat map", flavor: "heat", stops: ["Japan", "Chile", "Turkey"], prompt: "Earthquake hotspots across Japan, Chile and Turkey" },
+  { emoji: "🏔", label: "3D close-up", flavor: "route", stops: [], prompt: "A cinematic 3D flythrough over the Matterhorn, golden dawn", styleId: "sunrise-terrain" },
+];
+
+/** The style taps — REAL PRO styles from the editor's own registry, rendered
+ *  through the SAME pipeline (applyBasemapIdentity + terrain + grid), so the
+ *  landing shows the EXACT look a creator gets in the studio. The swatches come
+ *  straight from each pro style. */
+const STYLE_TAPS: { styleId: string; label: string; hint: string }[] = [
+  { styleId: "satellite-night", label: "Satellite", hint: "The earth-at-night hero" },
+  { styleId: "cartograph", label: "Cartograph", hint: "Paper survey · 3D terrain · grid" },
+  { styleId: "dark-editorial", label: "Dark editorial", hint: "Red borders · grey streets" },
+  { styleId: "sunrise-terrain", label: "3D terrain", hint: "Real elevation, first light" },
+  { styleId: "apple-light", label: "Minimal", hint: "Clean pale editorial canvas" },
 ];
 
 const MARQUEE_USES = [
@@ -93,35 +122,49 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
   const [phIdx, setPhIdx] = useState(0);
   const [focused, setFocused] = useState(false);
   const glowRef = useRef<HTMLDivElement>(null);
-  // Tap a style card → the whole world regrades live (works logged-out).
-  const [styleId, setStyleId] = useState<string | null>(null);
-  const grade = useMemo<MapGrade | null>(() => {
-    const s = PRO_MAP_STYLES.find((x) => x.id === styleId);
-    if (!s) return null;
-    const isLight = /^#[c-f]/i.test(s.swatches[0]);
-    const isSatelliteLook = /satellite/i.test(String((s.basemap as any)?.styleUrl ?? ""));
-    return isSatelliteLook
-      ? {
-          // Satellite-native looks: keep the imagery, shift its temperature.
-          tint: s.swatches[2], tintStrength: 0.3,
-          accents: [s.swatches[2], s.swatches[1], s.swatches[2]],
-          saturation: -0.15, brightness: 0.7, contrast: 0.3, hueRotate: 0,
-        }
-      : {
-          // Designed looks: a REAL duotone — desaturate hard, tint with the
-          // style's body colour, punch contrast. Unmistakable on tap.
-          tint: s.swatches[1], tintStrength: 0.75,
-          accents: [s.swatches[2], s.swatches[1], s.swatches[2]],
-          saturation: -0.95,
-          brightness: isLight ? 0.95 : 0.45,
-          contrast: isLight ? 0.15 : 0.4,
-          hueRotate: 0,
-        };
-  }, [styleId]);
+  // Tap a style card → the whole world re-renders in a REAL PRO style through
+  // the editor's own pipeline (land/water/border recolour, 3D terrain, survey
+  // grid), and every overlay element re-themes with it. Works logged-out.
+  const [styleId, setStyleId] = useState<string>("satellite-night");
+  const proStyle = useMemo(() => proMapStyleById(styleId) ?? map3dStyleById(styleId) ?? null, [styleId]);
+  // Light-basemap styles need a darker prompt-bar so the glass reads.
+  const styleIsLight = useMemo(() => {
+    const hex = String((proStyle?.look as any)?.bgColor || (proStyle?.swatches as string[] | undefined)?.[0] || "");
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex);
+    if (!m) return false;
+    const n = parseInt(m[1], 16);
+    return (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) > 150;
+  }, [proStyle]);
 
-  /* Live understanding — the same engine the app runs, right on the sales page.
-     Offline coords only (no geocoder): instant, and never a wrong pin. */
+  /* AUTO-TOUR — the landing demos itself. While the visitor hasn't touched
+     anything, the idea chips activate one after another (route draws, sea
+     voyage sails, countries fill, heat blooms), so the page is alive from
+     second one. Any interaction hands the wheel over permanently. */
+  // Which idea chip is driving the preview (null = the visitor is typing freely).
+  const [activeChip, setActiveChip] = useState<IdeaChip | null>(null);
+  // The immersive build-flow overlay (click CTA → cinematic reveal → questions → gate).
+  const [buildFlow, setBuildFlow] = useState(false);
+
+  const [touched, setTouched] = useState(false);
+  useEffect(() => {
+    if (touched) return;
+    const tour = IDEA_CHIPS.filter((c) => !c.styleId); // flavor demos only — style swaps stay user-driven
+    let i = 0;
+    const play = (c: IdeaChip) => { setDemo(c.prompt); setActiveChip(c); };
+    const first = setTimeout(() => play(tour[0]), 3200);
+    const loop = setInterval(() => { i = (i + 1) % tour.length; play(tour[i]); }, 9000);
+    return () => { clearTimeout(first); clearInterval(loop); };
+  }, [touched]);
+
+  /* Live understanding. When a chip is active its EXPLICIT stops+flavor drive
+     the map (deterministic, always correct). When the visitor types their own
+     idea we fall back to the intent engine — offline coords only, instant, and
+     it never drops a pin on a style word. */
   const { stops, flavor } = useMemo<{ stops: GeoStop[]; flavor: PreviewFlavor }>(() => {
+    if (activeChip && demo === activeChip.prompt) {
+      const stops = activeChip.stops.map((n) => coordsFor(n)).filter(Boolean) as GeoStop[];
+      return { stops, flavor: activeChip.flavor };
+    }
     const t = demo.trim();
     if (t.length < 2) return { stops: [], flavor: "route" };
     try {
@@ -133,7 +176,7 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
         .filter(Boolean) as GeoStop[];
       return { stops, flavor: flavorForPrompt(demo, it.action) };
     } catch { return { stops: [], flavor: "route" }; }
-  }, [demo]);
+  }, [demo, activeChip]);
 
   /* Cycling placeholder */
   useEffect(() => {
@@ -153,21 +196,17 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
     return () => window.removeEventListener("mousemove", fn);
   }, []);
 
-  /* The conversion carry: the visitor's prompt rides through sign-up into the
-     studio — AiIdeaBox reads `mapanisy-seed-prompt` on mount. */
-  const ctaHref = signedIn ? "/home" : "/sign-up?redirect_url=%2Fhome";
-  const seedAndGo = () => {
-    try { if (demo.trim()) localStorage.setItem("mapanisy-seed-prompt", demo.trim()); } catch { /* private mode */ }
-  };
+  /* The conversion carry: the visitor's idea rides into the studio via the
+     BuildFlow overlay, which writes `mapanisy-seed-prompt` at its hand-off. */
 
   /* Mirrors src/lib/tiers.ts — the wired billing ladder. Keep in sync. */
   const plans = [
     { name: "Free", price: "$0", suffix: "forever", tagline: "Try the whole studio", featured: false, cta: "Start free",
-      features: ["3 animations / month", "Full AI Director & editor", "All scene types", "1080p export, small watermark", "GPX / KML / FIT import"] },
-    { name: "Creator", price: "$19", suffix: "/month", tagline: "Unlimited 4K, no watermark", featured: true, cta: "Get Creator",
+      features: ["3 animations / month", "Full AI Director & editor", "All scene types", "720p export, small watermark", "GPX / KML / FIT import"] },
+    { name: "Creator", price: "$7.99", suffix: "/mo", note: "or $40/year — save 58%", tagline: "Unlimited 4K, no watermark", featured: true, cta: "Get Creator",
       features: ["Unlimited 4K renders", "No watermark", `All ${PRO_MAP_STYLES.length} pro styles + looks`, "GPS track flythroughs", "Public share links"] },
-    { name: "Pro", price: "$39", suffix: "/month", tagline: "For serious storytellers", featured: false, cta: "Get Pro",
-      features: ["Everything in Creator", "AI Director (premium model)", "Story arcs — multi-scene films", "Brand kits + FCPXML export", "Priority render queue"] },
+    { name: "Pro", price: "$250", suffix: "once", note: "Lifetime — pay once", tagline: "Everything + first access to new features", featured: false, cta: "Get lifetime access",
+      features: ["Everything in Creator", "First access to upcoming features", "AI Director — premium model", "Story arcs — multi-scene films", "Brand kits + FCPXML export", "Priority render queue"] },
   ];
 
   return (
@@ -177,11 +216,10 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
         @keyframes phFadeL { 0% { opacity: 0; transform: translateY(6px); } 12% { opacity: 1; transform: none; } 82% { opacity: 1; } 100% { opacity: 0; transform: translateY(-5px); } }
         @keyframes ctaBreath { 0%,100% { box-shadow: 0 10px 44px -8px rgba(110,123,255,0.55); } 50% { box-shadow: 0 10px 66px -6px rgba(110,123,255,0.85); } }
         @keyframes marqueeL { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-        @keyframes marqueeR { from { transform: translateX(-50%); } to { transform: translateX(0); } }
         @keyframes chevFade { 0%,100% { opacity: 0.2; transform: translateY(0); } 50% { opacity: 0.75; transform: translateY(6px); } }
-        .mq-l { animation: marqueeL 46s linear infinite; } .mq-r { animation: marqueeR 58s linear infinite; }
-        .mq-pause:hover .mq-l, .mq-pause:hover .mq-r { animation-play-state: paused; }
-        @media (prefers-reduced-motion: reduce) { .mq-l, .mq-r { animation: none; } }
+        .mq-l { animation: marqueeL 46s linear infinite; }
+        .mq-pause:hover .mq-l { animation-play-state: paused; }
+        @media (prefers-reduced-motion: reduce) { .mq-l { animation: none; } }
       `}</style>
 
       {/* ── Nav ── */}
@@ -216,7 +254,7 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
 
       {/* ── HERO — the product, live, before a single click ── */}
       <section className="relative overflow-hidden" style={{ minHeight: "100svh" }}>
-        <LiveStoryMap stops={stops} grade={grade} flavor={flavor} />
+        <LiveStoryMap stops={stops} flavor={flavor} proStyle={proStyle} />
         <div ref={glowRef} className="pointer-events-none absolute inset-0 z-[5]" aria-hidden />
 
         <div className="relative z-10 mx-auto flex max-w-3xl flex-col items-center justify-center px-6 text-center" style={{ minHeight: "100svh", paddingTop: 86, paddingBottom: 120 }}>
@@ -228,7 +266,7 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
             <span className="text-[10px] font-bold uppercase tracking-[0.28em] text-[#aab4ff]">This map is live — try it</span>
           </div>
 
-          <h1 className="text-[clamp(2.4rem,6vw,4.6rem)] font-medium leading-[1.02] tracking-[-0.024em]" style={{ fontFamily: SERIF, animation: "landRise 0.8s ease 80ms both" }}>
+          <h1 className="text-[clamp(2.4rem,6vw,4.6rem)] font-medium leading-[1.02] tracking-[-0.024em]" style={{ fontFamily: SERIF, animation: "landRise 0.8s ease 80ms both", textShadow: "0 2px 26px rgba(4,6,16,0.65), 0 1px 4px rgba(4,6,16,0.55)" }}>
             Type a story.
             <br />
             <span style={{ background: "linear-gradient(108deg,#9CA6FF 8%,#2FE0FF 52%,#B57BFF 100%)", WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent", filter: "drop-shadow(0 0 34px rgba(110,123,255,0.45))" }}>
@@ -236,7 +274,7 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
             </span>
           </h1>
 
-          <p className="mx-auto mt-5 max-w-[460px] text-[15.5px] leading-relaxed text-white/55" style={{ animation: "landRise 0.8s ease 160ms both" }}>
+          <p className="mx-auto mt-5 max-w-[460px] text-[15.5px] leading-relaxed text-white/55" style={{ animation: "landRise 0.8s ease 160ms both", textShadow: "0 1px 14px rgba(4,6,16,0.7)" }}>
             The AI director researches your idea, plans the camera and builds a cinematic
             map animation — 4K, in minutes, no After Effects.
           </p>
@@ -244,16 +282,16 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
           {/* ── THE LIVE DEMO BAR ── */}
           <div className="mt-9 w-full max-w-xl" style={{ animation: "landRise 0.9s ease 260ms both" }}>
             <div
-              className={`relative rounded-2xl border bg-white/[0.06] p-2 backdrop-blur-2xl transition-all duration-300 ${focused ? "border-iris/50" : "border-white/[0.12]"}`}
+              className={`relative rounded-2xl border p-2 backdrop-blur-2xl transition-all duration-300 ${focused ? "border-iris/50" : "border-white/[0.12]"} ${styleIsLight ? "bg-[#0a0d1a]/78" : "bg-white/[0.06]"}`}
               style={{ boxShadow: focused ? "0 0 0 1px rgba(110,123,255,0.3), 0 0 60px rgba(110,123,255,0.22), 0 24px 70px rgba(0,0,0,0.55)" : "0 24px 70px rgba(0,0,0,0.5)" }}
             >
               <div className="relative">
                 <input
                   value={demo}
-                  onChange={(e) => setDemo(e.target.value)}
-                  onFocus={() => setFocused(true)}
+                  onChange={(e) => { setTouched(true); setActiveChip(null); setDemo(e.target.value); }}
+                  onFocus={() => { setFocused(true); setTouched(true); }}
                   onBlur={() => setFocused(false)}
-                  onKeyDown={(e) => { if (e.key === "Enter") { seedAndGo(); window.location.href = ctaHref; } }}
+                  onKeyDown={(e) => { if (e.key === "Enter") setBuildFlow(true); }}
                   aria-label="Describe your story"
                   className="w-full bg-transparent px-4 py-3.5 text-[15px] text-white/90 outline-none placeholder:text-transparent"
                   placeholder="Describe your story…"
@@ -270,14 +308,13 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
                     ? <span className="text-[#7fe9ff]">✦ {stops.length === 1 ? `Found ${stops[0].label}` : `${stops.length} stops mapped`} — already directing</span>
                     : "The map reacts while you type"}
                 </span>
-                <Link
-                  href={ctaHref}
-                  onClick={seedAndGo}
+                <button
+                  onClick={() => setBuildFlow(true)}
                   className="inline-flex shrink-0 items-center gap-1.5 rounded-xl px-5 py-2.5 text-[13px] font-bold text-white transition-transform hover:-translate-y-0.5 active:scale-95"
                   style={{ background: "linear-gradient(135deg,#6E7BFF 0%,#B57BFF 100%)", animation: "ctaBreath 2.6s ease-in-out infinite" }}
                 >
                   <Sparkles size={13} /> {demo.trim() ? "Make this film — free" : "Start creating — free"}
-                </Link>
+                </button>
               </div>
             </div>
 
@@ -295,18 +332,28 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
               </div>
             )}
 
-            {/* Idea chips — tap to preview a route, a highlight, a heat map */}
+            {/* Idea chips — tap to preview a route, a sea voyage, real country
+                highlights, a heat map, or a 3D terrain dive */}
             <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5" style={{ animation: "landRise 0.9s ease 320ms both" }}>
-              {IDEA_CHIPS.map((c) => (
-                <button
-                  key={c.label}
-                  onClick={() => setDemo(demo === c.prompt ? "" : c.prompt)}
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-medium backdrop-blur transition-all hover:-translate-y-0.5 ${demo === c.prompt ? "border-iris/60 bg-iris/20 text-white" : "border-white/[0.1] bg-white/[0.04] text-white/50 hover:border-iris/40 hover:text-white/85"}`}
-                  title={c.prompt}
-                >
-                  <span aria-hidden>{c.emoji}</span> {c.label}
-                </button>
-              ))}
+              {IDEA_CHIPS.map((c) => {
+                const active = demo === c.prompt;
+                return (
+                  <button
+                    key={c.label}
+                    onClick={() => {
+                      setTouched(true);
+                      setDemo(active ? "" : c.prompt);
+                      setActiveChip(active ? null : c);
+                      if (c.styleId) setStyleId(active ? "satellite-night" : c.styleId);
+                      else setStyleId("satellite-night");
+                    }}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-medium backdrop-blur transition-all hover:-translate-y-0.5 ${active ? "border-iris/60 bg-iris/20 text-white" : "border-white/[0.1] bg-white/[0.04] text-white/50 hover:border-iris/40 hover:text-white/85"}`}
+                    title={c.prompt}
+                  >
+                    <span aria-hidden>{c.emoji}</span> {c.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -317,20 +364,29 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
             <span className="inline-flex items-center gap-1.5"><Check size={12} className="text-iris" /> {PRO_MAP_STYLES.length} pro styles</span>
           </div>
 
-          {/* Tap-a-look strip — regrades the whole world behind, live */}
+          {/* Tap-a-style strip — swaps the REAL basemap live; every element on
+              the map (routes, pins, highlights, labels) re-themes with it */}
           <div className="mt-5 flex flex-col items-center gap-2" style={{ animation: "landRise 0.9s ease 440ms both" }}>
-            <span className="text-[9.5px] font-bold uppercase tracking-[0.28em] text-white/28">Tap a look — the world changes · +{PRO_MAP_STYLES.length - 12} more in the studio</span>
+            <span className="text-[9.5px] font-bold uppercase tracking-[0.28em] text-white/28">Tap a style — the whole map changes · {PRO_MAP_STYLES.length}+ looks in the studio</span>
             <div className="flex flex-wrap items-center justify-center gap-1.5">
-              {PRO_MAP_STYLES.slice(0, 12).map((s) => (
-                <button
-                  key={s.id}
-                  onClick={() => setStyleId(styleId === s.id ? null : s.id)}
-                  title={`${s.name} — ${s.tagline}`}
-                  className={`h-7 w-7 rounded-full ring-2 transition-all hover:scale-110 ${styleId === s.id ? "scale-110 ring-white/80" : "ring-white/15"}`}
-                  style={{ background: `conic-gradient(from 40deg, ${s.swatches[0]}, ${s.swatches[1]}, ${s.swatches[2]}, ${s.swatches[0]})` }}
-                  aria-label={`Preview the ${s.name} style`}
-                />
-              ))}
+              {STYLE_TAPS.map((s) => {
+                const active = styleId === s.styleId;
+                const sw = (proMapStyleById(s.styleId)?.swatches as string[] | undefined) ?? ["#16241c", "#3d5a3a", "#0e1a2b"];
+                return (
+                  <button
+                    key={s.styleId}
+                    onClick={() => { setTouched(true); setStyleId(active ? "satellite-night" : s.styleId); }}
+                    title={`${s.label} — ${s.hint}`}
+                    className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-medium backdrop-blur transition-all hover:-translate-y-0.5 ${active ? "border-white/70 bg-white/15 text-white" : "border-white/[0.12] bg-white/[0.04] text-white/55 hover:border-white/40 hover:text-white/90"}`}
+                    aria-label={`Switch the map to the ${s.label} style`}
+                  >
+                    <span className="flex overflow-hidden rounded-full ring-1 ring-white/25" aria-hidden>
+                      {sw.slice(0, 3).map((c, i) => <span key={i} className="h-3.5 w-2" style={{ background: c }} />)}
+                    </span>
+                    {s.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -386,9 +442,10 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
               <div className="relative overflow-hidden rounded-xl border border-white/[0.08]">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src="/og-image.jpg" alt="4K export frame — alpine terrain rendered by Mapanisy" className="aspect-[1200/630] w-full object-cover" />
-                <div className="absolute inset-0 flex items-center justify-center bg-black/25">
-                  <span className="flex h-11 w-11 items-center justify-center rounded-full bg-white/90 text-[#04060f] shadow-xl"><Play size={16} className="ml-0.5" fill="currentColor" /></span>
-                </div>
+                {/* A single exported frame — NOT a video player, so no play button
+                    that goes nowhere. The badge states what it is. */}
+                <div className="pointer-events-none absolute inset-0" style={{ background: "linear-gradient(to top, rgba(4,6,15,0.5), transparent 45%)" }} />
+                <span className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-md bg-black/60 px-2 py-0.5 text-[9.5px] font-semibold text-white/80"><Film size={10} /> Rendered output</span>
                 <span className="absolute bottom-2 right-2 rounded-md bg-black/70 px-2 py-0.5 text-[9.5px] font-bold text-white/85">3840 × 2160 · MP4</span>
               </div>
             ) },
@@ -438,13 +495,13 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
       </section>
 
       {/* ── Pricing · FAQ · Final CTA ── */}
-      <Pricing serifFont={SERIF} plans={plans} />
+      <Pricing serifFont={SERIF} plans={plans} signedIn={signedIn} />
       <p className="-mt-14 pb-8 text-center text-[12px] text-white/35">
         Teams, white-label or enterprise?{" "}
         <Link href="/pricing" className="text-[#aab4ff] underline-offset-2 hover:underline">See the full pricing →</Link>
       </p>
       <FAQ serifFont={SERIF} />
-      <FinalCTA serifFont={SERIF} />
+      <FinalCTA serifFont={SERIF} signedIn={signedIn} />
 
       {/* ── Footer ── */}
       <footer className="border-t border-white/[0.06] px-6 py-10">
@@ -468,6 +525,10 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
           <span className="inline-flex items-center gap-1"><Globe2 size={10} /> Map data © OpenStreetMap · Imagery © Esri</span>
         </div>
       </footer>
+
+      {/* The immersive build experience — cinematic reveal → quick questions →
+          the free-first-animation sign-up gate. */}
+      {buildFlow && <BuildFlow idea={demo} signedIn={signedIn} initialLook={STYLEID_TO_LOOK[styleId]} onClose={() => setBuildFlow(false)} />}
     </div>
   );
 }

@@ -8,6 +8,8 @@
  * into the current scene — turning an invented feature into a one-click block.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
+import { rateLimit } from "@/lib/rateLimit";
 // Side-effect import: the generate route registers its buildFromPlan in the
 // plan-builder registry (route modules must not export values to each other).
 import "../../generate/route";
@@ -16,6 +18,15 @@ import { getPlanBuilder } from "@/lib/planBuilder";
 import { normalizeAddon, expandAddon } from "@/lib/addons";
 
 export async function POST(req: NextRequest) {
+  // Defense-in-depth: this runs the full build pipeline (Nominatim geocoding).
+  // Gate + rate-limit it like the geocode proxies (H1) so it can't be abused
+  // if middleware ever slips.
+  const { userId } = await auth();
+  if (!userId) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+  if (!rateLimit("v2-addon-apply", userId, { maxRequests: 30, windowSec: 60 })) {
+    return NextResponse.json({ error: "Rate limit exceeded — slow down a moment." }, { status: 429 });
+  }
+
   let body: { addon?: unknown; values?: Record<string, string> };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Bad JSON" }, { status: 400 }); }
 

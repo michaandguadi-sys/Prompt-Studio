@@ -204,7 +204,7 @@ const FineTune: React.FC<{ comp: any; patchComposition: (p: any) => void; layers
         <ColorBox label="Water color" value={bm.waterColor} fallback="#0c1828" onChange={(c) => setBM({ waterColor: c })} />
         <Toggle label="3D terrain" on={!!bm.terrain} onChange={(v) => setBM({ terrain: v })} />
         <Slider label="Terrain strength" min={0} max={5} step={0.1} value={bm.terrainStrength ?? 1.4} onChange={(v) => setBM({ terrainStrength: v })} fmt={(v) => v.toFixed(1)} />
-        <Slider label="Camera tilt" min={0} max={84} step={1} value={pitch} onChange={setPitch} fmt={(v) => `${Math.round(v)}°`} />
+        <Slider label="Camera tilt" min={0} max={85} step={1} value={pitch} onChange={setPitch} fmt={(v) => `${Math.round(v)}°`} />
       </div>
     </div>
   );

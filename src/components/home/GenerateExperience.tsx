@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { MapPin, Sparkles, Upload, Loader2, Clapperboard, Camera } from "lucide-react";
+import { MapPin, Sparkles, Upload, Loader2 } from "lucide-react";
 import { useEditor } from "@/v2/store/editor";
 import { parseTrackFile, buildTrackProject } from "@/v2/track";
 import { interpret } from "@/lib/parse";
@@ -11,7 +11,7 @@ import type { Interpretation } from "@/lib/parse/intent";
 import { AiIdeaBox } from "./AiIdeaBox";
 import { StoryLens } from "./StoryLens";
 import { InspirationRail } from "./InspirationRail";
-import { LiveStoryMap } from "./LiveStoryMap";
+import { LiveStoryMap, flavorForPrompt } from "./LiveStoryMap";
 import { coordsFor, geocodeStop, cachedStop, isLikelyPlaceName, type GeoStop } from "./worldCoords";
 
 const SERIF = "Newsreader, 'Playfair Display', Georgia, serif";
@@ -40,17 +40,24 @@ export const GenerateExperience: React.FC = () => {
   const router = useRouter();
   const load = useEditor((s) => s.load);
   const [prompt, setPrompt] = useState("");
-  // Film vs Still — bloggers pick "Still image" up front; the same director
-  // builds the same composition, then the Still Studio opens in the editor.
-  const [mode, setMode] = useState<"film" | "still">(() => {
-    try { return localStorage.getItem("mapanisy-mode") === "still" ? "still" : "film"; } catch { return "film"; }
-  });
-  useEffect(() => {
-    try { localStorage.setItem("mapanisy-mode", mode); } catch {}
-    import("@/lib/taste").then(({ recordTaste }) => recordTaste("mode", mode)).catch(() => {});
-  }, [mode]);
+  // Home is film-first: every idea becomes a cinematic map animation. Extracting
+  // a high-res still is a one-button action inside the editor (the "Snapshot"
+  // button), so the home page stays a single, focused "describe your film" flow.
   const [hoverStops, setHoverStops] = useState<GeoStop[] | null>(null);
   const [generating, setGenerating] = useState(false);
+  /* ARRIVAL — the once-per-session "yes, I'm in" reveal right after sign-in:
+     glowing prompt first, then the map blooms in with a 3D fly-down, then the
+     rest of the page rises staggered. useLayoutEffect flips the flag BEFORE
+     first paint, so there's no flash and no SSR hydration mismatch. */
+  const [arrival, setArrival] = useState(false);
+  useLayoutEffect(() => {
+    try {
+      if (sessionStorage.getItem("mapanisy-arrival") !== "1") {
+        sessionStorage.setItem("mapanisy-arrival", "1");
+        setArrival(true);
+      }
+    } catch { /* private mode — skip the choreography */ }
+  }, []);
   const [dragOver, setDragOver] = useState(false);
   const [dropBusy, setDropBusy] = useState(false);
   const [dropError, setDropError] = useState<string | null>(null);
@@ -80,6 +87,10 @@ export const GenerateExperience: React.FC = () => {
       .map((n) => coordsFor(n) ?? cachedStop(n) ?? null)
       .filter(Boolean) as GeoStop[];
   }, [placeNames, geoTick]);
+
+  /* Preview flavor — same engine as the landing hero, so "highlight France"
+     fills the real country and "sailing to Athens" hugs the water here too. */
+  const flavor = useMemo(() => flavorForPrompt(prompt, it?.action), [prompt, it]);
 
   useEffect(() => {
     const missing = placeNames.filter((n) => !coordsFor(n) && cachedStop(n) === undefined).slice(0, 2);
@@ -149,13 +160,26 @@ export const GenerateExperience: React.FC = () => {
           0%, 100% { box-shadow: 0 0 0 1px rgba(110,123,255,0.22), 0 0 48px rgba(110,123,255,0.16), 0 24px 80px rgba(0,0,0,0.6); }
           50%      { box-shadow: 0 0 0 1px rgba(110,123,255,0.38), 0 0 84px rgba(110,123,255,0.26), 0 24px 80px rgba(0,0,0,0.6); }
         }
+        /* ── ARRIVAL — the once-per-session "yes, I'm in" reveal ──────────
+           1. the glowing prompt blooms out of the dark
+           2. the living 3D map fades up behind it, flying down to the world
+           3. the rest of the page rises in, staggered                      */
+        @keyframes arrPrompt {
+          0%   { opacity: 0; transform: translateY(26px) scale(0.94); box-shadow: 0 0 0 1px rgba(110,123,255,0), 0 0 0 rgba(110,123,255,0); }
+          45%  { opacity: 1; transform: translateY(0) scale(1.015); box-shadow: 0 0 0 1px rgba(110,123,255,0.55), 0 0 120px rgba(110,123,255,0.5), 0 24px 80px rgba(0,0,0,0.6); }
+          100% { opacity: 1; transform: none; box-shadow: 0 0 0 1px rgba(110,123,255,0.22), 0 0 48px rgba(110,123,255,0.16), 0 24px 80px rgba(0,0,0,0.6); }
+        }
+        @keyframes arrMap { from { opacity: 0; } to { opacity: 1; } }
       `}</style>
 
-      {/* ── The living map ── */}
-      <LiveStoryMap stops={stops} hoverStops={hoverStops} generating={generating} />
+      {/* ── The living map — on arrival it blooms in behind the prompt while
+             the camera flies down from a tilted 3D close-up to the world ── */}
+      <div style={arrival ? { animation: "arrMap 1.8s ease 0.9s both" } : undefined}>
+        <LiveStoryMap stops={stops} hoverStops={hoverStops} generating={generating} flavor={flavor} introFly={arrival} />
+      </div>
 
       {/* ── Top nav (over the map) ── */}
-      <header className="relative z-20 mx-auto flex max-w-5xl items-center justify-between px-6 pt-6" style={{ animation: "genRise 0.6s ease both" }}>
+      <header className="relative z-20 mx-auto flex max-w-5xl items-center justify-between px-6 pt-6" style={{ animation: "genRise 0.6s ease both", animationDelay: arrival ? "2.1s" : "0s" }}>
         <div className="flex items-center gap-2">
           <div className="flex h-5 w-5 items-center justify-center rounded-full bg-iris shadow-[0_0_12px_rgba(110,123,255,0.6)]">
             <MapPin size={10} strokeWidth={2.5} color="white" />
@@ -164,7 +188,7 @@ export const GenerateExperience: React.FC = () => {
           <span className="ml-0.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-white/35">Studio</span>
         </div>
         <div className="flex items-center gap-2.5">
-          <Link href="/studio2" className="text-[12px] font-medium text-white/45 transition-colors hover:text-white/85">Blank map</Link>
+          <Link href="/studio2?blank=1" className="text-[12px] font-medium text-white/45 transition-colors hover:text-white/85">Blank map</Link>
           <Link href="/brand" className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.12] bg-white/[0.06] px-3 py-1.5 text-[11px] font-medium text-white/60 backdrop-blur transition-all hover:border-iris/50 hover:text-white">
             <Sparkles size={11} className="text-iris" /> Brand kit
           </Link>
@@ -174,7 +198,7 @@ export const GenerateExperience: React.FC = () => {
       {/* ── Center stage ── */}
       <div className="relative z-20 mx-auto flex max-w-3xl flex-col justify-center px-6 pb-8 pt-[7vh]" style={{ minHeight: "calc(100svh - 180px)" }}>
         {/* Kicker + headline — quiet, the prompt is the hero */}
-        <div className="mb-6 text-center" style={{ animation: "genRise 0.7s ease both", animationDelay: "80ms" }}>
+        <div className="mb-6 text-center" style={{ animation: "genRise 0.7s ease both", animationDelay: arrival ? "1.75s" : "80ms" }}>
           <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-iris/30 bg-white/[0.05] px-4 py-1.5 backdrop-blur-md">
             <span className="relative flex h-1.5 w-1.5">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-iris opacity-70" />
@@ -196,41 +220,15 @@ export const GenerateExperience: React.FC = () => {
           </h1>
         </div>
 
-        {/* Film / Still — what are we making today? */}
-        <div className="mb-3 flex items-center justify-center" style={{ animation: "genRise 0.8s ease both", animationDelay: "120ms" }}>
-          <div className="flex items-center rounded-xl border border-white/[0.1] bg-white/[0.05] p-1 backdrop-blur-md">
-            <button
-              onClick={() => setMode("film")}
-              title="A cinematic map animation — 4K MP4"
-              className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[12px] font-semibold transition-all ${mode === "film" ? "bg-iris text-white shadow-glow-iris" : "text-white/40 hover:text-white/75"}`}
-            >
-              <Clapperboard size={12} /> Film
-            </button>
-            <button
-              onClick={() => setMode("still")}
-              title="One perfect frame — PNG, JPG, WebP, SVG or PDF. Made for blog posts."
-              className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[12px] font-semibold transition-all ${mode === "still" ? "bg-iris text-white shadow-glow-iris" : "text-white/40 hover:text-white/75"}`}
-            >
-              <Camera size={12} /> Still image
-            </button>
-          </div>
-          {mode === "still" && (
-            <span className="ml-3 hidden text-[10.5px] text-[#7fe9ff] sm:block" style={{ animation: "genRise 0.3s ease both" }}>
-              ✦ for blogs & articles — annotate, then export PNG · JPG · WebP · SVG · PDF
-            </span>
-          )}
-        </div>
-
-        {/* The floating glass prompt — softly breathing glow */}
-        <div className="rounded-2xl" style={{ animation: "genRise 0.8s ease both, genGlowBreathe 4s ease-in-out 1s infinite", animationDelay: "160ms" }}>
+        {/* The floating glass prompt — the FIRST thing to appear on arrival,
+            blooming with a glow before the map even fades in */}
+        <div className="rounded-2xl" style={arrival
+          ? { animation: "arrPrompt 1.4s cubic-bezier(.3,1.1,.4,1) 0.25s both, genGlowBreathe 4s ease-in-out 2.2s infinite" }
+          : { animation: "genRise 0.8s ease both, genGlowBreathe 4s ease-in-out 1s infinite", animationDelay: "160ms" }}>
           <AiIdeaBox
             darkMode
             onPromptChange={setPrompt}
-            onGenerateStart={() => {
-              setGenerating(true);
-              // Still mode: tell the editor to open the Still Studio on arrival.
-              try { if (mode === "still") sessionStorage.setItem("mapanisy-open-still", "1"); } catch {}
-            }}
+            onGenerateStart={() => setGenerating(true)}
           />
         </div>
 

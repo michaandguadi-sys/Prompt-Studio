@@ -5,7 +5,7 @@ import { PricingCheckoutButton } from "@/components/PricingCheckoutButton/Pricin
 
 export const metadata = { title: "Pricing — Mapanisy" };
 
-const DISPLAY_ORDER = ["free", "creator", "teams", "custom"] as const;
+const DISPLAY_ORDER = ["free", "creator", "pro"] as const;
 
 export default function PricingPage() {
   return (
@@ -50,10 +50,14 @@ export default function PricingPage() {
 
       {/* ── Plans ───────────────────────────────────────────────────────── */}
       <section className="px-6 pb-24 max-w-6xl mx-auto">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+        <div className="mx-auto grid max-w-4xl grid-cols-1 gap-5 md:grid-cols-3">
           {DISPLAY_ORDER.map((key) => {
             const tier = TIERS[key];
             const isCreator = key === "creator";
+            const isPro = key === "pro";
+            const annualSave = tier.priceAnnualUSD
+              ? Math.round((1 - tier.priceAnnualUSD / (tier.priceUSD * 12)) * 100)
+              : 0;
             return (
               <div
                 key={key}
@@ -61,7 +65,9 @@ export default function PricingPage() {
                   "relative rounded-xl border flex flex-col gap-5 p-6 transition-all duration-200",
                   isCreator
                     ? "border-amber/50 bg-gradient-to-b from-amber/8 to-transparent shadow-glow-amber-sm"
-                    : "border-line/60 bg-paper-100 hover:border-line",
+                    : isPro
+                      ? "border-brand/40 bg-gradient-to-b from-brand/[0.06] to-transparent"
+                      : "border-line/60 bg-paper-100 hover:border-line",
                 ].join(" ")}
               >
                 {isCreator && (
@@ -69,27 +75,48 @@ export default function PricingPage() {
                     Most popular
                   </div>
                 )}
+                {isPro && (
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-graphite px-3 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white">
+                    Pay once · lifetime
+                  </div>
+                )}
 
                 {/* Price block */}
                 <div>
                   <div className="text-[9px] uppercase tracking-[0.35em] text-graphite/35 mb-3">{tier.label}</div>
-                  <div className="flex items-baseline gap-1.5">
-                    {tier.priceUSD === 0 ? (
-                      <span className="text-4xl font-light">Free</span>
-                    ) : (
-                      <>
+                  {tier.billing === "free" ? (
+                    <div className="flex items-baseline gap-1.5"><span className="text-4xl font-light">Free</span></div>
+                  ) : tier.billing === "lifetime" ? (
+                    <>
+                      <div className="flex items-baseline gap-1.5">
+                        <span className="text-4xl font-light">${tier.priceUSD}</span>
+                        <span className="text-graphite/35 text-sm">once</span>
+                      </div>
+                      <div className="mt-1.5 text-[11px] font-semibold text-brand">Lifetime — pay once, yours forever</div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-baseline gap-1.5">
                         <span className="text-4xl font-light">${tier.priceUSD}</span>
                         <span className="text-graphite/35 text-sm">/mo</span>
-                      </>
-                    )}
-                  </div>
+                      </div>
+                      {tier.priceAnnualUSD != null && (
+                        <div className="mt-1.5 flex items-center gap-2 text-[11px]">
+                          <span className="text-graphite/55">or <span className="font-semibold text-graphite">${tier.priceAnnualUSD}/yr</span></span>
+                          <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-emerald-600">Save {annualSave}%</span>
+                        </div>
+                      )}
+                    </>
+                  )}
                   <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-line bg-paper-100 px-2.5 py-1 text-[11px] text-graphite/60">
                     <Zap size={10} className="text-amber" />
-                    {tier.unlimited
-                      ? "Unlimited 4K renders"
-                      : tier.maxRenders != null
-                        ? `${tier.maxRenders} free animation${tier.maxRenders === 1 ? "" : "s"}`
-                        : `${tier.minutesPerMonth} min/mo`}
+                    {tier.earlyAccess
+                      ? "Everything + early access"
+                      : tier.unlimited
+                        ? "Unlimited 4K renders"
+                        : tier.maxRenders != null
+                          ? `${tier.maxRenders} free animation${tier.maxRenders === 1 ? "" : "s"}`
+                          : `${tier.minutesPerMonth} min/mo`}
                   </div>
                 </div>
 
@@ -104,7 +131,7 @@ export default function PricingPage() {
                 </ul>
 
                 {/* CTA */}
-                {tier.priceUSD === 0 ? (
+                {tier.billing === "free" ? (
                   <Link
                     href="/sign-up"
                     className="block rounded-lg py-2.5 text-center text-xs font-semibold bg-paper-100 text-graphite hover:bg-paper-200 border border-line transition-colors"
@@ -114,30 +141,13 @@ export default function PricingPage() {
                 ) : (
                   <PricingCheckoutButton
                     priceId={tier.stripePriceId}
-                    label={`Get ${tier.label}`}
+                    label={tier.billing === "lifetime" ? "Get lifetime access" : `Get ${tier.label}`}
                     highlighted={isCreator}
                   />
                 )}
               </div>
             );
           })}
-        </div>
-
-        {/* Enterprise strip */}
-        <div className="mt-6 rounded-xl border border-line/60 bg-paper-100 p-7 flex flex-col md:flex-row items-center justify-between gap-5">
-          <div>
-            <div className="text-sm font-semibold text-graphite mb-1">Enterprise</div>
-            <p className="text-xs text-graphite/45 max-w-md">
-              Need team seats at scale, white-label, an API, or a custom production
-              deal? We&apos;ll set up a plan that fits your pipeline.
-            </p>
-          </div>
-          <a
-            href="mailto:michaandguadi@gmail.com?subject=Mapanisy Enterprise Plan"
-            className="shrink-0 rounded-lg border border-amber/30 bg-amber/8 px-5 py-2.5 text-xs font-semibold text-amber hover:bg-amber/15 transition-colors"
-          >
-            Contact us →
-          </a>
         </div>
       </section>
 

@@ -1,25 +1,25 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { X, Minimize2, Maximize2, AlertTriangle } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { X, Minimize2, Maximize2, AlertTriangle, Clock, Coins } from "lucide-react";
 
 /**
- * THE DEVELOP — cinematic loading experience for animation generation.
- * Full-screen while building, minimizable to a floating pill so the user
- * can browse the home while the AI works. Never blocks navigation.
+ * THE BUILD — a full-screen, cinematic loading experience for map generation.
+ *
+ * The whole viewport becomes a live 3D cityscape being SCANNED and BUILT: a
+ * perspective grid of buildings rises out of the ground as a scan-plane sweeps
+ * across it (the "we're building your map" promise, rendered), with the AI's
+ * phase, a real ETA countdown, and a live token/credit meter overlaid. Pure
+ * canvas — one rAF loop — so it costs nothing while the AI works. Minimizable to
+ * a floating pill so the user can keep browsing; never blocks navigation.
  */
 
-const STATUS = [
-  "Scouting the location…",
-  "Researching the facts…",
-  "Framing the establishing shot…",
-  "Plotting the camera move…",
-  "Drawing the route…",
-  "Highlighting the key regions…",
-  "Placing labels & markers…",
-  "Colour-grading the scene…",
-  "Striking the cinematic print…",
-];
+/** Render at document.body — the overlay is mounted inside the home page's
+ *  glass prompt card, whose backdrop-filter traps `position:fixed` children in
+ *  a local stacking context. A portal escapes that; z-[300] sits above chrome. */
+const portal = (node: React.ReactNode) =>
+  typeof document === "undefined" ? null : createPortal(node, document.body);
 
 const DIRECTOR_STATUS = [
   "Director researching the story…",
@@ -34,8 +34,20 @@ const COMPOSER_STATUS = [
   "Composer designing the animation…",
   "Framing the establishing shot…",
   "Plotting the camera moves…",
+  "Building the 3D terrain…",
+  "Raising the city blocks…",
   "Placing labels & markers…",
   "Timing each beat…",
+  "Colour-grading the scene…",
+  "Striking the cinematic print…",
+];
+
+const STATUS = [
+  "Scouting the location…",
+  "Building the 3D terrain…",
+  "Raising the city…",
+  "Drawing the route…",
+  "Placing labels & markers…",
   "Colour-grading the scene…",
   "Striking the cinematic print…",
 ];
@@ -57,23 +69,126 @@ const FACTS = [
   "The shortest land border runs ~85 m, between Italy and the Vatican.",
 ];
 
-const CITIES = [
-  { x: 60, y: 250, d: 0 }, { x: 300, y: 120, d: 0.9 },
-  { x: 540, y: 70, d: 1.8 }, { x: 470, y: 240, d: 1.3 },
-];
+/**
+ * BuildScape — a live 3D city being built. A perspective grid recedes to a
+ * horizon; buildings rise as a scan-plane sweeps up the grid, glowing along the
+ * scan line; a route arc draws over the top; the camera slowly orbits. One
+ * canvas, one rAF loop. Reduced-motion: renders a calm static frame.
+ */
+const BuildScape: React.FC = () => {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const cv = ref.current;
+    if (!cv) return;
+    const ctx = cv.getContext("2d");
+    if (!ctx) return;
+    const reduce = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    let raf = 0;
+    const t0 = performance.now();
+    const COLS = 34, DEPTH = 24;
 
-const CellMap: React.FC<{ seed: number }> = ({ seed }) => {
-  const blobs = ["M14 18 L30 15 L36 26 L27 36 L15 31 Z", "M44 24 L58 22 L62 33 L52 41 L43 33 Z"];
-  const route = ["M10 40 C 26 28, 40 30, 60 16", "M12 14 C 28 26, 42 22, 60 38"][seed % 2];
+    const frame = (ts: number) => {
+      raf = requestAnimationFrame(frame);
+      if (typeof document !== "undefined" && document.hidden) return;
+      const t = reduce ? 6 : (ts - t0) / 1000;
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const W = cv.clientWidth, H = cv.clientHeight;
+      if (!W || !H) return;
+      if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) {
+        cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+
+      const cx = W / 2;
+      const horizon = H * 0.40;
+      const yaw = reduce ? 0.06 : Math.sin(t * 0.16) * 0.16;   // slow orbit
+      const scan = reduce ? 0.7 : (t * 0.16) % 1.4;            // 0..1.4 build sweep (holds at top)
+
+      // Draw far → near (painter's order).
+      for (let d = 0; d < DEPTH; d++) {
+        const p = d / (DEPTH - 1);                              // 0 far .. 1 near
+        const persp = 0.12 + p * p * 1.2;
+        const rowY = horizon + Math.pow(p, 1.35) * (H - horizon);
+        const rowW = W * (0.26 + p * 1.6);
+
+        // ground grid line
+        ctx.strokeStyle = `rgba(110,123,255,${0.04 + persp * 0.06})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(cx - rowW / 2, rowY); ctx.lineTo(cx + rowW / 2, rowY); ctx.stroke();
+
+        for (let c = 0; c < COLS; c++) {
+          const fx = c / (COLS - 1) - 0.5;
+          const sx = cx + (fx + yaw * (1 - p) * 0.7) * rowW;
+          if (sx < -60 || sx > W + 60) continue;
+          const seed = c * 12.9898 + d * 78.233;
+          const rnd = (n: number) => { const v = Math.sin(seed + n * 43.1) * 43758.5453; return v - Math.floor(v); };
+          if (rnd(9) > 0.86) continue; // some empty plots — reads as a real city
+          const wave = (Math.sin(fx * 6 + t * 0.8) + Math.cos(p * 7 - t * 0.6)) * 0.5;
+          const rise = Math.max(0, Math.min(1, (scan - p) * 4 + 0.12));       // 0..1 built as scan passes
+          const near = Math.max(0, 1 - Math.abs(scan - p) * 5.5);             // glow at the scan line
+          const baseH = (14 + rnd(1) * 52 + wave * 16) * persp;
+          const h = baseH * (0.14 + rise * 0.86);
+          const bw = Math.max(1.4, (rowW / COLS) * (0.5 + rnd(2) * 0.45));
+          const topY = rowY - h;
+          const lit = Math.max(near, rise > 0.03 && rise < 0.97 ? 0.28 : 0);
+          const alpha = Math.min(0.94, 0.14 + persp * 0.5 + lit * 0.5);
+          const g = ctx.createLinearGradient(0, topY, 0, rowY);
+          g.addColorStop(0, `rgba(${(120 + lit * 135) | 0},${(150 + lit * 90) | 0},255,${alpha})`);
+          g.addColorStop(1, `rgba(22,32,78,${alpha * 0.34})`);
+          ctx.fillStyle = g;
+          ctx.fillRect(sx - bw / 2, topY, bw, h);
+          if (lit > 0.22) { // hot roofline as the scan builds it
+            ctx.fillStyle = `rgba(${(160 + lit * 95) | 0},255,255,${lit})`;
+            ctx.fillRect(sx - bw / 2, topY - 1.3, bw, 2.2);
+          }
+        }
+      }
+
+      // The scan sweep band + line.
+      const sp = Math.min(1, scan);
+      const scanY = horizon + Math.pow(sp, 1.35) * (H - horizon);
+      const band = ctx.createLinearGradient(0, scanY - 46, 0, scanY + 12);
+      band.addColorStop(0, "rgba(47,224,255,0)");
+      band.addColorStop(1, "rgba(47,224,255,0.15)");
+      ctx.fillStyle = band; ctx.fillRect(0, scanY - 46, W, 58);
+      ctx.strokeStyle = "rgba(150,255,255,0.45)"; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.moveTo(0, scanY); ctx.lineTo(W, scanY); ctx.stroke();
+
+      // A glowing route arc drawing across the built city.
+      const rp = reduce ? 1 : (t * 0.4) % 1;
+      const ax = W * 0.18, ay = horizon + (H - horizon) * 0.62;
+      const bx = W * 0.82, by = horizon + (H - horizon) * 0.5;
+      const mx = W * 0.5, my = horizon + (H - horizon) * 0.16;
+      ctx.strokeStyle = "rgba(110,123,255,0.9)"; ctx.lineWidth = 2.4; ctx.lineCap = "round";
+      ctx.shadowColor = "rgba(110,123,255,0.8)"; ctx.shadowBlur = 12;
+      ctx.beginPath(); ctx.moveTo(ax, ay);
+      const steps = 40;
+      for (let i = 1; i <= steps * rp; i++) {
+        const u = i / steps, v = 1 - u;
+        ctx.lineTo(v * v * ax + 2 * v * u * mx + u * u * bx, v * v * ay + 2 * v * u * my + u * u * by);
+      }
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    };
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, []);
   return (
-    <svg viewBox="0 0 72 50" className="absolute inset-0 h-full w-full" preserveAspectRatio="xMidYMid slice">
-      <rect x="0" y="0" width="72" height="50" fill="#0a1024" />
-      {[12, 24, 36].map((y) => <line key={y} x1="0" y1={y} x2="72" y2={y} stroke="#9CA6FF" strokeOpacity="0.07" strokeWidth="0.5" />)}
-      <path d={blobs[seed % 2]} fill="#6E7BFF" fillOpacity="0.22" stroke="#9CA6FF" strokeOpacity="0.6" strokeWidth="0.6" />
-      <path d={route} fill="none" stroke="#2FE0FF" strokeWidth="1.1" strokeLinecap="round" opacity="0.8" />
-    </svg>
+    <canvas
+      ref={ref}
+      className="pointer-events-none absolute inset-0 h-full w-full"
+      style={{ maskImage: "linear-gradient(to bottom, transparent, #000 16%, #000 86%, transparent)", WebkitMaskImage: "linear-gradient(to bottom, transparent, #000 16%, #000 86%, transparent)" }}
+    />
   );
 };
+
+/** Human "3s" / "1m 20s" from seconds. */
+function fmt(sec: number): string {
+  sec = Math.max(0, Math.round(sec));
+  if (sec < 60) return `${sec}s`;
+  return `${Math.floor(sec / 60)}m ${String(sec % 60).padStart(2, "0")}s`;
+}
 
 export const GeneratingOverlay: React.FC<{
   open: boolean;
@@ -84,76 +199,77 @@ export const GeneratingOverlay: React.FC<{
   phase?: "director" | "composer";
   /** Post-generation warning to surface (e.g. truncation). */
   warning?: string | null;
-  /** Estimated token count — shown as "~Xk tokens" near the status. */
+  /** Estimated token count — drives the live "credits used" meter. */
   estimatedTokens?: number;
 }> = ({ open, idea, styleName, current, total, phase, warning, estimatedTokens }) => {
   const [statusI, setStatusI] = useState(0);
   const [factI, setFactI] = useState(0);
-  const [tick, setTick] = useState(0);
   const [minimized, setMinimized] = useState(false);
   const [warningDismissed, setWarningDismissed] = useState(false);
+  const [elapsedMs, setElapsedMs] = useState(0);
 
   const multi = (total ?? 0) > 1;
-  const cellCount = multi ? Math.min(total!, 8) : 4;
-  const activeCell = multi ? Math.min((current ?? 1) - 1, cellCount - 1) : tick % cellCount;
   const pct = multi ? Math.round(((current ?? 1) / total!) * 100) : undefined;
-  const timecode = `00:0${Math.min(9, Math.floor(tick / 2))}:${String((tick * 7) % 24).padStart(2, "0")}`;
-
   const statusArr = phase === "director" ? DIRECTOR_STATUS : phase === "composer" ? COMPOSER_STATUS : STATUS;
 
+  // A single scene runs ~19s (director + composer, GLM-class). Multi-scene
+  // stories run per-scene. This is the ETA baseline; it's honest — it counts
+  // down, and if the model runs long it holds at "almost there".
+  const estTotalMs = (multi ? total! : 1) * 19_000;
+  const timeFrac = Math.min(1, elapsedMs / estTotalMs);
+  // Real multi-scene progress when we have it; else the elapsed estimate capped
+  // at 96% so the bar never claims "done" before it is.
+  const progress = multi && pct !== undefined ? pct / 100 : Math.min(0.96, timeFrac);
+  const remainSec = Math.max(0, estTotalMs - elapsedMs) / 1000;
+  // Live token/credit meter — ticks toward the estimate over the elapsed time.
+  const liveTokens = estimatedTokens && estimatedTokens > 0
+    ? Math.round(estimatedTokens * Math.min(1, timeFrac * 1.02))
+    : 0;
+
   useEffect(() => {
-    if (!open) { setMinimized(false); setWarningDismissed(false); return; }
+    if (!open) { setMinimized(false); setWarningDismissed(false); setElapsedMs(0); return; }
     setStatusI(0);
     setFactI(Math.floor(Math.random() * FACTS.length));
-    const s = setInterval(() => setStatusI((i) => (i + 1) % statusArr.length), 1500);
-    const f = setInterval(() => setFactI((i) => (i + 1) % FACTS.length), 3800);
-    const c = setInterval(() => setTick((i) => i + 1), 900);
-    return () => { clearInterval(s); clearInterval(f); clearInterval(c); };
+    const t0 = performance.now();
+    const s = setInterval(() => setStatusI((i) => (i + 1) % statusArr.length), 1600);
+    const f = setInterval(() => setFactI((i) => (i + 1) % FACTS.length), 5600);
+    const e = setInterval(() => setElapsedMs(performance.now() - t0), 120);
+    return () => { clearInterval(s); clearInterval(f); clearInterval(e); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   useEffect(() => { setStatusI(0); }, [phase]);
 
   if (!open) return null;
 
-  // ── FLOATING PILL (minimized state) ──────────────────────────────────────
+  const tokenLabel = liveTokens >= 1000 ? `${(liveTokens / 1000).toFixed(1)}k` : `${liveTokens}`;
+  const estLabel = estimatedTokens ? (estimatedTokens >= 1000 ? `${Math.round(estimatedTokens / 1000)}k` : `${estimatedTokens}`) : "";
+
+  // ── FLOATING PILL (minimized) ────────────────────────────────────────────
   if (minimized) {
-    return (
+    return portal(
       <div
-        className="fixed bottom-5 right-5 z-[120] flex items-center gap-3 rounded-2xl border border-[#6E7BFF]/30 bg-[#06070d]/95 px-4 py-3 shadow-[0_8px_32px_rgba(0,0,0,0.7)] backdrop-blur-xl"
-        style={{ animation: "pillRise .3s cubic-bezier(.34,1.56,.64,1)" }}
+        className="fixed bottom-5 right-5 z-[300] flex items-center gap-3 rounded-2xl border border-[#6E7BFF]/30 bg-[#06070d]/95 px-4 py-3 shadow-[0_8px_32px_rgba(0,0,0,0.7)] backdrop-blur-xl"
+        style={{ animation: "goPillRise .3s cubic-bezier(.34,1.56,.64,1)" }}
       >
-        <style>{`
-          @keyframes pillRise{from{opacity:0;transform:translateY(16px) scale(.92)}to{opacity:1;transform:none}}
-          @keyframes pillRingSpin{to{transform:rotate(360deg)}}
-        `}</style>
-        {/* Progress ring indicator */}
+        <style>{`@keyframes goPillRise{from{opacity:0;transform:translateY(16px) scale(.92)}to{opacity:1;transform:none}}@keyframes goRingSpin{to{transform:rotate(360deg)}}`}</style>
         <div className="relative flex h-8 w-8 shrink-0 items-center justify-center">
-          <svg
-            className="absolute inset-0"
-            viewBox="0 0 32 32"
-            style={{ animation: "pillRingSpin 1.6s linear infinite" }}
-          >
+          <svg className="absolute inset-0" viewBox="0 0 32 32" style={{ animation: "goRingSpin 1.6s linear infinite" }}>
             <circle cx="16" cy="16" r="13" fill="none" stroke="rgba(110,123,255,0.15)" strokeWidth="2" />
-            <circle
-              cx="16" cy="16" r="13"
-              fill="none"
-              stroke="#6E7BFF"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeDasharray={multi && pct !== undefined ? `${2 * Math.PI * 13 * pct / 100} ${2 * Math.PI * 13 * (1 - pct / 100)}` : "20 62"}
-            />
+            <circle cx="16" cy="16" r="13" fill="none" stroke="#6E7BFF" strokeWidth="2" strokeLinecap="round"
+              strokeDasharray={`${2 * Math.PI * 13 * progress} ${2 * Math.PI * 13 * (1 - progress)}`} />
           </svg>
           <span className="relative h-2 w-2 rounded-full bg-[#6E7BFF]" />
         </div>
         <div className="min-w-0">
           <div className="text-[12px] font-semibold text-white/90">
-            {phase === "director" ? "Director researching…" : phase === "composer" ? "Composer building…" : "Building animation…"}
+            {phase === "director" ? "Director researching…" : phase === "composer" ? "Composer building…" : "Building your map…"}
           </div>
-          {idea && <div className="mt-0.5 max-w-[200px] truncate text-[10px] text-white/40">"{idea}"</div>}
+          <div className="mt-0.5 flex items-center gap-2 text-[10px] text-white/40">
+            <span className="tabular-nums">~{fmt(remainSec)} left</span>
+            {liveTokens > 0 && <span className="tabular-nums">· {tokenLabel} tok</span>}
+          </div>
         </div>
-        {multi && pct !== undefined && (
-          <span className="text-[10px] font-semibold tabular-nums text-[#9CA6FF]/70">{pct}%</span>
-        )}
         <button
           onClick={() => setMinimized(false)}
           className="ml-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/50 transition-colors hover:bg-white/10 hover:text-white"
@@ -165,168 +281,111 @@ export const GeneratingOverlay: React.FC<{
     );
   }
 
-  // ── FULL SCREEN OVERLAY ───────────────────────────────────────────────────
-  return (
-    <div className="fixed inset-0 z-[120] flex flex-col items-center justify-center overflow-hidden bg-[#06070d] px-6" style={{ animation: "dvFade .3s ease" }}>
+  // ── FULLSCREEN BUILD ─────────────────────────────────────────────────────
+  return portal(
+    <div className="fixed inset-0 z-[300] overflow-y-auto" style={{ animation: "goFade .35s ease", background: "#04060f" }}>
       <style>{`
-        @keyframes dvFade  { from{opacity:0} to{opacity:1} }
-        @keyframes dvRise  { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
-        @keyframes dvDraw  { 0%{stroke-dashoffset:1100} 60%{stroke-dashoffset:0} 100%{stroke-dashoffset:0} }
-        @keyframes dvPing  { 0%{r:4;opacity:.9} 70%{r:34;opacity:0} 100%{opacity:0} }
-        @keyframes dvDot   { 0%{offset-distance:0%} 60%{offset-distance:100%} 100%{offset-distance:100%} }
-        @keyframes dvScan  { 0%{transform:translateX(-80px);opacity:0} 50%{opacity:.55} 100%{transform:translateX(760px);opacity:0} }
-        @keyframes dvSpin  { to{transform:rotate(360deg)} }
-        @keyframes dvPiece { 0%{opacity:0;transform:translateY(10px) scale(.9)} 55%{opacity:.95;transform:translateY(0) scale(1)} 100%{opacity:.9} }
-        @keyframes dvKen   { 0%{transform:scale(1.08) translate(1%,-1%)} 100%{transform:scale(1.16) translate(-1.5%,1.5%)} }
-        @keyframes dvRecBlink { 0%,100%{opacity:1} 50%{opacity:.25} }
-        @keyframes dvShimmer  { 0%{transform:translateX(-100%)} 100%{transform:translateX(220%)} }
-        .dv-status { animation: dvRise .45s ease }
+        @keyframes goFade { from{opacity:0} to{opacity:1} }
+        @keyframes goRise { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:none} }
+        @keyframes goBar  { 0%{transform:translateX(-100%)} 100%{transform:translateX(320%)} }
+        @keyframes goSpin { to{transform:rotate(360deg)} }
+        .go-status{animation:goRise .4s ease}
+        @media (prefers-reduced-motion: reduce){ .go-anim{animation:none!important} }
       `}</style>
 
-      {/* Minimize button — top right */}
+      {/* the live 3D city being built */}
+      <BuildScape />
+      {/* cinematic grade */}
+      <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(90% 70% at 50% 12%, rgba(110,123,255,0.12), transparent 60%), linear-gradient(to bottom, rgba(4,6,15,0.4), transparent 30%, transparent 60%, rgba(4,6,15,0.85))" }} />
+
+      {/* minimize */}
       <button
         onClick={() => setMinimized(true)}
-        className="absolute right-5 top-5 z-20 flex items-center gap-1.5 rounded-xl border border-white/12 bg-white/5 px-3 py-1.5 text-[11px] font-medium text-white/50 backdrop-blur transition-colors hover:bg-white/10 hover:text-white"
-        title="Minimize — AI keeps building in the background"
+        className="absolute right-5 top-5 z-10 flex h-9 w-9 items-center justify-center rounded-xl border border-white/12 bg-white/5 text-white/55 backdrop-blur transition-colors hover:bg-white/10 hover:text-white"
+        title="Minimize — keeps building in the background"
       >
-        <Minimize2 size={12} /> Minimize — keep building
+        <Minimize2 size={15} />
       </button>
 
-      {/* Aurora + letterbox */}
-      <div className="pointer-events-none absolute inset-0" aria-hidden style={{ background: "radial-gradient(120% 70% at 50% -10%, rgba(110,123,255,0.2), transparent 60%), radial-gradient(90% 60% at 50% 120%, rgba(47,224,255,0.12), transparent 55%)" }} />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-[7vh] bg-black/70" aria-hidden />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[7vh] bg-black/70" aria-hidden />
-
-      {/* Eyebrow */}
-      <div className="relative z-10 mb-3 flex items-center gap-2.5" style={{ animation: "dvRise .4s ease" }}>
-        <span className="h-px w-8 bg-gradient-to-r from-transparent to-[#6E7BFF]" />
-        <span className="text-[10px] font-semibold uppercase tracking-[0.4em] gradient-text">{multi ? "Developing your film" : "Developing your shot"}</span>
-        <span className="h-px w-8 bg-gradient-to-l from-transparent to-[#2FE0FF]" />
-      </div>
-
-      {/* Two-phase pipeline indicator */}
-      {phase && !multi && (
-        <div className="relative z-10 mb-3 flex items-center justify-center gap-2" style={{ animation: "dvRise .5s ease" }}>
-          <div style={{ display:"flex", alignItems:"center", gap:6, borderRadius:999, padding:"3px 11px", fontSize:11, fontWeight:600, border: phase==="director" ? "1px solid rgba(110,123,255,0.45)" : "1px solid rgba(47,224,255,0.28)", background: phase==="director" ? "rgba(110,123,255,0.13)" : "rgba(47,224,255,0.07)", color: phase==="director" ? "#9CA6FF" : "rgba(47,224,255,0.7)", transition:"all 0.5s ease" }}>
-            {phase === "director" ? (
-              <span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#6E7BFF] opacity-60" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[#6E7BFF]" /></span>
-            ) : <span style={{ fontSize:9, color:"#2FE0FF" }}>✓</span>}
-            Phase 1 · Director
-          </div>
-          <span style={{ color:"rgba(255,255,255,0.22)", fontSize:14 }}>→</span>
-          <div style={{ display:"flex", alignItems:"center", gap:6, borderRadius:999, padding:"3px 11px", fontSize:11, fontWeight:600, border: phase==="composer" ? "1px solid rgba(47,224,255,0.4)" : "1px solid rgba(255,255,255,0.08)", background: phase==="composer" ? "rgba(47,224,255,0.1)" : "rgba(255,255,255,0.03)", color: phase==="composer" ? "#2FE0FF" : "rgba(255,255,255,0.2)", transition:"all 0.5s ease" }}>
+      {/* centered content */}
+      <div className="relative z-[2] flex min-h-full flex-col items-center justify-center px-6 py-16 text-center">
+        {/* phase pills */}
+        <div className="go-anim flex items-center gap-1.5" style={{ animation: "goRise .5s ease both" }}>
+          <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-semibold transition-all ${phase === "director" ? "border-[#6E7BFF]/50 bg-[#6E7BFF]/15 text-[#9CA6FF]" : "border-white/10 bg-white/[0.03] text-white/40"}`}>
+            {phase === "director"
+              ? <span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#6E7BFF] opacity-60" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[#6E7BFF]" /></span>
+              : <span className="text-[10px] text-[#2FE0FF]">✓</span>}
+            Director
+          </span>
+          <span className="text-white/25">→</span>
+          <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-semibold transition-all ${phase === "composer" ? "border-[#2FE0FF]/45 bg-[#2FE0FF]/10 text-[#2FE0FF]" : "border-white/10 bg-white/[0.03] text-white/40"}`}>
             {phase === "composer" && <span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#2FE0FF] opacity-60" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[#2FE0FF]" /></span>}
-            Phase 2 · Composer
-          </div>
-          {estimatedTokens && estimatedTokens > 0 && (
-            <span className="ml-1 rounded-full border border-white/8 bg-white/4 px-2 py-0.5 text-[9px] font-medium text-white/30">
-              ~{estimatedTokens >= 1000 ? `${Math.round(estimatedTokens / 1000)}k` : estimatedTokens} tokens
-            </span>
+            Composer
+          </span>
+          {styleName && <span className="ml-1 truncate rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] text-white/55">{styleName}</span>}
+        </div>
+
+        {/* headline status */}
+        <h2 key={statusI} className="go-status mt-6 max-w-2xl text-[clamp(1.5rem,4vw,2.6rem)] font-medium leading-tight tracking-[-0.02em] text-white" style={{ fontFamily: "Newsreader, 'Playfair Display', Georgia, serif", textShadow: "0 2px 30px rgba(4,6,16,0.7)" }}>
+          {statusArr[statusI % statusArr.length]}
+        </h2>
+        {idea && <div className="mt-3 max-w-lg truncate text-[13px] italic text-white/45">“{idea}”</div>}
+
+        {/* progress bar */}
+        <div className="mt-8 w-full max-w-md">
+          {multi && (
+            <div className="mb-1.5 flex items-center justify-between text-[10.5px] font-medium text-white/45">
+              <span>Shot {Math.min(current ?? 1, total!)} of {total}</span>
+              <span className="tabular-nums">{pct}%</span>
+            </div>
           )}
-        </div>
-      )}
+          <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
+            {multi
+              ? <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.max(4, (pct ?? 0))}%`, background: "linear-gradient(90deg,#6E7BFF,#2FE0FF,#B57BFF)" }} />
+              : <div className="h-full rounded-full transition-[width] duration-300 ease-out" style={{ width: `${Math.max(4, progress * 100)}%`, background: "linear-gradient(90deg,#6E7BFF,#2FE0FF,#B57BFF)" }} />}
+          </div>
 
-      {/* The cinema frame */}
-      <div className="relative z-10 w-[min(92vw,720px)]" style={{ animation: "dvRise .5s ease" }}>
-        <div className="relative overflow-hidden rounded-2xl border border-white/12 bg-black" style={{ aspectRatio:"16/9", boxShadow:"0 40px 120px -30px rgba(0,0,0,0.9), 0 0 70px -24px rgba(110,123,255,0.55)" }}>
-          <div className="absolute inset-0" style={{ animation:"dvKen 9s ease-in-out infinite alternate" }}>
-            <svg viewBox="0 0 600 338" className="absolute inset-0 h-full w-full" preserveAspectRatio="xMidYMid slice">
-              <defs>
-                <linearGradient id="dvRoute" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#6E7BFF" /><stop offset="55%" stopColor="#B57BFF" /><stop offset="100%" stopColor="#2FE0FF" /></linearGradient>
-                <radialGradient id="dvSky" cx="50%" cy="0%" r="90%"><stop offset="0%" stopColor="#1c2547" /><stop offset="70%" stopColor="#070b18" /></radialGradient>
-                <radialGradient id="dvVig" cx="50%" cy="50%" r="70%"><stop offset="55%" stopColor="#000" stopOpacity="0" /><stop offset="100%" stopColor="#000" stopOpacity="0.6" /></radialGradient>
-              </defs>
-              <rect x="0" y="0" width="600" height="338" fill="url(#dvSky)" />
-              {[48,96,144,192,240,288].map((y)=><line key={"h"+y} x1="0" y1={y} x2="600" y2={y} stroke="#9CA6FF" strokeOpacity="0.05" strokeWidth="0.6" />)}
-              {[60,150,240,330,420,510].map((x)=><line key={"v"+x} x1={x} y1="0" x2={x} y2="338" stroke="#9CA6FF" strokeOpacity="0.05" strokeWidth="0.6" />)}
-              {[{d:"M70 130 L130 118 L156 168 L124 214 L78 196 Z",delay:0},{d:"M250 84 L320 96 L340 150 L294 188 L246 150 Z",delay:0.5},{d:"M430 168 L510 156 L536 212 L474 248 L432 210 Z",delay:1},{d:"M170 238 L240 224 L268 272 L214 302 L164 270 Z",delay:1.5}].map((p,i)=>(
-                <path key={i} d={p.d} fill="#6E7BFF" fillOpacity="0.16" stroke="#9CA6FF" strokeWidth="0.9" strokeOpacity="0.5" style={{transformBox:"fill-box",transformOrigin:"center",animation:`dvPiece 3s ease-out ${p.delay}s infinite`} as React.CSSProperties} />
-              ))}
-              <g style={{transformOrigin:"300px 170px",animation:"dvSpin 16s linear infinite",opacity:0.1}}>
-                <circle cx="300" cy="170" r="130" fill="none" stroke="#9CA6FF" strokeWidth="0.7" strokeDasharray="3 6" />
-                <line x1="300" y1="40" x2="300" y2="56" stroke="#9CA6FF" strokeWidth="1" />
-              </g>
-              <path d="M60 250 C 180 200, 220 110, 300 120 S 470 100, 540 70" fill="none" stroke="url(#dvRoute)" strokeWidth="3" strokeLinecap="round" strokeDasharray="1100" style={{animation:"dvDraw 3.2s ease-in-out infinite",filter:"drop-shadow(0 0 6px rgba(110,123,255,0.6))"}} />
-              <circle r="4" fill="#2FE0FF" style={{offsetPath:"path('M60 250 C 180 200, 220 110, 300 120 S 470 100, 540 70')",animation:"dvDot 3.2s ease-in-out infinite",filter:"drop-shadow(0 0 6px #2FE0FF)"} as React.CSSProperties} />
-              {CITIES.map((c,i)=>(
-                <g key={i}><circle cx={c.x} cy={c.y} fill="none" stroke="#9CA6FF" strokeWidth="1.4" style={{animation:`dvPing 2.6s ease-out ${c.d}s infinite`}} /><circle cx={c.x} cy={c.y} r="2.6" fill="#fff" /></g>
-              ))}
-              <rect x="-80" y="0" width="80" height="338" fill="#9CA6FF" opacity="0.12" style={{animation:"dvScan 3s ease-in-out infinite"}} />
-              <rect x="0" y="0" width="600" height="338" fill="url(#dvVig)" />
-            </svg>
-            <div className="absolute inset-0" style={{backgroundImage:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E\")",mixBlendMode:"overlay",opacity:0.06}} />
-          </div>
-          {/* HUD */}
-          <div className="absolute left-4 top-3 flex items-center gap-1.5 rounded-md bg-black/45 px-2 py-1 backdrop-blur-sm">
-            <span className="h-2 w-2 rounded-full bg-red-500" style={{animation:"dvRecBlink 1.1s ease-in-out infinite"}} />
-            <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/80">Rec</span>
-            <span className="ml-1 font-mono text-[10px] tabular-nums text-white/55">{timecode}</span>
-          </div>
-          <div className="absolute right-4 top-3 rounded-md border border-white/10 bg-black/40 px-2 py-1 text-[9px] font-semibold tracking-wide text-white/70 backdrop-blur-sm">4K · 24FPS</div>
-          <div className="absolute left-4 bottom-3 rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-[8px] font-semibold tracking-wide text-white/70 backdrop-blur-sm">
-            {phase==="director" ? "RESEARCHING" : phase==="composer" ? "COMPOSING" : "ESTABLISHING"}
-          </div>
-          {[["left-2 top-2","border-l border-t"],["right-2 top-2","border-r border-t"],["left-2 bottom-2","border-l border-b"],["right-2 bottom-2","border-r border-b"]].map(([pos,b],i)=>(
-            <span key={i} className={`pointer-events-none absolute ${pos} h-4 w-4 ${b} border-white/25`} />
-          ))}
-        </div>
-
-        {/* Filmstrip */}
-        <div className="relative mt-4 overflow-hidden rounded-xl border border-white/10 bg-[#0a0c16] px-3 py-2.5">
-          <div className="mb-1.5 flex justify-between px-0.5">{Array.from({length:16}).map((_,i)=><span key={i} className="h-1.5 w-2.5 rounded-[2px] bg-white/10" />)}</div>
-          <div className="flex gap-2">
-            {Array.from({length:cellCount}).map((_,i)=>{
-              const done=i<activeCell, active=i===activeCell;
-              return (
-                <div key={i} className={`relative flex-1 overflow-hidden rounded-md border transition-all duration-300 ${active ? "border-[#6E7BFF] ring-1 ring-[#6E7BFF]/50" : done ? "border-[#2FE0FF]/40" : "border-white/8"}`} style={{aspectRatio:"16/9",opacity:done?1:active?1:0.4}}>
-                  <CellMap seed={i} />
-                  {!done&&!active&&<div className="absolute inset-0 bg-black/55" />}
-                  {active&&<div className="absolute inset-0" style={{background:"linear-gradient(100deg,transparent,rgba(110,123,255,0.35),transparent)",animation:"dvShimmer 1.4s ease-in-out infinite"}} />}
-                  {done&&<div className="absolute right-1 top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-[#2FE0FF] text-[8px] font-bold text-[#06121a]">✓</div>}
-                  <div className="absolute bottom-0.5 left-1 text-[8px] font-bold tracking-wide text-white/70">{String(i+1).padStart(2,"0")}</div>
+          {/* live meters: ETA + tokens/credits */}
+          <div className="mt-4 flex items-stretch justify-center gap-2.5">
+            <div className="flex flex-1 items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2.5 backdrop-blur">
+              <Clock size={15} className="shrink-0 text-[#9CA6FF]" />
+              <div className="min-w-0 text-left">
+                <div className="text-[9px] font-semibold uppercase tracking-[0.16em] text-white/35">Est. wait</div>
+                <div className="tabular-nums text-[15px] font-semibold text-white">{remainSec > 0.5 ? `~${fmt(remainSec)}` : "almost there…"}</div>
+              </div>
+            </div>
+            {liveTokens > 0 && (
+              <div className="flex flex-1 items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.04] px-3.5 py-2.5 backdrop-blur">
+                <Coins size={15} className="shrink-0 text-[#2FE0FF]" />
+                <div className="min-w-0 text-left">
+                  <div className="text-[9px] font-semibold uppercase tracking-[0.16em] text-white/35">Tokens used</div>
+                  <div className="tabular-nums text-[15px] font-semibold text-white">{tokenLabel}<span className="text-[11px] font-normal text-white/35"> / ~{estLabel}</span></div>
                 </div>
-              );
-            })}
+              </div>
+            )}
           </div>
-          <div className="mt-1.5 flex justify-between px-0.5">{Array.from({length:16}).map((_,i)=><span key={i} className="h-1.5 w-2.5 rounded-[2px] bg-white/10" />)}</div>
-        </div>
-      </div>
-
-      {/* Status + idea */}
-      <div className="relative z-10 mt-5 w-[min(92vw,720px)] text-center">
-        <div className="flex items-center justify-center gap-2">
-          <span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#6E7BFF] opacity-60" /><span className="relative inline-flex h-2 w-2 rounded-full bg-[#6E7BFF]" /></span>
-          <span key={statusI} className="dv-status text-[15px] font-semibold text-white">{statusArr[statusI % statusArr.length]}</span>
-          {styleName && <span className="ml-1 truncate rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] text-white/55">{styleName}</span>}
-        </div>
-        {idea && <div className="mt-1.5 line-clamp-1 text-[12px] italic text-white/40">"{idea}"</div>}
-
-        {/* Progress bar */}
-        <div className="mx-auto mt-3 max-w-md">
-          {multi ? (
-            <>
-              <div className="mb-1 flex items-center justify-between text-[10px] text-white/40"><span>Striking shot {Math.min(current??1,total!)} of {total}</span><span className="tabular-nums">{pct}%</span></div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full transition-all duration-500" style={{width:`${pct}%`,background:"linear-gradient(90deg,#6E7BFF,#2FE0FF,#B57BFF)"}} /></div>
-            </>
-          ) : (
-            <div className="h-1.5 overflow-hidden rounded-full bg-white/10"><div className="h-full w-1/3 rounded-full" style={{background:"linear-gradient(90deg,#6E7BFF,#2FE0FF)",animation:"dvScan 1.6s ease-in-out infinite"}} /></div>
-          )}
         </div>
 
-        {/* Truncation warning — shown if the AI had to simplify */}
+        {/* warning */}
         {warning && !warningDismissed && (
-          <div className="dv-status mx-auto mt-3 flex max-w-lg items-start gap-2 rounded-xl border border-amber-500/20 bg-amber-500/8 px-3 py-2.5 text-left text-[11px] leading-relaxed text-amber-200/80">
+          <div className="go-status mt-5 flex max-w-md items-start gap-2 rounded-xl border border-amber-500/20 bg-amber-500/8 px-3.5 py-2.5 text-left text-[11.5px] leading-relaxed text-amber-200/85 backdrop-blur">
             <AlertTriangle size={13} className="mt-px shrink-0 text-amber-400" />
             <span>{warning}</span>
-            <button onClick={() => setWarningDismissed(true)} className="ml-auto shrink-0 text-amber-400/50 hover:text-amber-400"><X size={11} /></button>
+            <button onClick={() => setWarningDismissed(true)} className="ml-auto shrink-0 text-amber-400/60 hover:text-amber-400"><X size={12} /></button>
           </div>
         )}
 
-        {/* Rotating map fact */}
-        <div key={`f${factI}`} className="dv-status mx-auto mt-4 flex max-w-lg items-start gap-2 rounded-xl border border-[#6E7BFF]/15 bg-[#6E7BFF]/[0.06] px-3 py-2 text-left text-[11.5px] leading-relaxed text-white/65 backdrop-blur-md">
-          <span className="mt-px shrink-0">🌍</span>
-          <span><span className="font-semibold text-[#9CA6FF]">Did you know — </span>{FACTS[factI]}</span>
-        </div>
+        {/* tappable earth fact */}
+        <button
+          onClick={() => setFactI((i) => (i + 1) % FACTS.length)}
+          className="group mt-7 block max-w-md rounded-xl border border-[#6E7BFF]/15 bg-[#6E7BFF]/[0.06] px-4 py-2.5 text-left backdrop-blur transition-colors hover:border-[#6E7BFF]/30 hover:bg-[#6E7BFF]/[0.1]"
+          title="Tap for another fact"
+        >
+          <div key={`f${factI}`} className="go-status flex items-start gap-2 text-[12px] leading-relaxed text-white/70">
+            <span className="mt-px shrink-0 go-anim" style={{ display: "inline-block", animation: "goSpin 9s linear infinite" }}>🌍</span>
+            <span><span className="font-semibold text-[#9CA6FF]">Did you know — </span>{FACTS[factI]}</span>
+          </div>
+        </button>
       </div>
     </div>
   );

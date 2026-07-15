@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useEditor } from "@/v2/store/editor";
-import { Film, Trash2, FolderOpen } from "lucide-react";
+import { Film, Trash2, Sparkles } from "lucide-react";
 
 type Saved = { id: string; name: string; updatedAt: number };
 
@@ -50,9 +50,20 @@ export const ProjectsGrid: React.FC = () => {
 
   if (projects.length === 0) {
     return (
-      <div className="flex items-center gap-3 rounded-2xl border border-dashed border-black/10 bg-black/[0.02] px-5 py-6 text-sm text-graphite/35">
-        <FolderOpen size={16} className="text-graphite/25" />
-        No saved projects yet — generate or build an animation, then “Save” it in the editor.
+      <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-black/10 bg-black/[0.02] px-6 py-14 text-center">
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand text-white shadow-glow-iris">
+          <Film size={20} />
+        </div>
+        <h3 className="mt-4 text-base font-semibold text-graphite">No films yet</h3>
+        <p className="mt-1 max-w-xs text-sm text-graphite/45">
+          Describe a story or drop a GPS track — your first cinematic map animation lands here.
+        </p>
+        <button
+          onClick={() => router.push("/home")}
+          className="mt-5 inline-flex items-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-glow-iris transition-transform hover:-translate-y-0.5"
+        >
+          <Sparkles size={15} /> Create your first film
+        </button>
       </div>
     );
   }
@@ -60,10 +71,13 @@ export const ProjectsGrid: React.FC = () => {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {projects.map((p) => (
-        <button
+        <div
           key={p.id}
+          role="button"
+          tabIndex={0}
           onClick={() => open(p)}
-          className="group relative flex items-center gap-3 overflow-hidden rounded-2xl card-light px-4 py-3.5 text-left transition-all hover:-translate-y-0.5 hover:shadow-floaty"
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(p); } }}
+          className="group relative flex cursor-pointer items-center gap-3 overflow-hidden rounded-2xl card-light px-4 py-3.5 text-left transition-all hover:-translate-y-0.5 hover:shadow-floaty focus:outline-none focus-visible:ring-2 focus-visible:ring-iris/50"
         >
           <div className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity bg-brand-soft" />
           <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand text-white shadow-glow-iris">
@@ -73,14 +87,16 @@ export const ProjectsGrid: React.FC = () => {
             <div className="truncate text-sm font-medium text-graphite">{p.name || p.id}</div>
             <div className="text-[11px] text-graphite/35">map animation</div>
           </div>
-          <span
+          <button
+            type="button"
             onClick={(e) => remove(e, p.id)}
-            className="relative shrink-0 rounded-md p-1.5 text-graphite/25 opacity-0 transition-all hover:text-red-400 group-hover:opacity-100"
+            aria-label={`Delete ${p.name || p.id}`}
+            className="relative shrink-0 rounded-md p-1.5 text-graphite/25 opacity-0 transition-all hover:text-red-400 focus-visible:opacity-100 group-hover:opacity-100"
             title="Delete project"
           >
             <Trash2 size={13} />
-          </span>
-        </button>
+          </button>
+        </div>
       ))}
     </div>
   );

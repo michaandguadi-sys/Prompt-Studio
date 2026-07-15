@@ -133,6 +133,63 @@ export function graticule(step = 10): { type: "FeatureCollection"; features: unk
  *  map reads premium/cinematic out of the box (user land/water colours override). */
 export const NOIR = { land: "#090d16", water: "#0c1828", boundary: "#3a4a66" } as const;
 
+/** Basemap identity a Map3DStyle imposes on the vector style — the fields that
+ *  make styles look DIFFERENT (land, water, borders, grid). */
+export type BasemapIdentity = {
+  styleUrl?: string;
+  landColor?: string;
+  waterColor?: string;
+  boundaryGlow?: string;
+  graticule?: boolean;
+  graticuleColor?: string;
+  graticuleStep?: number;
+};
+/** Remembers a style's original paints so clearing a colour restores the base. */
+export type PaintStash = { styleKey: string; base: Record<string, string | null> };
+
+/**
+ * Recolour a live MapLibre map's land / water / boundaries and (optionally) draw
+ * a lat/long graticule to match a Map3DStyle's basemap identity. This is the
+ * SINGLE SOURCE OF TRUTH used by BOTH the render (MapComposition) and the
+ * landing preview (LiveStoryMap), so a style looks identical in both places.
+ * `stash` is mutated in place (reset when the base style changes).
+ */
+export function applyBasemapIdentity(map: any, bm: BasemapIdentity, stash: PaintStash): void {
+  try {
+    const styleUrl = bm?.styleUrl;
+    if (stash.styleKey !== styleUrl) { stash.styleKey = styleUrl ?? ""; stash.base = {}; }
+    const setOrRestore = (layerId: string, prop: string, override: string) => {
+      const key = `${styleUrl}::${layerId}::${prop}`;
+      if (!(key in stash.base)) stash.base[key] = (map.getPaintProperty(layerId, prop) as string | null) ?? null;
+      map.setPaintProperty(layerId, prop, override || stash.base[key]);
+    };
+    const grid = isGridStyle(styleUrl);
+    const showGrid = grid || !!bm?.graticule;
+    const gridLineColor = bm?.graticuleColor || GRID.line;
+    const gridStep = bm?.graticuleStep || 10;
+    const noir = isDarkStyle(styleUrl);
+    const effLand = bm?.landColor || (grid ? GRID.land : noir ? NOIR.land : "");
+    const effWater = bm?.waterColor || (grid ? GRID.water : noir ? NOIR.water : "");
+    const glow = bm?.boundaryGlow || "";
+    const boundaryColor = glow || (grid ? GRID.boundary : NOIR.boundary);
+    for (const layer of map.getStyle()?.layers ?? []) {
+      const id = ((layer as any).id || "").toLowerCase();
+      const t = (layer as any).type;
+      if (t === "fill" && /water|ocean|sea|river|lake/.test(id)) setOrRestore((layer as any).id, "fill-color", effWater);
+      else if (t === "background") setOrRestore((layer as any).id, "background-color", effLand);
+      else if (t === "fill" && /\bland\b|landcover|landuse|park|grass|wood|sand|ice|earth|natural/.test(id)) setOrRestore((layer as any).id, "fill-color", effLand);
+      else if ((noir || grid || glow) && t === "line" && /boundary|admin/.test(id) && !/water/.test(id)) setOrRestore((layer as any).id, "line-color", boundaryColor);
+    }
+    if (showGrid) {
+      if (!map.getSource("ps-grid")) map.addSource("ps-grid", { type: "geojson", data: graticule(gridStep) });
+      if (!map.getLayer("ps-grid-lines")) {
+        const firstSymbol = (map.getStyle()?.layers ?? []).find((ly: any) => ly.type === "symbol")?.id;
+        map.addLayer({ id: "ps-grid-lines", type: "line", source: "ps-grid", paint: { "line-color": gridLineColor, "line-width": 0.7 } }, firstSymbol);
+      } else map.setPaintProperty("ps-grid-lines", "line-color", gridLineColor);
+    } else if (map.getLayer("ps-grid-lines")) map.removeLayer("ps-grid-lines");
+  } catch { /* style mid-load — the caller re-runs on styledata */ }
+}
+
 /** Free, no-key terrain DEM (AWS Terrain Tiles, Terrarium-encoded). */
 export const ML_TERRAIN_SOURCE_ID = "ml-terrain-dem";
 

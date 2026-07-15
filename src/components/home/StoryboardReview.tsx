@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Clapperboard, Loader2, ArrowRight, ArrowLeft, ChevronLeft, ChevronRight, Trash2, GripVertical, Mic, Play, Square, X as XIcon } from "lucide-react";
 import { SIGNATURE_STYLES, signatureStyleById } from "@/lib/presets/signatureStyles";
 import { fontStack } from "@/v2/doc/themes";
@@ -36,6 +37,9 @@ export type ReviewData = {
   /** Single-scene "Director's cut": no story rebuild on open — the runtime
    *  slider just sets the scene duration, narration is carried through. */
   single?: boolean;
+  /** The creator's interview answers (labels) — shown as "your calls" chips so
+   *  the 3-tap Q&A visibly shaped this cut. */
+  choices?: string[];
 };
 
 /** Confidence pill colour for a researched fact. */
@@ -125,6 +129,14 @@ export const StoryboardReview: React.FC<{
     setVoUrl(null); setVoDuration(0); setVoPlaying(false); setVoError(null);
   };
 
+  // The review is a true modal: lock page scroll behind it while open so the
+  // hero/prompt/rail can't scroll into view underneath.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
   const edit = (fn: (b: Beat[]) => Beat[]) => { setBeats(fn); setDirty(true); };
   const move = (i: number, d: -1 | 1) => edit((b) => {
     const j = i + d; if (j < 0 || j >= b.length) return b;
@@ -184,13 +196,21 @@ export const StoryboardReview: React.FC<{
     } catch { setError("Network error."); setBuilding(false); }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8">
-      {/* Cinematic backdrop graded in the chosen style */}
-      <div className="absolute inset-0" style={{ background: `radial-gradient(ellipse at 30% 0%, ${sw[1]}55 0%, transparent 50%), radial-gradient(ellipse at 80% 100%, ${sw[2]}22 0%, transparent 55%), ${sw[0]}f2` }} onClick={onClose} />
+  // Portal to document.body: this modal is mounted inside the home page's
+  // glass prompt card, whose backdrop-filter traps `position:fixed` children in
+  // a local stacking context — the hero headline, prompt bar and inspiration
+  // rail (z-[200]+) painted OVER the storyboard. The portal escapes that trap;
+  // z-[320] puts the review above every piece of page chrome AND above the
+  // generating overlay (z-[300]) it replaces.
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div role="dialog" aria-modal="true" aria-label="Storyboard review" className="fixed inset-0 z-[320] flex items-center justify-center p-4 sm:p-8">
+      {/* Cinematic backdrop graded in the chosen style — near-opaque so the
+          page underneath can never compete with the storyboard. */}
+      <div className="absolute inset-0" style={{ background: `radial-gradient(ellipse at 30% 0%, ${sw[1]}55 0%, transparent 50%), radial-gradient(ellipse at 80% 100%, ${sw[2]}22 0%, transparent 55%), ${sw[0]}fa` }} onClick={onClose} />
       <div className="absolute inset-0 pointer-events-none opacity-40" style={{ backgroundImage: "radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.8) 130%)" }} />
 
-      <div className="relative flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-black/40 shadow-2xl backdrop-blur-xl">
+      <div className="relative flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-black/40 shadow-2xl backdrop-blur-xl sm:max-h-[calc(100dvh-4rem)]">
         {/* Header */}
         <div className="flex items-start justify-between gap-4 px-6 pb-4 pt-5">
           <div className="min-w-0">
@@ -206,6 +226,14 @@ export const StoryboardReview: React.FC<{
               {data.single ? <>1 scene · {runtime}s</> : <>{beats.length} beats · ~{Math.round(perBeat)}s each</>} {sig ? <>· <span style={{ color: sw[2] }}>{sig.name}</span></> : "· Director's choice"}
               {data.dirScript?.inputType && <> · <span style={{ opacity: 0.55 }}>{data.dirScript.inputType === "voiceover" ? "narration" : data.dirScript.inputType === "brief" ? "story brief" : "topic"}</span></>}
             </div>
+            {Array.isArray(data.choices) && data.choices.length > 0 && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                <span className="text-[9px] font-semibold uppercase tracking-[0.18em] text-white/30">Your calls, applied</span>
+                {data.choices.map((c) => (
+                  <span key={c} className="rounded-full border px-2 py-0.5 text-[9.5px] font-medium" style={{ borderColor: `${sw[2]}55`, color: sw[2] }}>✓ {c}</span>
+                ))}
+              </div>
+            )}
           </div>
           <button onClick={onClose} className="shrink-0 rounded-lg border border-white/10 px-3 py-1.5 text-[11px] text-white/55 transition-colors hover:border-white/30 hover:text-white">
             <ArrowLeft size={11} className="mr-1 inline" /> Adjust prompt
@@ -214,7 +242,7 @@ export const StoryboardReview: React.FC<{
 
         {/* ── Director's brief: the fact-checked journalism, shown BEFORE building ── */}
         {data.verification && (data.verification.thesis || data.verification.facts?.length) && (
-          <div className="mx-6 mb-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
+          <div className="mx-6 mb-3 max-h-[32vh] overflow-y-auto rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-[10px] font-semibold uppercase tracking-[0.25em] text-white/45">Director&apos;s brief</span>
               {data.verification.provider === "ai"
@@ -364,6 +392,7 @@ export const StoryboardReview: React.FC<{
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };

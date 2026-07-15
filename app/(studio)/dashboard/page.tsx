@@ -311,8 +311,8 @@ export default function DashboardPage() {
               </ul>
             </div>
 
-            {/* ── Upgrade CTA ────────────────────────────────────────── */}
-            {quota.tier !== "custom" && quota.tier !== "agency" && (
+            {/* ── Upgrade CTA (hidden once they're on the top tier) ───── */}
+            {quota.tier !== "pro" && (
               <Link
                 href="/pricing"
                 className="group flex items-center justify-between rounded-xl border border-amber/25 bg-amber/5 hover:bg-amber/8 hover:border-amber/40 px-6 py-5 transition-all duration-200 anim-fade-up"

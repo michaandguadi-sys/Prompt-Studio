@@ -31,6 +31,8 @@ export type JobSettings = {
 
 export type RenderJob = {
   id: string;
+  /** Clerk id of the user who enqueued it — scopes list/cancel to the owner. */
+  userId?: string;
   compositionId: string;
   status: JobStatus;
   /** 0 → 1. Updated from Remotion stdout "Rendered N/M" lines. */
@@ -68,10 +70,11 @@ export function subscribe(fn: () => void): () => void {
   return () => listeners.delete(fn);
 }
 
-export function enqueue(compositionId: string, settings: JobSettings = {}): RenderJob {
+export function enqueue(compositionId: string, settings: JobSettings = {}, userId?: string): RenderJob {
   const id = randomUUID();
   const job: RenderJob = {
     id,
+    userId,
     compositionId,
     status: "queued",
     progress: 0,
@@ -89,6 +92,12 @@ export function enqueue(compositionId: string, settings: JobSettings = {}): Rend
 
 export function listJobs(): RenderJob[] {
   return Array.from(jobs.values()).sort((a, b) => b.enqueuedAt - a.enqueuedAt);
+}
+
+/** Only the jobs enqueued by `userId` — the queue is shared process memory, so
+ *  the API must never expose one user's jobs to another. */
+export function listJobsForUser(userId: string): RenderJob[] {
+  return listJobs().filter((j) => j.userId === userId);
 }
 
 export function getJob(id: string): RenderJob | undefined {
@@ -118,10 +127,12 @@ export function cancel(id: string): boolean {
   return false;
 }
 
-export function clearFinished(): number {
+export function clearFinished(userId?: string): number {
   let n = 0;
   for (const [id, job] of jobs.entries()) {
-    if (job.status === "done" || job.status === "failed" || job.status === "cancelled") {
+    const finished = job.status === "done" || job.status === "failed" || job.status === "cancelled";
+    // When a userId is given, only clear THAT user's finished jobs.
+    if (finished && (!userId || job.userId === userId)) {
       jobs.delete(id);
       n++;
     }

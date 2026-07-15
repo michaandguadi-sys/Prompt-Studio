@@ -49,7 +49,7 @@ export const HomeContent: React.FC = () => {
               <p className="text-[12px] text-white/40">Pick up where you left off.</p>
             </div>
             <Link
-              href="/studio2"
+              href="/studio2?blank=1"
               className="inline-flex items-center gap-1.5 text-xs text-white/40 transition-colors hover:text-[#aab4ff]"
             >
               <Layers size={12} /> Blank map

@@ -79,7 +79,7 @@ export const QuickPromptBar: React.FC<{ onStartAI: () => void }> = ({ onStartAI 
         {/* Quick actions row */}
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
-            onClick={() => router.push("/studio2")}
+            onClick={() => router.push("/studio2?blank=1")}
             className="inline-flex items-center gap-1.5 rounded-full border border-line bg-paper-50 px-3 py-1.5 text-[11px] font-medium text-graphite/60 transition-colors hover:border-iris/40 hover:text-iris"
           >
             <Wand2 size={11} /> Blank animation

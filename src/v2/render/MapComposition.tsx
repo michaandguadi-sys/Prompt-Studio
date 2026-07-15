@@ -7,7 +7,7 @@ import {
 import Map, { MapRef, Source, Layer as MapLayer } from "react-map-gl/maplibre";
 import { LngLat } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { resolveMapStyle, demSource, ML_TERRAIN_SOURCE_ID, isDarkStyle, NOIR, isGridStyle, GRID, graticule } from "@/lib/maplibre";
+import { resolveMapStyle, demSource, ML_TERRAIN_SOURCE_ID, isDarkStyle, applyBasemapIdentity } from "@/lib/maplibre";
 import { safeInterpolate, easings, catmullRomChain, linearChain } from "@/lib/interp";
 import { centroidOf } from "@/lib/geo";
 import { makePatternImageData, patternImageId } from "@/lib/mapPatterns";
@@ -18,6 +18,7 @@ import type {
   FlagLayer, TitleLayer, ChartLayer, ImageLayer, RouteLayer, MarkerLayer,
   AnnotationLayer, ConnectionsLayer, SpotlightLayer, TrackLayer, ChoroplethLayer, BubbleLayer, FlowLayer, HeatmapLayer, Look,
 } from "../doc/schema";
+import { minZoomForAspect } from "../doc/schema";
 import { fontStack, WEBFONTS_CSS_URL } from "../doc/themes";
 
 /** Photoreal 3D (Google Earth) overlay — lazy so deck.gl/loaders.gl never load
@@ -431,48 +432,14 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
           map.setLight({ anchor: "map", position: [1.5, azimuth, 90 - altitude * 75], color: night ? "#9fb4e6" : altitude < 0.4 ? "#ffd9a8" : "#ffffff", intensity: night ? 0.25 : 0.4 + altitude * 0.4 } as any);
         } catch {}
       } catch {}
-      // ── Land & water recolour — repaint the MAP ITSELF, not the grade ──
-      // Overrides the basemap's water fills + land background; clearing the
-      // colour restores the style's original (stashed on first touch).
+      // ── Land / water / border recolour + graticule — the style's IDENTITY.
+      // Shared with the landing preview via applyBasemapIdentity() (single source
+      // of truth), so a style looks identical in the editor and the preview.
       try {
-        // Drop stashes from a previous style so we re-capture fresh originals
-        // (and don't leak memory across many style switches).
-        if (paintStyleKey.current !== bm.styleUrl) { paintStyleKey.current = bm.styleUrl; paintBase.current = {}; }
-        const setOrRestore = (layerId: string, prop: string, override: string) => {
-          const key = `${bm.styleUrl}::${layerId}::${prop}`;
-          if (!(key in paintBase.current)) paintBase.current[key] = map.getPaintProperty(layerId, prop as any) ?? null;
-          map.setPaintProperty(layerId, prop as any, override || paintBase.current[key]);
-        };
-        // Signature "noir" deepening: dark basemaps get a richer near-black land +
-        // deep-water + a subtle cool boundary glow by DEFAULT, so every map reads
-        // cinematic out of the box. Explicit land/water colours still win.
-        const grid = isGridStyle(bm.styleUrl);
-        const noir = isDarkStyle(bm.styleUrl);
-        const effLand = (bm as any).landColor || (grid ? GRID.land : noir ? NOIR.land : "");
-        const effWater = (bm as any).waterColor || (grid ? GRID.water : noir ? NOIR.water : "");
-        // A creative 3D style can force a glowing accent boundary on ANY base.
-        const glow = (bm as any).boundaryGlow || "";
-        const boundaryColor = glow || (grid ? GRID.boundary : NOIR.boundary);
-        for (const layer of map.getStyle()?.layers ?? []) {
-          const id = (layer.id || "").toLowerCase();
-          const t = (layer as any).type;
-          if (t === "fill" && /water|ocean|sea|river|lake/.test(id)) setOrRestore(layer.id, "fill-color", effWater);
-          else if (t === "background") setOrRestore(layer.id, "background-color", effLand);
-          else if (t === "fill" && /\bland\b|landcover|landuse|park|grass|wood|sand|ice|earth|natural/.test(id)) setOrRestore(layer.id, "fill-color", effLand);
-          else if ((noir || grid || glow) && t === "line" && /boundary|admin/.test(id) && !/water/.test(id)) {
-            setOrRestore(layer.id, "line-color", boundaryColor);
-          }
-        }
-        // Blueprint graticule — a glowing lat/long grid over the navy base.
-        if (grid) {
-          if (!map.getSource("ps-grid")) map.addSource("ps-grid", { type: "geojson", data: graticule(10) as any } as any);
-          if (!map.getLayer("ps-grid-lines")) {
-            const firstSymbol = (map.getStyle()?.layers ?? []).find((ly: any) => ly.type === "symbol")?.id;
-            map.addLayer({ id: "ps-grid-lines", type: "line", source: "ps-grid", paint: { "line-color": GRID.line, "line-width": 0.7 } as any } as any, firstSymbol);
-          }
-        } else if (map.getLayer("ps-grid-lines")) {
-          map.removeLayer("ps-grid-lines");
-        }
+        const stash = { styleKey: paintStyleKey.current, base: paintBase.current as Record<string, string | null> };
+        applyBasemapIdentity(map, bm as any, stash);
+        paintStyleKey.current = stash.styleKey;
+        paintBase.current = stash.base;
       } catch {}
       map.triggerRepaint?.();
     };
@@ -485,7 +452,7 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
     let tries = 0;
     const retry = setInterval(() => { if (map.isStyleLoaded?.()) { apply(); clearInterval(retry); } else if (++tries > 50) clearInterval(retry); }, 80);
     return () => { map.off?.("styledata", apply); map.off?.("idle", apply); clearInterval(retry); };
-  }, [bm.showStreets, bm.showLabels, (bm as any).labelDetail, bm.terrain, bm.buildings3d, bm.styleUrl, (bm as any).terrainStrength, (bm as any).landColor, (bm as any).waterColor, (bm as any).buildingColor, (bm as any).buildingOpacity, (bm as any).buildingHeightMult, (bm as any).buildingGradient, (bm as any).boundaryGlow, (bm as any).timeOfDay, (bm as any).photoreal3d, photoreal3d, photorealExportFallback]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [bm.showStreets, bm.showLabels, (bm as any).labelDetail, bm.terrain, bm.buildings3d, bm.styleUrl, (bm as any).terrainStrength, (bm as any).landColor, (bm as any).waterColor, (bm as any).buildingColor, (bm as any).buildingOpacity, (bm as any).buildingHeightMult, (bm as any).buildingGradient, (bm as any).boundaryGlow, (bm as any).graticule, (bm as any).graticuleColor, (bm as any).graticuleStep, (bm as any).timeOfDay, (bm as any).photoreal3d, photoreal3d, photorealExportFallback]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── OpenHistoricalMap: show the world AS OF `ohmYear` (animated or static) ──
   // Re-applies the date filter whenever the displayed year TICKS, so borders and
@@ -581,6 +548,15 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
         initialViewState={{ longitude: pose.lon, latitude: pose.lat, zoom: pose.zoom, pitch: pose.pitch, bearing: pose.bearing }}
         interactive={false}
         attributionControl={false}
+        // Explicit pitch ceiling. 85 is maplibre-gl 4.x's HARD limit — passing
+        // >85 throws in the Map constructor and the map never renders. The
+        // brief's full 90° look-ahead needs the maplibre-gl v5 upgrade.
+        maxPitch={85}
+        // World-wrap guard: never zoom out past one-world-fills-the-frame, so a
+        // single frame can never show duplicated landmasses. renderWorldCopies
+        // stays ON so antimeridian-crossing shots (Pacific flight arcs) remain
+        // continuous — the floor alone makes duplicates impossible.
+        minZoom={minZoomForAspect(comp.aspect)}
         // CLEAN RENDER (no artifacts / flicker):
         //  • preserveDrawingBuffer — the headless renderer screenshots the WebGL
         //    canvas; without this the GL back-buffer is cleared after paint and the
@@ -606,6 +582,14 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
           if (m?.areTilesLoaded?.()) release();
         }}
         onIdle={() => { setMapReady(true); release(); }}
+        onError={(e: any) => {
+          // Transient tile fetch failures (network switch, sleep resume, dev
+          // reload) self-heal on the next camera move — without this handler
+          // react-map-gl console.errors every single aborted tile request.
+          const msg = String(e?.error?.message ?? e?.message ?? "");
+          if (/failed to fetch|networkerror|network changed|abort|load failed/i.test(msg)) return;
+          console.warn("[map]", msg);
+        }}
         style={{ width: "100%", height: "100%", filter: mapFilterCss(comp.look) }}
       >
         {/* PHOTOREAL 3D (Google Earth) — deck.gl overlay of Google's

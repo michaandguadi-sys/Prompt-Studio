@@ -24,6 +24,7 @@ import path from "path";
 import { db, schema } from "@/lib/db";
 import { eq } from "drizzle-orm";
 import { checkQuota } from "@/lib/quota";
+import { TIERS, type Tier } from "@/lib/tiers";
 import { devGetOrCreateUserByClerk } from "@/lib/devAgentStore";
 import { rateLimit } from "@/lib/rateLimit";
 import { Composition, dimsFor } from "@/v2/doc/schema";
@@ -74,22 +75,28 @@ export async function POST(req: NextRequest) {
   const comp = parsed.data;
 
   const format = VALID_FORMATS.has(body?.format) ? (body.format as string) : "png";
-  const scale = Math.min(1, Math.max(0.1, Number(body?.scale) || 1));
   const jpegQuality = Math.min(100, Math.max(1, Math.round(Number(body?.jpegQuality) || 90)));
   const totalFrames = Math.max(1, Math.round(comp.durationSec * comp.fps));
   const frame = Math.min(totalFrames - 1, Math.max(0, Math.round(Number(body?.frame) || 0)));
 
-  // Same watermark rule as video renders: free tier (when billing is wired).
-  let watermark = false;
+  // Same watermark + resolution rules as video renders. Fails CLOSED in
+  // production: if the tier can't be resolved (no DB / lookup error) the still
+  // is branded and 720p-capped like free; in dev it stays permissive so
+  // stills never block.
+  let tier: Tier | null = null;
   try {
     if (db) {
       const [user] = await db.select({ id: schema.users.id }).from(schema.users)
         .where(eq(schema.users.clerkId, clerkId)).limit(1);
-      if (user) { const q = await checkQuota(user.id); watermark = q.tier === "free"; }
+      if (user) tier = (await checkQuota(user.id)).tier;
     } else {
       devGetOrCreateUserByClerk(clerkId); // keep the dev store consistent
     }
   } catch { /* quota is advisory for stills — never block the render */ }
+  if (!tier && process.env.NODE_ENV === "production") tier = "free";
+  const watermark = tier === "free";
+  const maxScale = tier ? TIERS[tier]?.maxScale ?? 1 : 1;
+  const scale = Math.min(maxScale, Math.max(0.1, Number(body?.scale) || 1));
 
   // The bundle must be served from the APP origin so /api/sat and /api/dem
   // tile proxies resolve (same root cause as video renders).

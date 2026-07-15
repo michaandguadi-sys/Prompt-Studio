@@ -19,11 +19,26 @@ const SAT = "mapbox://styles/mapbox/satellite-streets-v12";
 
 export const PRO_MAP_STYLES: Map3DStyle[] = [
   {
-    id: "clean-minimal", name: "Clean Minimal", tagline: "Quiet, precise, all signal",
-    swatches: ["#f7f7f4", "#dbe4ea", "#3b4252"],
-    basemap: { styleUrl: LIGHT, landColor: "#f7f7f4", waterColor: "#dbe4ea", boundaryGlow: "", terrain: false, buildings3d: false },
-    look: { vignette: 0, grain: 0, mapFilter: "none", tintOpacity: 0, bgColor: "#ffffff" },
-    pitch: 0,
+    id: "cartograph", name: "Cartograph", tagline: "Hand-drawn survey — 3D terrain, ink borders & a grid",
+    swatches: ["#e6d8ba", "#2f6d75", "#a83e2c"],
+    basemap: {
+      styleUrl: LIGHT,
+      landColor: "#e6d8ba",        // warm parchment
+      waterColor: "#2f6d75",       // deep muted teal ocean — bold against the paper
+      boundaryGlow: "#a83e2c",     // ink-crimson country borders (old-atlas ink)
+      terrain: true, terrainStrength: 1.8,
+      buildings3d: false,
+      graticule: true,             // a lat/long survey grid, drawn over the terrain
+      graticuleColor: "rgba(92,67,38,0.34)", // sepia ink
+      graticuleStep: 10,
+    },
+    look: {
+      texture: "paper", textureOpacity: 0.55,
+      vignette: 0.3, grain: 0.06, mapFilter: "none",
+      gradeHigh: "#fff4df", gradeHighAmt: 0.07,
+      bgColor: "#e3d5b6",
+    },
+    pitch: 44,                     // pitched so the 3D relief + grid read
   },
   {
     id: "apple-light", name: "Cupertino Light", tagline: "Soft paper, calm blue water",
@@ -180,6 +195,89 @@ export const PRO_MAP_STYLES: Map3DStyle[] = [
     look: { vignette: 0.3, grain: 0.08, gradeShadow: "#2a1a30", gradeShadowAmt: 0.4, gradeHigh: "#ffb27a", gradeHighAmt: 0.5, mapFilter: "warm", mapFilterAmount: 0.35, bgColor: "#120d16" },
     pitch: 58,
   },
+  // ── Landing-parity looks — the EXACT styles the homepage previews with, so
+  //    the film a creator opens matches the preview that sold them on it. ──
+  {
+    id: "dark-editorial", name: "Dark Editorial", tagline: "Red borders · grey streets — the newsroom look",
+    swatches: ["#14161c", "#FF3B4D", "#8A93A6"],
+    basemap: { styleUrl: DARK, landColor: "#14161c", waterColor: "#0b0d13", boundaryGlow: "#FF3B4D", terrain: false, buildings3d: false },
+    look: { vignette: 0.34, grain: 0.06, gradeShadow: "#160a0d", gradeShadowAmt: 0.22, bgColor: "#0a0b10" },
+    pitch: 0,
+  },
+  // ── More creative looks — bold, distinctive, leaning into the color +
+  //    graticule + terrain system. Think posters, not developer themes. ──
+  {
+    id: "risograph", name: "Risograph", tagline: "Bold two-ink print — poster energy",
+    swatches: ["#f4ead2", "#2b3a67", "#ff5a5f"],
+    basemap: { styleUrl: LIGHT, landColor: "#f4ead2", waterColor: "#2b3a67", boundaryGlow: "#ff5a5f", terrain: false, buildings3d: false },
+    look: { texture: "paper", textureOpacity: 0.4, grain: 0.16, vignette: 0.14, mapFilter: "none", gradeShadow: "#2b3a67", gradeShadowAmt: 0.12, bgColor: "#f4ead2" },
+    pitch: 0,
+  },
+  {
+    id: "thermal", name: "Thermal", tagline: "Infrared scan — glowing magma relief",
+    swatches: ["#160424", "#3a0a5c", "#ff8a1f"],
+    basemap: { styleUrl: DARK, landColor: "#120522", waterColor: "#05010a", boundaryGlow: "#ff8a1f", terrain: true, terrainStrength: 2.6, buildings3d: false },
+    look: { vignette: 0.5, grain: 0.06, mapFilter: "none", tintColor: "#3a0a5c", tintOpacity: 0.16, gradeShadow: "#0a0014", gradeShadowAmt: 0.3, gradeHigh: "#ffb020", gradeHighAmt: 0.18, bgColor: "#05010a" },
+    pitch: 52,
+  },
+  {
+    id: "drafting", name: "Drafting Table", tagline: "Architect's blueprint — cyan ink on cream, gridded",
+    swatches: ["#eef1ea", "#d7e6e8", "#1b7f9e"],
+    basemap: { styleUrl: LIGHT, landColor: "#eef1ea", waterColor: "#d7e6e8", boundaryGlow: "#1b7f9e", terrain: false, buildings3d: false, graticule: true, graticuleColor: "rgba(27,127,158,0.28)", graticuleStep: 10 },
+    look: { texture: "paper", textureOpacity: 0.3, vignette: 0.12, grain: 0.04, mapFilter: "none", bgColor: "#e9ece5" },
+    pitch: 0,
+  },
+  {
+    id: "satellite-night", name: "Satellite Night", tagline: "The earth-at-night hero — graded real imagery",
+    swatches: ["#16241c", "#3d5a3a", "#0e1a2b"],
+    basemap: { styleUrl: SAT, terrain: false, buildings3d: false },
+    look: { vignette: 0.5, grain: 0.08, tintColor: "#0a1226", tintOpacity: 0.28, gradeShadow: "#04060f", gradeShadowAmt: 0.42, gradeHigh: "#8fa8c8", gradeHighAmt: 0.07, bgColor: "#04060f" },
+    pitch: 0,
+  },
 ];
 
 export const proMapStyleById = (id: string): Map3DStyle | undefined => PRO_MAP_STYLES.find((s) => s.id === id);
+
+/**
+ * Map free-text look language → a PRO_MAP_STYLES id. This is what makes the
+ * landing preview become the real film even WITHOUT AI: a hero style tap or a
+ * BuildFlow "look" answer ("…, dark editorial style") is turned into the exact
+ * same pro style the editor would apply. Ordered most-specific first; returns
+ * null when nothing clearly matches so the planner's default stands. (The AI
+ * path picks map3dStyle itself — this only fills the gap on the heuristic path.)
+ */
+const STYLE_PHRASE_TO_ID: [RegExp, string][] = [
+  // ── Landing hero taps + BuildFlow "look" values — the EXACT previews shown ──
+  [/\bdark[- ]?editorial\b|\bnewsroom\b|\bred[- ]?border/i, "dark-editorial"],
+  [/\b(satellite|imagery)\b[^.]*\b(night|cinematic|film(ic)?|hero)\b|\b(night|cinematic)\b[^.]*\bsatellite\b/i, "satellite-cinematic"],
+  [/\b3d\b[^.]*\bterrain\b|\bterrain\b[^.]*\b3d\b|\bflythrough\b|\bmountain(s)?\b|\bpeaks?\b|\balps\b/i, "satellite-cinematic"],
+  [/\bclean\b[^.]*\bsimple\b|\bsimple\b[^.]*\bmap\b|\bminimal(ist)?\b/i, "apple-light"],
+  [/\bcartograph|\bhand[- ]?drawn\b|\bsurvey\b|\bold[- ]?world\b|\bink\b/i, "cartograph"],
+  [/\brisograph|\briso\b|\bposter\b|\btwo[- ]?ink\b|\bscreen[- ]?print/i, "risograph"],
+  [/\bthermal\b|\binfrared\b|\bmagma\b|\bheat vision\b/i, "thermal"],
+  [/\bdrafting\b|\barchitect|\btechnical draw|\bblueprint (cream|light)\b/i, "drafting"],
+  [/\bsatellite\b/i, "satellite-night"],
+  // ── Common pro-style names, typed directly ──
+  [/\bnat(ional)? ?geo(graphic)?\b/i, "natgeo"],
+  [/\bvintage\b|\bold[- ]?map\b|\bantique\b|\batlas\b/i, "vintage-atlas"],
+  [/\bcrimson\b|\bbold red\b/i, "crimson-atlas"],
+  [/\bnoir\b|\bmidnight\b/i, "midnight"],
+  [/\bluxury\b|\bpremium\b|\belegant\b/i, "luxury-travel"],
+  [/\badventure\b|\bexpedition\b|\bhik(e|ing)\b|\btrek\b/i, "adventure"],
+  [/\b(deep )?ocean\b|\bnautical\b|\babyss/i, "deep-ocean"],
+  [/\bdesert\b|\bsahara\b|\barid\b/i, "desert"],
+  [/\bwinter\b|\bsnow\b|\barctic\b|\bpolar\b/i, "winter"],
+  [/\bdocumentary\b|\bearth[- ]?doc/i, "earth-documentary"],
+  [/\bapple\b|\bcupertino\b/i, "apple-dark"],
+  [/\bsunrise\b|\bgolden[- ]?hour\b|\bdawn\b|\bfirst light\b/i, "sunrise-terrain"],
+  [/\bnordic\b|\bscandi/i, "nordic-light"],
+  [/\bpastel\b/i, "pastel-city"],
+  [/\bmonochrome\b|\bblack[- ]?and[- ]?white\b|\bb&w\b/i, "modern-monochrome"],
+];
+
+/** First matching pro-style id for a piece of look language, or null. */
+export function detectProStyle(text: string): string | null {
+  if (!text) return null;
+  for (const [re, id] of STYLE_PHRASE_TO_ID) if (re.test(text)) return id;
+  return null;
+}

@@ -9,6 +9,7 @@
  */
 
 import type { Composition, Layer, CameraPose } from "./schema";
+import { minZoomForAspect } from "./schema";
 
 export type ValidationIssue = {
   level: "fixed" | "warning";
@@ -19,12 +20,14 @@ export type ValidationIssue = {
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const finiteOr = (v: unknown, d: number) => (typeof v === "number" && Number.isFinite(v) ? v : d);
 
-function fixPose(p: CameraPose | undefined, issues: ValidationIssue[], where: string): CameraPose {
+function fixPose(p: CameraPose | undefined, issues: ValidationIssue[], where: string, minZoom = 0.5): CameraPose {
   const fixed: CameraPose = {
     lon: clamp(finiteOr(p?.lon, 0), -180, 180),
     lat: clamp(finiteOr(p?.lat, 20), -85, 85),
-    zoom: clamp(finiteOr(p?.zoom, 3), 0.5, 22),
-    pitch: clamp(finiteOr(p?.pitch, 0), 0, 84),
+    // Floor at the aspect's world-wrap zoom so one world copy always fills the
+    // frame — no duplicated landmasses at the widest pull-back.
+    zoom: clamp(finiteOr(p?.zoom, 3), minZoom, 22),
+    pitch: clamp(finiteOr(p?.pitch, 0), 0, 85),
     bearing: finiteOr(p?.bearing, 0) % 360,
   };
   if (!p || !Number.isFinite(p.lon) || !Number.isFinite(p.lat) || !Number.isFinite(p.zoom)) {
@@ -64,9 +67,10 @@ export function validateComposition(comp: Composition): ValidationIssue[] {
   // ── Camera ──
   const cam = comp.layers.find((l) => l.type === "camera") as any;
   if (cam) {
-    cam.start = fixPose(cam.start, issues, "start");
-    cam.end = fixPose(cam.end, issues, "end");
-    if (Array.isArray(cam.waypoints)) cam.waypoints = cam.waypoints.map((w: CameraPose, i: number) => fixPose(w, issues, `waypoint ${i + 1}`));
+    const zoomFloor = minZoomForAspect(comp.aspect);
+    cam.start = fixPose(cam.start, issues, "start", zoomFloor);
+    cam.end = fixPose(cam.end, issues, "end", zoomFloor);
+    if (Array.isArray(cam.waypoints)) cam.waypoints = cam.waypoints.map((w: CameraPose, i: number) => fixPose(w, issues, `waypoint ${i + 1}`, zoomFloor));
     if (typeof cam.moveFraction === "number" && (cam.moveFraction < 0.3 || cam.moveFraction > 1)) {
       cam.moveFraction = clamp(cam.moveFraction, 0.3, 1);
       issues.push({ level: "fixed", message: "Camera move fraction clamped to a readable range." });

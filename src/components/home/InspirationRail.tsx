@@ -11,17 +11,23 @@ import { coordsFor, type GeoStop } from "./worldCoords";
 
 type Card = { emoji: string; title: string; prompt: string; places: string[] };
 
+/** The premium showcase suite — every card is a flagship capability demo
+ *  (terrain flythrough, water-hugging sea voyage, orbital reveal, Pacific
+ *  arc, historical vectors, data bubbles). Prompts are phrased so the intent
+ *  parser resolves the right stops: destinations sit in the from→to chain and
+ *  style words ride after a comma (parser-verified). Same element vocabulary
+ *  the editor renders — routes, highlights, tracks, bubbles, orbits. */
 const CARDS: Card[] = [
+  { emoji: "🥾", title: "Mont Blanc terrain flythrough", prompt: "A terrain-hugging 3D flythrough over Mont Blanc, golden dawn light, documentary style", places: ["Mont Blanc"] },
+  { emoji: "⛵", title: "Mediterranean sea voyage", prompt: "Sailing from Barcelona to Athens, serene dawn light, minimal design", places: ["Barcelona", "Athens"] },
+  { emoji: "🛫", title: "New York → Cook Islands", prompt: "Flight from New York to the Cook Islands, dramatic Pacific arc, cold blue mood", places: ["New York", "Cook Islands"] },
+  { emoji: "⛪", title: "Barcelona cathedral orbit", prompt: "A slow 360 orbit around the cathedral of Barcelona at sunrise, cinematic reveal", places: ["Barcelona"] },
+  { emoji: "🧭", title: "Viking migrations", prompt: "The Viking migrations from Norway to Iceland to Greenland, historical parchment style", places: ["Norway", "Iceland", "Greenland"] },
+  { emoji: "📊", title: "US population bubbles", prompt: "Every American city above 5 million people as glowing population bubbles, data documentary", places: ["United States"] },
   { emoji: "✈️", title: "Around the world in 90 seconds", prompt: "A cinematic flight around the world: New York → London → Dubai → Tokyo → Sydney, smooth camera moves, documentary style", places: ["New York", "London", "Dubai", "Tokyo", "Sydney"] },
-  { emoji: "🏔", title: "Epic hiking adventure", prompt: "Documentary intro of a trek through the Himalayas from Kathmandu to Mount Everest base camp, golden hour, slow aerial camera", places: ["Kathmandu", "Mount Everest"] },
-  { emoji: "🚗", title: "Road trip across America", prompt: "A vintage Route 66 road trip from Chicago to Los Angeles by car, warm nostalgic mood, vintage atlas style", places: ["Chicago", "Los Angeles"] },
-  { emoji: "🎥", title: "Documentary opening", prompt: "The fall of the Berlin Wall, November 1989 — show the divided city, then the moment it crumbled, archival documentary mood", places: ["Berlin"] },
-  { emoji: "🛰", title: "Satellite flyover", prompt: "Satellite flyover of the Amazon from the Andes to the Atlantic, slow drifting camera, National Geographic style", places: ["Andes", "Amazon"] },
-  { emoji: "🌍", title: "Countries I've visited", prompt: "Highlight every country I've visited one by one: France, Italy, Japan, Brazil and Morocco — playful, colorful, energetic", places: ["France", "Italy", "Japan", "Brazil", "Morocco"] },
-  { emoji: "⛵", title: "Mediterranean sailing", prompt: "A sailing journey from Barcelona to Athens across the Mediterranean by boat, serene dawn light, minimal design", places: ["Barcelona", "Athens"] },
   { emoji: "🚂", title: "The Orient Express", prompt: "The legendary Orient Express from Paris via Vienna to Istanbul by train, luxury vintage style, elegant slow camera", places: ["Paris", "Vienna", "Istanbul"] },
-  { emoji: "🌋", title: "Volcano expedition", prompt: "My volcano expedition in Guatemala — fly into Guatemala City, then trek to the crater at dawn, dramatic mood", places: ["Guatemala City"] },
-  { emoji: "🚁", title: "New York to Iceland", prompt: "Fly from New York to Iceland with smooth cinematic camera moves, cold blue mood, aerial documentary style", places: ["New York", "Reykjavik"] },
+  { emoji: "🎥", title: "Documentary opening", prompt: "The fall of the Berlin Wall, November 1989 — show the divided city, then the moment it crumbled, archival documentary mood", places: ["Berlin"] },
+  { emoji: "🌍", title: "Countries I've visited", prompt: "Highlight every country I've visited one by one: France, Italy, Japan, Brazil and Morocco — playful, colorful, energetic", places: ["France", "Italy", "Japan", "Brazil", "Morocco"] },
 ];
 
 export const InspirationRail: React.FC<{

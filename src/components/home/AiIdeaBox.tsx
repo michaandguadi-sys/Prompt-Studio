@@ -14,6 +14,26 @@ import { addAddon, type Addon } from "@/lib/addons";
 import { useAiEngine } from "@/lib/aiEngine";
 import { recordTaste, tasteSummary } from "@/lib/taste";
 
+/** POST JSON with a hard timeout. The AI planning endpoints legitimately take
+ *  20-40s (research + compose), so the ceilings are generous — but without an
+ *  abort a stalled model or dropped connection would strand the creator on the
+ *  loading overlay forever. On timeout the fetch rejects with an AbortError the
+ *  callers turn into a friendly "taking longer than usual" message. */
+async function postJSON(url: string, body: unknown, timeoutMs: number): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const EXAMPLES = [
   "The fall of the Berlin Wall, 1989",
   "Fly into Tokyo at night",
@@ -137,10 +157,7 @@ export const AiIdeaBox: React.FC<{
   }, [useAI, filled]);
 
   const genOne = async (idea: string, mode?: "story", interview?: { answers: Record<string, string>; text: string }, opts?: { style?: string; arc?: ArcContext }) => {
-    const res = await fetch("/api/v2/generate", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ idea, mode, style: opts?.style ?? styleArg, ai: useAI ? ai() : undefined, useAI, interview: interview?.answers, interviewText: interview?.text, arc: opts?.arc, taste: tasteSummary() || undefined }),
-    });
+    const res = await postJSON("/api/v2/generate", { idea, mode, style: opts?.style ?? styleArg, ai: useAI ? ai() : undefined, useAI, interview: interview?.answers, interviewText: interview?.text, arc: opts?.arc, taste: tasteSummary() || undefined }, 90_000);
     const d = await res.json();
     try { if (Array.isArray(d?.addons)) for (const a of d.addons as Addon[]) if (a?.name) addAddon(a); } catch { /* registry full / SSR */ }
     return d;
@@ -148,26 +165,45 @@ export const AiIdeaBox: React.FC<{
 
   const fetchArc = async (ideas: string[]): Promise<StoryArc> => {
     try {
-      const r = await fetch("/api/v2/storyarc", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ideas, style: styleArg, ai: useAI ? ai() : undefined, useAI }),
-      });
+      const r = await postJSON("/api/v2/storyarc", { ideas, style: styleArg, ai: useAI ? ai() : undefined, useAI }, 60_000);
       if (r.ok) { const d = await r.json(); if (d?.sequences?.length === ideas.length) return d as StoryArc; }
     } catch { /* fall through to deterministic */ }
     return buildArc(ideas, { styleId: styleArg });
   };
 
   const ivLabel = (q: IVQ, val: string) => q.options.find((o) => o.value === val)?.label ?? val;
+
+  /** What the SELECTED answer does to the film — rendered live under each
+   *  question, so every tap visibly steers the director (these map 1:1 to the
+   *  binding directives the server injects into the Director prompt). */
+  const EFFECT_HINTS: Record<string, Record<string, string>> = {
+    tone: {
+      cinematic: "moody grade · the story climaxes in a hero shot",
+      calm: "gentle pacing · no tension beats · room to breathe",
+      urgent: "fast cuts · a tension beat mid-story · punchy titles",
+      epic: "opens wide · terrain on · slow hero finale",
+    },
+    energy: {
+      smooth: "gliding, eased camera — never abrupt",
+      dynamic: "chase camera · high pitch · motion in every beat",
+      punchy: "quick zooms · fast pacing",
+      locked: "still frames · the map breathes",
+    },
+    length: {
+      "8": "2–3 beats — one sharp idea",
+      "15": "3–4 beats — setup → payoff",
+      "30": "4–6 beats — a full mini-doc arc",
+    },
+  };
+  const effectFor = (q: IVQ, val: string): string =>
+    EFFECT_HINTS[q.id]?.[val] ?? (q.id === "focus" ? "the director builds the thesis around this" : "");
   const ivPayload = () => iv ? { answers: iv.answers, text: iv.questions.map((q) => `• ${q.question} → ${ivLabel(q, iv.answers[q.id])}`).join("\n") } : undefined;
   const setAnswer = (qid: string, value: string) => setIv((s) => (s ? { ...s, answers: { ...s.answers, [qid]: value } } : s));
 
   const startInterview = async (idea: string) => {
     setIvLoading(true); setError(null);
     try {
-      const r = await fetch("/api/v2/interview", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idea, ai: useAI ? ai() : undefined, useAI }),
-      });
+      const r = await postJSON("/api/v2/interview", { idea, ai: useAI ? ai() : undefined, useAI }, 45_000);
       const d = await r.json();
       if (d?.questions?.length) {
         const answers: Record<string, string> = {};
@@ -245,16 +281,22 @@ export const AiIdeaBox: React.FC<{
       if (!d?.project) { setError(d?.error ?? "Couldn't generate that — try a clearer idea."); setLoading(false); return; }
       if (useAI && d.aiConfigured === false) setAiNudge(true);
       if (d._meta?.warning) setGenerationWarning(d._meta.warning);
-      if (d.story && d.plan) { setReview({ project: d.project, plan: d.plan, narration: d.narration ?? [], styleId, idea: filled[0], verification: d.verification, storyboard: d.storyboard, dirScript: d.dirScript }); setLoading(false); return; }
+      const choices = iv ? iv.questions.map((q) => ivLabel(q, iv.answers[q.id])) : undefined;
+      if (d.story && d.plan) { setReview({ project: d.project, plan: d.plan, narration: d.narration ?? [], styleId, idea: filled[0], verification: d.verification, storyboard: d.storyboard, dirScript: d.dirScript, choices }); setLoading(false); return; }
       if (d.plan || d.verification) {
         // Only pause at the single-scene review when AI research produced a
         // Director's Brief worth reading (thesis + facts). Smart Director goes
         // straight to the editor — no extra click needed.
         const hasResearch = !!(d.dirScript?.beats?.length || (d.verification?.thesis && d.verification?.facts?.length > 0));
-        if (hasResearch) { setReview({ project: d.project, plan: d.plan, narration: d.narration ?? [], styleId, idea: filled[0], verification: d.verification, storyboard: d.storyboard, dirScript: d.dirScript, single: true }); setLoading(false); return; }
+        if (hasResearch) { setReview({ project: d.project, plan: d.plan, narration: d.narration ?? [], styleId, idea: filled[0], verification: d.verification, storyboard: d.storyboard, dirScript: d.dirScript, single: true, choices }); setLoading(false); return; }
       }
       openInEditor(d.project, d.narration ?? []);
-    } catch { setError("Network error — please try again."); setLoading(false); }
+    } catch (e: any) {
+      setError(e?.name === "AbortError"
+        ? "The director is taking longer than usual — please try again."
+        : "Network error — please try again.");
+      setLoading(false);
+    }
   };
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -406,6 +448,14 @@ export const AiIdeaBox: React.FC<{
                       );
                     })}
                   </div>
+                  {(() => {
+                    const eff = effectFor(q, iv!.answers[q.id]);
+                    return eff ? (
+                      <div key={iv!.answers[q.id]} className={`mt-1 text-[10px] ${dm ? "text-[#8fb8ff]/75" : "text-iris/75"}`} style={{ animation: "dvRise .25s ease" }}>
+                        → {eff}
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
               ))}
             </div>
@@ -587,16 +637,9 @@ export const AiIdeaBox: React.FC<{
       )}
 
       {/* ── FOOTER LINKS ────────────────────────────────────────────────────── */}
-      <div className={`mt-3 flex items-center justify-between gap-1.5 text-[11px] ${dm ? "text-white/22" : "text-graphite/40"}`}>
-        <div className="flex items-center gap-1.5">
-          <span>or</span>
-          <button
-            onClick={() => router.push("/studio2")}
-            className={`inline-flex items-center gap-1 transition-colors ${dm ? "text-white/38 hover:text-iris" : "text-graphite/55 hover:text-iris"}`}
-          >
-            start from a blank map <ArrowRight size={11} />
-          </button>
-        </div>
+      {/* "Start from a blank map" lives in the top nav — removed here per Micha
+          so the prompt box stays focused on describing a story. */}
+      <div className={`mt-3 flex items-center justify-end gap-1.5 text-[11px] ${dm ? "text-white/22" : "text-graphite/40"}`}>
         <button
           onClick={() => setSettingsOpen(true)}
           className={`inline-flex items-center gap-1 transition-colors ${dm ? "text-white/28 hover:text-iris" : "text-graphite/45 hover:text-iris"}`}

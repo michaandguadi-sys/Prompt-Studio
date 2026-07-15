@@ -28,7 +28,7 @@ Last verified: 2026-07-03 (all ✅ items machine-verified on this codebase).
 4. **Transfer code**: `git clone` your repo on the VPS (or rsync, excluding node_modules/.next).
 5. **Env files on the VPS** (never committed):
    - `.env` (build args): `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_MAPBOX_TOKEN=` (empty is fine)
-   - `.env.production` (runtime): copy from `.env.production.example`, fill `CLERK_SECRET_KEY`, `CLERK_WEBHOOK_SECRET`, `ANTHROPIC_API_KEY`
+   - `.env.production` (runtime): copy from `.env.production.example`, fill `CLERK_SECRET_KEY`, `CLERK_WEBHOOK_SECRET`, and `ZAI_API_KEY` (the built-in AI story engine — see `docs/ZAI_SETUP.md`; `ANTHROPIC_API_KEY` etc. also work, or users BYO in Settings)
 6. **Caddy**: copy `Caddyfile` to `/etc/caddy/Caddyfile`, set your domain, `systemctl reload caddy`.
 7. **DNS**: `A @ → VPS IP`, `A www → VPS IP`.
 8. **Launch**: `docker compose up -d --build` (first build ~5–8 min).
@@ -36,9 +36,10 @@ Last verified: 2026-07-03 (all ✅ items machine-verified on this codebase).
 
 ## ⚠️ Known decisions / deferred (fine for MVP)
 
-- **Branding**: landing says "Prompt Studio", the app says "Mapanisy" — pick one before marketing pushes (grep for both).
+- **Branding**: ✅ resolved — uniformly "Mapanisy" across the app (0 "Prompt Studio" / "Mapinsy" left).
+- **Orphaned v1 layer** (deferred, edge-gated & safe for MVP — middleware gates all of it): the old per-type `/studio/*` pages (map/edit/title/quote/lowerthird/dataviz) and the legacy render system (`src/lib/renderQueue.ts`, `/api/render`, `/api/render-queue` [+ `/[id]`], `/api/export-tsx`, `/api/ai/generate` [orphaned], `ExportDialog`, `RenderQueueWidget`) are superseded by the v2 editor (`/studio2`) and the v2 render path (`/api/v2/render` + `src/v2/ui/RenderQueue`). Not in the shipping nav. The redundant `RenderQueueWidget` was removed from `(studio)/layout.tsx`. Post-launch: delete the rest, or add `auth()`+rate-limit and scope `GET /api/render-queue` to the user (it currently lists all jobs). None are internet-reachable (Clerk middleware gates them).
 - **Database**: optional at launch — file store under the `data/dev` volume works for MVP; add Postgres (`DATABASE_URL`) when multi-user grows.
-- **Stripe**: skip until billing goes live; free tier needs no Stripe. Price IDs go in `.env.production` later.
+- **Stripe**: skip until billing goes live; free tier needs no Stripe. When you go live, create the products + prices and set `STRIPE_PRICE_CREATOR` (monthly), `STRIPE_PRICE_CREATOR_ANNUAL` (yearly), and `STRIPE_PRICE_PRO` (a **one-time** price for the $250 lifetime tier) in `.env.production`. Checkout is mode-aware (subscription vs one-time) and the webhook already grants Pro-lifetime on `checkout.session.completed` — just add the Stripe endpoint + `STRIPE_WEBHOOK_SECRET`.
 - **R2/S3 storage**: renders stream from the app volume for now; add R2 for CDN delivery later.
 - **drizzle.config.ts** uses the installed drizzle-kit 0.18 flat API — if you bump drizzle-kit, switch back to the `dialect` shape.
 
@@ -46,5 +47,6 @@ Last verified: 2026-07-03 (all ✅ items machine-verified on this codebase).
 ```
 CLERK_SECRET_KEY + NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
 NEXT_PUBLIC_APP_URL
-ANTHROPIC_API_KEY   # or users bring their own key in Settings
+ZAI_API_KEY         # built-in AI story engine (free GLM tier) — see docs/ZAI_SETUP.md
+                    # (ANTHROPIC_API_KEY etc. also work; users can BYO in Settings)
 ```

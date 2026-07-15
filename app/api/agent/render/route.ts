@@ -16,6 +16,7 @@ import { generateQuoteSceneTsx } from "@/lib/codegen/quoteScene";
 import { toComponentName } from "@/lib/codegen/util";
 import { enqueueAgentJob, sessionForUser, type AgentJobSettings } from "@/lib/agentBridge";
 import { checkQuota } from "@/lib/quota";
+import { TIERS } from "@/lib/tiers";
 import { ExportSpecPayload, parseOrError } from "@/lib/schemas";
 import { devGetOrCreateUserByClerk } from "@/lib/devAgentStore";
 import type { SceneSpec } from "@/lib/types";
@@ -118,7 +119,20 @@ export async function POST(req: NextRequest) {
       upgradeUrl: "/pricing",
     }, { status: 402 });
   }
-  const watermark = !!db && quota.tier === "free";
+  // Fail CLOSED in production: no DB ⇒ treat as free. And the agent runs on the
+  // user's own machine where the watermark flag is advisory — branded tiers may
+  // not render here at all; they use the server-authoritative /api/v2/render path.
+  const isProd = process.env.NODE_ENV === "production";
+  const billingTier = db || !isProd ? quota.tier : "free";
+  if (!(TIERS[billingTier]?.agentAllowed ?? true)) {
+    return NextResponse.json({
+      error: "agent_not_allowed",
+      message: "Free renders run in the cloud (with watermark). Upgrade for unlimited renders on your own machine.",
+      tier: billingTier, upgradeUrl: "/pricing",
+    }, { status: 403 });
+  }
+  const watermark = billingTier === "free";
+  settings.scale = Math.min(Math.max(0.1, Number(settings.scale) || 1), TIERS[billingTier]?.maxScale ?? 1);
 
   const job = enqueueAgentJob(userId, spec.name, tsx, rootTsx, settings, spec, scenes, watermark);
   return NextResponse.json({

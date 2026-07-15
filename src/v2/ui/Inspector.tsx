@@ -553,7 +553,7 @@ const QuickAdjust: React.FC = () => {
           format={(v) => (v < 0.3 ? "none" : v < 2 ? "subtle" : v < 4.5 ? "medium" : "big")} />
       )}
       <div className="grid grid-cols-2 gap-2">
-        <Slider label="Tilt" value={cam.end.pitch} min={0} max={80} step={1} onChange={(v) => patchLayer(cam.id, { end: { ...cam.end, pitch: v } })} format={(v) => `${Math.round(v)}°`} />
+        <Slider label="Tilt" value={cam.end.pitch} min={0} max={85} step={1} onChange={(v) => patchLayer(cam.id, { end: { ...cam.end, pitch: v } })} format={(v) => `${Math.round(v)}°`} />
         <Slider label="Pace" value={durationSec} min={2} max={30} step={0.5} onChange={(v) => patchComposition({ durationSec: v })} format={(v) => `${v.toFixed(1)}s`} />
       </div>
       <Field label="My presets" hint="save look + camera, reuse anywhere">
@@ -1326,7 +1326,7 @@ const LayerFields: React.FC<{ layer: Layer; set: (p: Record<string, unknown>) =>
 
 /* ── Data layers (choropleth · bubble) — import REAL data, AI-cleaned, Pro-only ── */
 
-const PRO_DATA_TIERS = new Set(["teams", "custom", "agency"]); // Pro · Studio · Enterprise
+const PRO_DATA_TIERS = new Set(["pro"]); // data layers (choropleth · bubble) are a Pro perk
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Lerp two #rrggbb hex colours → the choropleth value ramp. */
@@ -1616,7 +1616,7 @@ const TrackFields: React.FC<{ layer: TrackLayer; set: (p: Record<string, unknown
       </Section>
 
       <Section title="Camera fine-tune">
-        <Slider label="Tilt" value={layer.pitch} min={0} max={80} step={1} onChange={(v) => set({ pitch: v })} format={(v) => `${Math.round(v)}°`} />
+        <Slider label="Tilt" value={layer.pitch} min={0} max={85} step={1} onChange={(v) => set({ pitch: v })} format={(v) => `${Math.round(v)}°`} />
         <Slider label="Zoom" value={layer.zoomOffset} min={-3} max={3} step={0.1} onChange={(v) => set({ zoomOffset: v })} format={(v) => (v > 0 ? `+${v.toFixed(1)}` : v.toFixed(1))} />
         <Slider label="Rotate" value={layer.bearingOffset} min={-180} max={180} step={1} onChange={(v) => set({ bearingOffset: v })} format={(v) => `${Math.round(v)}°`} />
       </Section>

@@ -4,6 +4,11 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { WEBFONTS_CSS_URL } from "@/v2/doc/themes";
 
 export const metadata: Metadata = {
+  // Resolves every RELATIVE og/twitter image (e.g. page.tsx's "/og-image.jpg")
+  // to an ABSOLUTE production URL. Without this, shared links (Twitter, Slack,
+  // Discord, Product Hunt) render a broken preview because Next falls back to
+  // localhost. Same origin source of truth as sitemap.ts / robots.ts.
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? "https://mapanisy.com"),
   title: "Mapanisy — The AI Story-Map Editor",
   description: "Turn any story — or any GPS track — into a cinematic 4K map animation. Fact-checked AI direction, no motion-design skills required.",
 };

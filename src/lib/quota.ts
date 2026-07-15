@@ -30,12 +30,18 @@ export type QuotaResult = {
 
 export async function checkQuota(userId: string): Promise<QuotaResult> {
   // Dev/testing bypass: add BYPASS_QUOTA=true to .env.local to unlock all tiers.
-  // Never set this in production — it disables all metering.
-  if (process.env.BYPASS_QUOTA === "true" || !db) {
+  // REFUSED in production — it would disable all metering and branding, so a
+  // leaked env var must never be able to hand out clean unlimited renders.
+  const bypassRequested = process.env.BYPASS_QUOTA === "true";
+  const isProd = process.env.NODE_ENV === "production";
+  if (bypassRequested && isProd) {
+    console.error("[quota] BYPASS_QUOTA=true is set in PRODUCTION — ignoring it. Remove the env var.");
+  }
+  if ((bypassRequested && !isProd) || !db) {
     return {
       allowed: true, usedMinutes: 0, limitMinutes: 9999,
       usedRenders: 0, maxRenders: null, unit: "minute",
-      tier: "teams", periodStart: new Date(), fraction: 0,
+      tier: "pro", periodStart: new Date(), fraction: 0,
     };
   }
 

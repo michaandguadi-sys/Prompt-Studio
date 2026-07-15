@@ -27,6 +27,9 @@ export const CameraPose = z.object({
   lon: z.number(),
   lat: z.number(),
   zoom: z.number().min(0).max(22),
+  // 85° is maplibre-gl 4.x's hard ceiling (values >85 throw in the Map
+  // constructor). The brief's full 90° look-ahead is blocked on the
+  // maplibre-gl v5 upgrade — raise here + every clamp site together then.
   pitch: z.number().min(0).max(85).default(0),
   bearing: z.number().default(0),
 });
@@ -706,7 +709,7 @@ export const TrackLayer = z.object({
   dotColor: z.string().default("#ffffff"),    // the moving head
   showDot: z.boolean().default(true),
   // camera offsets layered on top of the variant's base framing
-  pitch: z.number().min(0).max(84).default(60),
+  pitch: z.number().min(0).max(85).default(60),
   zoomOffset: z.number().min(-4).max(4).default(0),
   bearingOffset: z.number().min(-180).max(180).default(0),
   // labels
@@ -887,6 +890,13 @@ export const Composition = z.object({
   /** Suggested voiceover / documentary narration for this beat.
    *  Rendered as a subtitle at the bottom when look.showCaptions is true. */
   narration: z.string().default(""),
+  /** Multi-beat timed narration captions — one line per story beat, shown at
+   *  its camera-arrival time. Any field outside this schema is silently
+   *  stripped by every parseProject() round-trip, so it must live here. */
+  narrationLines: z.array(z.object({
+    text: z.string(),
+    startSec: z.number(),
+  })).default([]),
   /** Journalism-grade in-frame source citations (e.g. "World Bank 2024", "UN OCHA").
    *  Auto-populated from the AI brief's fact sources; displayed as a subtle corner overlay. */
   citations: z.array(z.string()).default([]),
@@ -946,6 +956,19 @@ export function dimsFor(aspect: Aspect): { width: number; height: number } {
     case "1:1": return { width: 2160, height: 2160 };
     default: return { width: 3840, height: 2160 };
   }
+}
+
+/**
+ * World-wrap zoom floor: the lowest zoom at which ONE world copy still fills
+ * the frame, so the camera can never pull back far enough to show duplicated
+ * landmasses in a single frame. MapLibre's projected world is 512·2^zoom px
+ * wide, so the floor is log2(canvasWidth / 512) plus a small safety margin.
+ * 16:9 → ≈2.96 · 9:16 and 1:1 → ≈2.13.
+ * Enforced at the validation gate (fixPose) and as minZoom on the render <Map>.
+ */
+export function minZoomForAspect(aspect: Aspect): number {
+  const { width } = dimsFor(aspect);
+  return Math.log2(width / 512) + 0.05;
 }
 
 /** Parse + validate an unknown value into a Project (throws on invalid). */

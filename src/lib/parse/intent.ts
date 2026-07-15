@@ -139,6 +139,11 @@ const resolvePlace = (frag: string): string | null => {
   if (/^[A-Za-z][A-Za-z .'-]{1,40}$/.test(f) && f.split(/\s+/).length <= 4) {
     const stop = new Set(["all", "countries", "country", "world", "map", "everything", "them", "it"]);
     if (stop.has(lf)) return null;
+    // Art-direction is never geography. Trailing craft phrases ("…, vintage atlas
+    // style", "…map animation") get split into fragments here and would otherwise
+    // Title-case into phantom route stops / highlights. These words never appear
+    // in a real place name, so rejecting them is safe (known places resolved above).
+    if (/\b(styles?|animation|animated|documentary|cinematic|voiceover|narration|flythrough|aesthetic|filmic|montage)\b/i.test(f)) return null;
     return f.replace(/\b\w/g, (c) => c.toUpperCase());
   }
   return null;
@@ -171,7 +176,12 @@ function continentKey(text: string): string | null {
 }
 
 function extractRoute(text: string): { from: string; to: string; via: string[] } | null {
-  const arrow = /→|->|—|–/.test(text);
+  // Only LITERAL arrows denote a route. Em/en-dashes (— –) are ordinary prose
+  // punctuation ("…Brazil — a punchy 15s cut") — treating them as arrows made a
+  // "Highlight France, Italy, Japan, Brazil — …" prompt mis-parse as a route AND
+  // dropped the country bundled with the leading clause. Real routes still work
+  // via arrows, "from…to", route nouns, or a bare "X to Y".
+  const arrow = /→|->/.test(text);
   const fromTo = /\bfrom\b[\s\S]+\bto\b/i.test(text);
   const routeNoun = ROUTE_NOUN_RE.test(text);
   const startsWithVerb = /^\s*(zoom|fly|move|go|travel|navigate|pan|dive|show|highlight|mark|focus|reveal|display|emphasi[sz]e|colou?r|fill|outline)\b/i.test(text);

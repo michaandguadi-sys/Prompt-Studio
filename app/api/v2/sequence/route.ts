@@ -8,6 +8,8 @@
  * handles the common commands with NO API key; the configured AI handles nuance.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
+import { rateLimit } from "@/lib/rateLimit";
 import { aiComplete, resolveAIConfig, configFromUser } from "@/lib/ai/providers";
 
 type Trans = "cut" | "fade" | "crossfade" | "slide";
@@ -146,6 +148,14 @@ async function aiOps(cmd: string, scenes: SceneSummary[], cfg: any): Promise<Op[
 }
 
 export async function POST(req: NextRequest) {
+  // Defense-in-depth: this route can call the configured LLM (aiOps) — gate it
+  // like every other AI route (C3/C4) so a middleware slip can't open cost abuse.
+  const { userId } = await auth();
+  if (!userId) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+  if (!rateLimit("v2-sequence", userId, { maxRequests: 30, windowSec: 60 })) {
+    return NextResponse.json({ error: "Rate limit exceeded — slow down a moment." }, { status: 429 });
+  }
+
   let body: { command?: string; scenes?: SceneSummary[]; ai?: any };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Bad JSON" }, { status: 400 }); }
   const command = (body.command ?? "").trim();

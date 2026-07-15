@@ -22,6 +22,7 @@ import { sharedBorderLine, sampleAlong, bboxOfGeos } from "@/lib/geoBorders";
 import { resolveRegion, detectRegion, cameraForBbox } from "@/lib/geoRegions";
 import { signatureStyleById } from "@/lib/presets/signatureStyles";
 import { map3dStyleById } from "@/lib/presets/map3dStyles";
+import { detectProStyle } from "@/lib/presets/proMapStyles";
 import { aiComplete, resolveAIConfig, configFromUser, type AIConfig } from "@/lib/ai/providers";
 import { _registerPlanBuilder } from "@/lib/planBuilder";
 import { DIRECTOR_PRINCIPLES, SOURCE_AND_VERIFY, COHESION_LAW, ARCHETYPES, matchArchetype } from "@/lib/ai/directorDoctrine";
@@ -188,7 +189,7 @@ const MOTIONS = ["fly-in", "zoom-out", "orbit", "push-in", "pan", "hold"];
 const SYSTEM = `You are the director of "Mapanisy", a cinematic MAP-animation studio (Vox / Johnny Harris style). Translate the user's idea into ONE finished, well-composed, art-directed map animation. Think like an editor: what is the single visual story, where does the eye go, what's the one focal point?
 
 Output ONLY minified JSON (no prose, no markdown) of EXACTLY this shape:
-{"title":str(≤30),"subtitle":str(≤48),"durationSec":num(5-12),"aspect":"16:9"|"9:16"|"1:1","basemapStyle":"dark"|"light"|"satellite"|"streets"|"outdoors"|"historical","mapYear":"1880 (start era, historical only)","mapYearEnd":"1920 (end era — animates year sweep + on-screen counter; historical only)","terrain":bool,"focus":str,"motion":"fly-in"|"zoom-out"|"orbit"|"push-in"|"pan"|"hold","cameraStops":[str],"mood":"conflict"|"historical"|"trade"|"empire"|"political"|"arctic"|"neutral","palette":"Default"|"Vox Editorial"|"Arctic Cold"|"Conflict Red"|"Trade Green"|"Political Violet"|"Classic Mono","priority":"camera"|"route"|"highlight","map3dStyle":"(optional look) PRO: clean-minimal|apple-light|apple-dark|earth-documentary|natgeo|satellite-cinematic|adventure|hiking|luxury-travel|editorial|filmic|midnight|desert|winter|ocean|vintage-atlas|modern-monochrome|metro-night|pastel-city|nordic-light|crimson-atlas|deep-ocean|sunrise-terrain · CREATIVE: holographic|neon-noir|miniature|blueprint|obsidian|molten|aurora|crystal-ice|papercraft|war-room|sakura|emerald|golden-hour|monochrome","map3dCustom":{"(optional — INVENT a bespoke 3D world when no preset fits)":"","landColor":"#hex","waterColor":"#hex","buildingColor":"#hex","buildingOpacity":0-1,"buildingHeightMult":0.2-8,"buildingGradient":bool,"boundaryGlow":"#hex","terrain":bool,"terrainStrength":0-5,"bgColor":"#hex","tintColor":"#hex","tintOpacity":0-1,"vignette":0-0.7,"pitch":0-84},"look":{"vignette":0-0.7,"grain":0-0.3,"texture":"none"|"paper","mapFilter":"none"|"antique"|"noir"|"sepia"},"layers":[...]}
+{"title":str(≤30),"subtitle":str(≤48),"durationSec":num(5-12),"aspect":"16:9"|"9:16"|"1:1","basemapStyle":"dark"|"light"|"satellite"|"streets"|"outdoors"|"historical","mapYear":"1880 (start era, historical only)","mapYearEnd":"1920 (end era — animates year sweep + on-screen counter; historical only)","terrain":bool,"focus":str,"motion":"fly-in"|"zoom-out"|"orbit"|"push-in"|"pan"|"hold","cameraStops":[str],"mood":"conflict"|"historical"|"trade"|"empire"|"political"|"arctic"|"neutral","palette":"Default"|"Vox Editorial"|"Arctic Cold"|"Conflict Red"|"Trade Green"|"Political Violet"|"Classic Mono","priority":"camera"|"route"|"highlight","map3dStyle":"(optional look) PRO: cartograph|apple-light|apple-dark|earth-documentary|natgeo|satellite-cinematic|adventure|hiking|luxury-travel|editorial|filmic|midnight|desert|winter|ocean|vintage-atlas|modern-monochrome|metro-night|pastel-city|nordic-light|crimson-atlas|deep-ocean|sunrise-terrain|dark-editorial|satellite-night|risograph|thermal|drafting · CREATIVE: holographic|neon-noir|miniature|blueprint|obsidian|molten|aurora|crystal-ice|papercraft|war-room|sakura|emerald|golden-hour|monochrome","map3dCustom":{"(optional — INVENT a bespoke 3D world when no preset fits)":"","landColor":"#hex","waterColor":"#hex","buildingColor":"#hex","buildingOpacity":0-1,"buildingHeightMult":0.2-8,"buildingGradient":bool,"boundaryGlow":"#hex","terrain":bool,"terrainStrength":0-5,"bgColor":"#hex","tintColor":"#hex","tintOpacity":0-1,"vignette":0-0.7,"pitch":0-85},"look":{"vignette":0-0.7,"grain":0-0.3,"texture":"none"|"paper","mapFilter":"none"|"antique"|"noir"|"sepia"},"layers":[...]}
 
 layer kinds (refer to places by NAME — coords are resolved for you):
  {"kind":"highlight","place":"France","fill":"flag"|"solid"|"hatch"|"crosshatch"|"stripes"|"dots","mood":"conflict","label":"optional ON-MAP text"}
@@ -260,7 +261,7 @@ FRAMING & STYLE DISCIPLINE — pick the move + style that SUIT the content (the 
  • A JOURNEY / route → basemapStyle:"dark", motion:"fly-in" through cameraStops, moderate tilt.
  • HISTORICAL → basemapStyle:"historical" or the antique look; keep the camera flatter (old maps read top-down).
  Match basemapStyle to the subject EVERY time — a wrong style (satellite under data, flat dark for a skyline) is the #1 thing that makes it look amateur.
- • MAP STYLE via "map3dStyle" — PREFER the PROFESSIONAL collection for most stories (they read like premium travel documentaries): "earth-documentary"/"satellite-cinematic" for landscapes+terrain, "natgeo"/"vintage-atlas" for history/exploration, "editorial"/"clean-minimal" for news/data, "apple-light"/"apple-dark" for modern product-grade looks, "adventure"/"hiking" for outdoor journeys, "luxury-travel"/"filmic"/"midnight" for mood pieces, "desert"/"winter"/"ocean" when the geography matches, "modern-monochrome" for stark editorial. The CREATIVE worlds (holographic, neon-noir, miniature, blueprint, molten, aurora, war-room, sakura, …) are for deliberately stylised pieces — use only when the brief calls for that energy; best on a CITY reveal, pairs with motion:"orbit"/"push-in".
+ • MAP STYLE via "map3dStyle" — PREFER the PROFESSIONAL collection for most stories (they read like premium travel documentaries): "earth-documentary"/"satellite-cinematic" for landscapes+terrain, "natgeo"/"vintage-atlas" for history/exploration, "editorial" for news/data, "cartograph" for adventure/expedition/history with a hand-drawn survey-atlas feel (parchment + 3D terrain + a lat/long grid + ink borders), "dark-editorial" for hard news / geopolitics / conflict (red country borders, grey streets — the newsroom look), "satellite-night" for a dramatic earth-at-night global opener or a space-view reveal, "apple-light"/"apple-dark" for modern product-grade looks, "adventure"/"hiking" for outdoor journeys, "luxury-travel"/"filmic"/"midnight" for mood pieces, "desert"/"winter"/"ocean" when the geography matches, "modern-monochrome" for stark editorial, "risograph" for a bold poster/zine two-ink print, "thermal" for a dramatic infrared magma-relief reveal, "drafting" for an architect's cyan-blueprint-on-cream gridded look. The CREATIVE worlds (holographic, neon-noir, miniature, blueprint, molten, aurora, war-room, sakura, …) are for deliberately stylised pieces — use only when the brief calls for that energy; best on a CITY reveal, pairs with motion:"orbit"/"push-in".
  • INVENT A 3D WORLD: when the story has a strong colour identity that no preset nails (e.g. "a toxic green wasteland", "a royal purple empire", "a frozen crimson tundra"), set "map3dCustom" with your own hexes — landColor, waterColor, buildingColor (+ buildingHeightMult/Gradient), boundaryGlow, terrain, bgColor/tintColor, pitch. Be bold and cohesive; the schema clamps anything out of range. Use a preset OR map3dCustom, not both.
 
 8. PLACE ACCURACY (critical — the map MUST land on the right spot). Every place name you emit is geocoded literally, so be UNAMBIGUOUS:
@@ -369,7 +370,7 @@ type DirectorBeat = {
   pacing?: "slow" | "medium" | "fast";
   cameraIntent?: "establish" | "explore" | "focus" | "reveal" | "hero";
   zoom?: number;           // 2–14
-  pitch?: number;          // 0–75 degrees
+  pitch?: number;          // 0–85 degrees (85 = maplibre 4.x max — near-horizon look-ahead)
   bearing?: number;        // -30–30
   motion?: string;         // fly-in | zoom-out | push-in | orbit | hold
   layers: string[];        // plain English layer descriptions in geography→emphasis→text order
@@ -458,7 +459,7 @@ ENERGY (emotional charge → camera language):
 • "building" → momentum rising. pitch 15-35°, push-in. 4-7s.
 • "tension"  → tight, urgent. pitch 30-50°. 3-5s.
 • "reveal"   → the key moment. Punch close OR sudden wide. 3-6s.
-• "payoff"   → hero shot. pitch 50-75°, slow hold or orbit. 5-10s.
+• "payoff"   → hero shot. pitch 50-85°, slow hold or orbit; 75-85° only for sweeping mountain/city look-ahead reveals. 5-10s.
 
 PACING (duration rhythm):
 • "slow" → 6-10s. Layers stagger 0.5s apart.
@@ -489,7 +490,7 @@ LAYER ORDER — SACRED. Within every beat:
 Never put a title before geography in the same beat.
 
 ━━━ OUTPUT — JSON only, no prose ━━━
-{"inputType":"voiceover|idea|brief","arc":"journey|reveal|contrast|scale|data|conflict","thesis":"≤20 words","totalSec":8-30,"palette":"Default|Vox Editorial|Arctic Cold|Conflict Red|Trade Green|Political Violet|Classic Mono","mapStyle":"dark|light|satellite|outdoors|historical","look":{"mapFilter":"none|antique|noir","vignette":0.3-0.6},"beats":[{"title":"≤20 CHARS","narration":"exact voiceover line or vivid invented narrator sentence","focus":"Precise, Country-qualified place name","energy":"calm|building|tension|reveal|payoff","pacing":"slow|medium|fast","cameraIntent":"establish|explore|focus|reveal|hero","zoom":2-14,"pitch":0-75,"bearing":-30-30,"motion":"fly-in|zoom-out|push-in|orbit|hold","layers":["GEOGRAPHY first","EMPHASIS second","TEXT last"],"entities":[{"place":"Full Name, City, Region, Country","value":NUMBER,"label":"≤15 chars"}],"entityMetric":"Annual Visitors","entityUnit":"visitors/yr","entityStagger":0.9}]}
+{"inputType":"voiceover|idea|brief","arc":"journey|reveal|contrast|scale|data|conflict","thesis":"≤20 words","totalSec":8-30,"palette":"Default|Vox Editorial|Arctic Cold|Conflict Red|Trade Green|Political Violet|Classic Mono","mapStyle":"dark|light|satellite|outdoors|historical","look":{"mapFilter":"none|antique|noir","vignette":0.3-0.6},"beats":[{"title":"≤20 CHARS","narration":"exact voiceover line or vivid invented narrator sentence","focus":"Precise, Country-qualified place name","energy":"calm|building|tension|reveal|payoff","pacing":"slow|medium|fast","cameraIntent":"establish|explore|focus|reveal|hero","zoom":3-14,"pitch":0-85,"bearing":-30-30,"motion":"fly-in|zoom-out|push-in|orbit|hold","layers":["GEOGRAPHY first","EMPHASIS second","TEXT last"],"entities":[{"place":"Full Name, City, Region, Country","value":NUMBER,"label":"≤15 chars"}],"entityMetric":"Annual Visitors","entityUnit":"visitors/yr","entityStagger":0.9}]}
 
 LAYER DESCRIPTION EXAMPLES (animator reads these LITERALLY — be precise):
   "highlight Sichuan province, China subtle blue border-first"
@@ -1282,7 +1283,7 @@ async function buildFromPlan(plan: Plan, opts: { story?: boolean } = {}): Promis
     : defaultCamera();
   if (plan.motion && MOTIONS.includes(plan.motion)) (cam as any).style = plan.motion;
   // The AI's explicit camera overrides always win over the derived framing.
-  if (typeof plan.cameraPitch === "number") (cam as any).end.pitch = Math.max(0, Math.min(84, plan.cameraPitch));
+  if (typeof plan.cameraPitch === "number") (cam as any).end.pitch = Math.max(0, Math.min(85, plan.cameraPitch));
   if (typeof plan.cameraBearing === "number") (cam as any).end.bearing = plan.cameraBearing;
 
   // AI-authored camera poses (Phase 2 output) — these carry full per-beat
@@ -1753,7 +1754,7 @@ async function buildFromPlan(plan: Plan, opts: { story?: boolean } = {}): Promis
     const lookPatch: Record<string, unknown> = {};
     for (const k of ["bgColor", "tintColor", "tintOpacity", "vignette"]) if (m3dc[k] !== undefined) lookPatch[k] = m3dc[k];
     project.composition.look = { ...project.composition.look, ...lookPatch } as any;
-    if (typeof m3dc.pitch === "number") (cam as any).end.pitch = Math.max(0, Math.min(84, m3dc.pitch));
+    if (typeof m3dc.pitch === "number") (cam as any).end.pitch = Math.max(0, Math.min(85, m3dc.pitch));
   }
   // Populate composition narration so the renderer can show it as a caption overlay.
   if (Array.isArray((plan as any).narration) && (plan as any).narration[0]) {
@@ -1795,7 +1796,9 @@ async function buildFromPlan(plan: Plan, opts: { story?: boolean } = {}): Promis
     while (beatStarts.length < narrationArr.length) {
       beatStarts.push(Math.round((beatStarts.length / narrationArr.length) * dur * 10) / 10);
     }
-    (project.composition as any).narrationLines = narrationArr.map((text, i) => ({
+    // Typed since narrationLines joined the Composition schema — previously an
+    // `as any` write that every parseProject() round-trip silently stripped.
+    project.composition.narrationLines = narrationArr.map((text, i) => ({
       text, startSec: beatStarts[i] ?? 0,
     }));
     project.composition.look.showCaptions = true;
@@ -2052,6 +2055,61 @@ function heuristicBrief(idea: string): any {
  * the AI planner via the prompt; energy + length are deterministic here so even
  * the no-AI path honors them.)
  */
+/**
+ * Camera energy derived from tone — the interview is 3 questions (tone, focus,
+ * length), so when the user hasn't answered a legacy `energy` question the
+ * tone decides the camera language. This keeps every answer consequential on
+ * BOTH the AI and no-AI paths.
+ */
+function energyFromInterview(iv: any): string {
+  const explicit = String(iv?.energy ?? "");
+  if (explicit) return explicit;
+  const tone = String(iv?.tone ?? "");
+  return tone === "urgent" ? "punchy"
+    : tone === "epic" ? "dynamic"
+    : tone === "calm" ? "smooth"
+    : tone === "cinematic" ? "smooth"
+    : "";
+}
+
+/**
+ * Translate the interview answers into BINDING directives in the Director's
+ * own vocabulary (energy arc, pacing, runtime, thesis angle). This is what
+ * makes the 3-tap Q&A actually steer the story engine — the answers arrive as
+ * hard constraints, not a suggestion blob.
+ */
+function interviewDirectives(iv: any, ivText: string): string {
+  if (!iv && !ivText) return "";
+  const lines: string[] = [];
+  const tone = String(iv?.tone ?? "");
+  const energy = energyFromInterview(iv);
+  const length = String(iv?.length ?? "");
+
+  if (tone === "cinematic") lines.push(`TONE (binding): cinematic & dramatic — moody palette, strong vignette, and the energy arc MUST climax in a "payoff" hero beat.`);
+  else if (tone === "calm") lines.push(`TONE (binding): calm & informational — restrained camera, NO "tension" beats; energies stay calm/building, generous dwell time.`);
+  else if (tone === "urgent") lines.push(`TONE (binding): urgent, news-style — "fast" pacing, put a "tension" beat in the middle third, short punchy titles.`);
+  else if (tone === "epic") lines.push(`TONE (binding): epic & sweeping — wide establishing shot first, terrain on, and a "payoff" finale with a slow hero move.`);
+
+  if (energy === "smooth") lines.push(`CAMERA (binding): smooth & elegant — fly-in / push-in moves, eased motion, never abrupt.`);
+  else if (energy === "dynamic") lines.push(`CAMERA (binding): dynamic — favor route-following/chase moves, higher pitch, motion in every beat.`);
+  else if (energy === "punchy") lines.push(`CAMERA (binding): punchy & fast — quick zooms, "fast" pacing on most beats.`);
+  else if (energy === "locked") lines.push(`CAMERA (binding): locked-off & still — hold shots, let the map breathe.`);
+
+  if (length === "8" || length === "15" || length === "30") {
+    const beats = length === "8" ? "2–3" : length === "15" ? "3–4" : "4–6";
+    lines.push(`RUNTIME (binding): totalSec ≈ ${length}. Plan exactly ${beats} beats to fit — do not exceed it.`);
+  }
+
+  // The readable transcript from the client ("• question → chosen label")
+  // carries the tailored FOCUS answer and any AI-generated questions verbatim —
+  // the Director builds the thesis around it.
+  if (ivText) lines.push(`THE CREATOR'S ANSWERS (the "focus" line defines the story's angle — the thesis MUST serve it):\n${ivText}`);
+
+  return lines.length
+    ? `## THE CREATOR'S DECISIONS — binding directives, not suggestions. Every one must be visible in the result:\n${lines.join("\n")}`
+    : "";
+}
+
 function applyInterview(project: Project, iv: any) {
   const comps: any[] = [];
   if (project.composition) comps.push(project.composition);
@@ -2072,7 +2130,7 @@ function applyInterview(project: Project, iv: any) {
     }
   }
 
-  const energy = String(iv.energy ?? "");
+  const energy = energyFromInterview(iv);
   if (!energy) return;
   for (const c of uniq) {
     const cam = c.layers.find((l: Layer) => l.type === "camera") as any;
@@ -2183,7 +2241,8 @@ export async function POST(req: NextRequest) {
     if (it?.route) ctx.push(`Route: ${it.route.from} → ${it.route.via.length ? it.route.via.join(" → ") + " → " : ""}${it.route.to}`);
     if (it?.action && it.action !== "unknown") ctx.push(`Action type: ${it.action}`);
     if (arch) ctx.push(`Matched story archetype: ${arch.name}.\nRecipe: ${arch.recipe.slice(0, 220)}`);
-    if (ivText) ctx.push(`User director constraints: ${ivText}`);
+    const directives = interviewDirectives(iv, ivText);
+    if (directives) ctx.push(directives);
     if (taste) ctx.push(`User taste profile (learned from their past choices — bias style/palette/pacing toward it unless the brief says otherwise): ${taste}`);
     if (!ctx.length) return idea;
     return `${idea}\n\n## ENGINE PRE-ANALYSIS — trust and use this:\n${ctx.join("\n")}`;
@@ -2206,8 +2265,9 @@ export async function POST(req: NextRequest) {
     dirScript ? scriptToComposerContext(dirScript) : idea,
     // Framework instruction still shapes structure when no director script (arc mode).
     !dirScript && framework && aiCfg ? frameworkInstruction(framework) : "",
-    // Interview constraints always flow through.
-    !dirScript && ivText ? `Director constraints (honor these):\n${ivText}` : "",
+    // Interview decisions flow to the Composer when no Director script carried
+    // them (arc mode / director skipped) — same binding form.
+    !dirScript ? interviewDirectives(iv, ivText) : "",
     // Arc continuity context.
     arcText && aiCfg ? arcText : "",
     // Learned user taste — a nudge for the composer's map3dStyle/palette/fonts.
@@ -2296,6 +2356,16 @@ export async function POST(req: NextRequest) {
     // Keep "historical" if the planner chose period borders — the era is the point.
     if (sig.basemapStyle && plan.basemapStyle !== "historical") plan.basemapStyle = sig.basemapStyle;
   }
+
+  // LANDING-PARITY: turn the creator's requested LOOK language into the matching
+  // pro style so the preview they tapped on the landing (or asked for in the
+  // BuildFlow "look" question) becomes the ACTUAL film — even with no AI. The AI
+  // path sets map3dStyle itself, so only fill it when nothing chose one yet.
+  if (!directPlan && !(plan as any).map3dStyle) {
+    const look = detectProStyle(`${idea} ${ivText}`);
+    if (look) (plan as any).map3dStyle = look;
+  }
+
   try {
     // A story is built as ONE continuous timeline (beats sequenced inside a
     // single composition) — never auto-split into scenes. Users add scenes

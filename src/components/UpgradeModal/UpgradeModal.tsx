@@ -60,14 +60,16 @@ export const UpgradeModal: React.FC<{
             Upgrade to keep rendering. Your scenes and settings are saved — pick up right where you left off.
           </p>
 
-          <div className="grid grid-cols-3 gap-2">
-            {(["creator", "teams", "custom"] as const).map((t) => {
+          <div className="grid grid-cols-2 gap-2">
+            {(["creator", "pro"] as const).map((t) => {
               const tc = TIERS[t];
               return (
                 <div key={t} className="rounded-lg border border-ink-700 bg-ink-900/40 p-3 text-center">
                   <div className="text-[10px] uppercase tracking-wider text-amber mb-1">{tc.label}</div>
                   <div className="text-sm font-semibold text-white">{tc.unlimited ? "Unlimited" : `${tc.minutesPerMonth} min`}</div>
-                  <div className="text-[10px] text-white/40">${tc.priceUSD}/mo</div>
+                  <div className="text-[10px] text-white/40">
+                    ${tc.priceUSD}{tc.billing === "lifetime" ? " once" : "/mo"}
+                  </div>
                 </div>
               );
             })}

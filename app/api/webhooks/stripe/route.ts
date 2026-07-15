@@ -21,7 +21,7 @@ import { headers } from "next/headers";
 import { db, schema } from "@/lib/db";
 import { eq } from "drizzle-orm";
 import { stripe } from "@/lib/stripe";
-import { tierFromStripePrice, TIERS } from "@/lib/tiers";
+import { tierFromStripePrice, TIERS, type Tier } from "@/lib/tiers";
 import type Stripe from "stripe";
 
 export async function POST(req: Request) {
@@ -45,11 +45,34 @@ export async function POST(req: Request) {
   switch (event.type) {
     case "checkout.session.completed": {
       const session = event.data.object as Stripe.Checkout.Session;
-      if (session.mode !== "subscription") break;
-
       const userId = session.metadata?.userId;
       if (!userId) break;
 
+      // ONE-TIME (lifetime) purchase — the Pro tier. A `payment`-mode checkout
+      // creates NO subscription, so the customer.subscription.* events never
+      // fire; we must grant the tier right here. It never expires:
+      // currentPeriodEnd stays null and nothing will ever downgrade it.
+      if (session.mode === "payment") {
+        if (session.payment_status !== "paid") break;
+        const metaTier = session.metadata?.tier;
+        const tier: Tier = metaTier && metaTier in TIERS ? (metaTier as Tier) : "pro";
+        const tierCfg = TIERS[tier];
+        await db.update(schema.subscriptions)
+          .set({
+            tier,
+            status:               "lifetime",
+            minutesLimit:         tierCfg.minutesPerMonth,
+            stripeSubscriptionId: null,
+            stripePriceId:        tierCfg.stripePriceId,
+            currentPeriodStart:   new Date(),
+            currentPeriodEnd:     null, // lifetime — never expires
+            updatedAt:            new Date(),
+          })
+          .where(eq(schema.subscriptions.userId, userId));
+        break;
+      }
+
+      if (session.mode !== "subscription") break;
       const stripeSub = await stripe.subscriptions.retrieve(session.subscription as string);
       await syncSubscription(userId, stripeSub);
       break;

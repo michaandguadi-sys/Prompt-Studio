@@ -68,7 +68,7 @@ export function sanitizePose(p: CameraPose): CameraPose {
     lon: clampN(finiteOr(p.lon, 0), -180, 180),
     lat: clampN(finiteOr(p.lat, 20), -85, 85),
     zoom: clampN(finiteOr(p.zoom, 3), 0.5, 22),
-    pitch: clampN(finiteOr(p.pitch, 0), 0, 84),
+    pitch: clampN(finiteOr(p.pitch, 0), 0, 85),
     bearing: finiteOr(p.bearing, 0) % 360,
   };
 }

@@ -16,6 +16,7 @@ import { eq } from "drizzle-orm";
 import { enqueueAgentJob, sessionForUser, listJobsForUser, type AgentJobSettings } from "@/lib/agentBridge";
 import { enqueueServerRender, listServerJobsForUser } from "@/lib/serverRender";
 import { checkQuota } from "@/lib/quota";
+import { TIERS } from "@/lib/tiers";
 import { devGetOrCreateUserByClerk } from "@/lib/devAgentStore";
 import { Project as ProjectSchema } from "@/v2/doc/schema";
 import { validateProject } from "@/v2/doc/validate";
@@ -91,7 +92,17 @@ export async function POST(req: NextRequest) {
       tier: quota.tier, unit: quota.unit, upgradeUrl: "/pricing",
     }, { status: 402 });
   }
-  const watermark = !!db && quota.tier === "free";
+  // Fail CLOSED in production: no DB ⇒ no tier lookup ⇒ treat as free
+  // (branded + 720p-capped). Only non-production dev without a DATABASE_URL
+  // keeps the permissive bypass tier from checkQuota.
+  const isProd = process.env.NODE_ENV === "production";
+  const billingTier = db || !isProd ? quota.tier : "free";
+  const watermark = billingTier === "free";
+
+  // Server-authoritative resolution ceiling — the free tier is capped at
+  // 720p-class output no matter what the client's render preset sends.
+  const maxScale = TIERS[billingTier]?.maxScale ?? 1;
+  settings.scale = Math.min(Math.max(0.1, Number(settings.scale) || 1), maxScale);
 
   const name = (project.name || "mapanisy").replace(/[^a-zA-Z0-9\-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "mapanisy";
 
@@ -101,11 +112,15 @@ export async function POST(req: NextRequest) {
   const story = !!body?.story && Array.isArray(project.scenes) && project.scenes.length > 1;
   const compositionId = story ? "MapanisyStory" : "MapanisyV2";
 
-  if (agentOnline) {
+  // The agent renders on the USER'S machine, where watermark/scale flags are
+  // advisory — branded/capped tiers are forced onto the server-authoritative
+  // cloud path instead (free is 3 renders/mo at 720p, so cloud cost is bounded).
+  const agentPermitted = TIERS[billingTier]?.agentAllowed ?? true;
+  if (agentOnline && agentPermitted) {
     const job = story
       ? enqueueAgentJob(userId, name, "", "", settings, undefined, undefined, watermark, undefined, project.scenes)
       : enqueueAgentJob(userId, name, "", "", settings, undefined, undefined, watermark, project.composition);
-    return NextResponse.json({ ok: true, jobId: job.id, mode: "agent", compositionId, watermark, scenes: story ? project.scenes.length : 1, fixes, warnings });
+    return NextResponse.json({ ok: true, jobId: job.id, mode: "agent", compositionId, watermark, scale: settings.scale, scenes: story ? project.scenes.length : 1, fixes, warnings });
   }
 
   const inputProps = story
@@ -117,5 +132,5 @@ export async function POST(req: NextRequest) {
     x264Preset: settings.x264Preset,
     alpha: settings.alpha,
   }, req.nextUrl.origin);
-  return NextResponse.json({ ok: true, jobId: job.id, mode: "cloud", compositionId, watermark, scenes: story ? project.scenes.length : 1, fixes, warnings });
+  return NextResponse.json({ ok: true, jobId: job.id, mode: "cloud", compositionId, watermark, scale: settings.scale, scenes: story ? project.scenes.length : 1, fixes, warnings });
 }
