@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { useStudio } from "@/store/studio";
 import { Save, ChevronDown, Trash2 } from "lucide-react";
+import { confirmDialog, alertDialog } from "@/v2/ui/dialogs";
 
 type Preset = { id: string; data: unknown };
 type Kind = "style" | "scene";
@@ -44,7 +45,7 @@ export const PresetBar: React.FC<{ kind?: Kind }> = ({ kind: initialKind = "scen
     setSaving(false);
     if (!res.ok) {
       const d = await res.json().catch(() => ({}));
-      alert(`Save failed: ${d.error ?? res.statusText}`);
+      await alertDialog({ title: "Save failed", message: d.error ?? res.statusText });
       return;
     }
     setName("");
@@ -58,7 +59,7 @@ export const PresetBar: React.FC<{ kind?: Kind }> = ({ kind: initialKind = "scen
   };
 
   const remove = async (id: string) => {
-    if (!confirm(`Delete preset "${id}"?`)) return;
+    if (!(await confirmDialog({ title: `Delete preset "${id}"?`, confirmLabel: "Delete", danger: true }))) return;
     await fetch(`/api/presets?kind=${kind}&id=${encodeURIComponent(id)}`, { method: "DELETE" });
     await refresh();
   };

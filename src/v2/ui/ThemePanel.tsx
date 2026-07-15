@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { Check, Plus, Trash2, Type } from "lucide-react";
 import { Field, Section, Select } from "./controls";
+import { promptDialog } from "./dialogs";
 import { ColorInput } from "@/components/ui/ColorInput";
 import { useEditor } from "../store/editor";
 import { THEME_PRESETS, FONT_CHOICES, FONT_GROUPS } from "../doc/themes";
@@ -125,8 +126,8 @@ export const ThemePanel: React.FC = () => {
             <Field label="Text"><ColorInput value={theme.text} onChange={(v) => setTheme({ text: v, name: "Custom" }, true)} /></Field>
           </div>
           <button
-            onClick={() => {
-              const name = (window.prompt("Name this palette", "My palette") || "").trim();
+            onClick={async () => {
+              const name = await promptDialog({ title: "Name this palette", defaultValue: "My palette", confirmLabel: "Save" });
               if (!name) return;
               add({ ...theme, name });
               setTheme({ name });

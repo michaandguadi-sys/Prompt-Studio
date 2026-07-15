@@ -18,6 +18,9 @@ const SECURITY_HEADERS = [
 ];
 
 const config: NextConfig = {
+  // Allow an isolated build dir (e.g. verification builds alongside a live dev
+  // server) without clobbering the dev server's .next. Unset in normal use.
+  ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {}),
   reactStrictMode: false,
   transpilePackages: ["mapbox-gl", "react-map-gl"],
   async headers() {

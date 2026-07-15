@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Upload, Trash2, Check } from "lucide-react";
 import { useStudio } from "@/store/studio";
 import { Section } from "@/components/ui/Field";
+import { confirmDialog, alertDialog } from "@/v2/ui/dialogs";
 
 type UploadedFont = { file: string; family: string; url: string };
 
@@ -45,7 +46,7 @@ export const FontUpload: React.FC = () => {
     const res = await fetch("/api/fonts", { method: "POST", body: form });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      alert(`Upload failed: ${data.error ?? res.statusText}`);
+      await alertDialog({ title: "Upload failed", message: data.error ?? res.statusText });
       setBusy(false);
       return;
     }
@@ -55,7 +56,7 @@ export const FontUpload: React.FC = () => {
   };
 
   const onDelete = async (file: string) => {
-    if (!confirm(`Delete ${file}?`)) return;
+    if (!(await confirmDialog({ title: `Delete ${file}?`, confirmLabel: "Delete", danger: true }))) return;
     await fetch(`/api/fonts?file=${encodeURIComponent(file)}`, { method: "DELETE" });
     await refresh();
   };

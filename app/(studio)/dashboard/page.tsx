@@ -6,6 +6,7 @@ import type { QuotaResult } from "@/lib/quota";
 import { TIERS } from "@/lib/tiers";
 import { useUser } from "@clerk/nextjs";
 import { SettingsModal, loadAISettings, type AISettings } from "@/v2/ui/SettingsModal";
+import { confirmDialog, alertDialog } from "@/v2/ui/dialogs";
 import { ProjectLibrary } from "@/components/dashboard/ProjectLibrary";
 import { tasteProfile, clearTaste, type TasteProfile } from "@/lib/taste";
 import { loadElements } from "@/lib/elements";
@@ -36,7 +37,7 @@ const CreativeDNA: React.FC = () => {
         </div>
         {p.events > 0 && (
           <button
-            onClick={() => { if (confirm("Forget everything the studio has learned about your taste?")) { clearTaste(); setP(tasteProfile()); } }}
+            onClick={async () => { if (await confirmDialog({ title: "Reset Creative DNA?", message: "Forget everything the studio has learned about your taste.", confirmLabel: "Reset", danger: true })) { clearTaste(); setP(tasteProfile()); } }}
             className="text-[11px] text-graphite/40 transition-colors hover:text-red-400"
           >
             Reset
@@ -135,7 +136,7 @@ export default function DashboardPage() {
     const res = await fetch("/api/stripe/portal", { method: "POST" });
     const { url, error } = await res.json();
     if (url) window.location.href = url;
-    else { alert(error ?? "Could not open billing portal"); setPortalLoading(false); }
+    else { await alertDialog({ title: "Couldn't open billing", message: error ?? "Could not open billing portal. Please try again." }); setPortalLoading(false); }
   };
 
   useEffect(() => {

@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useEditor } from "@/v2/store/editor";
+import { confirmDialog } from "@/v2/ui/dialogs";
 import { Film, Trash2, Sparkles } from "lucide-react";
 
 type Saved = { id: string; name: string; updatedAt: number };
@@ -39,7 +40,7 @@ export const ProjectsGrid: React.FC = () => {
 
   const remove = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (!confirm(`Delete project "${id}"?`)) return;
+    if (!(await confirmDialog({ title: `Delete project "${id}"?`, confirmLabel: "Delete", danger: true }))) return;
     await fetch(`/api/v2/projects?id=${encodeURIComponent(id)}`, { method: "DELETE" });
     refresh();
   };

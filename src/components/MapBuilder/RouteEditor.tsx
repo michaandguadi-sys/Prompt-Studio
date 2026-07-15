@@ -16,6 +16,7 @@ import {
   Crosshair,
 } from "lucide-react";
 import { useStudio } from "@/store/studio";
+import { confirmDialog } from "@/v2/ui/dialogs";
 import { Section, Field, NumberInput } from "@/components/ui/Field";
 import { ColorInput } from "@/components/ui/ColorInput";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -198,13 +199,13 @@ export const RouteEditor: React.FC = () => {
     });
   };
 
-  const remove = () => {
+  const remove = async () => {
     if (!route) return;
     const wantsRestore = !!route.prevCamera;
     const msg = wantsRestore
-      ? "Delete route and RESTORE the camera you had before adding it? (Undo is also available.)"
-      : "Delete route and all its settings? This cannot be undone (use undo to restore).";
-    if (confirm(msg)) {
+      ? "This restores the camera you had before adding the route. Undo is also available."
+      : "This removes the route and all its settings. Undo is available to restore it.";
+    if (await confirmDialog({ title: "Delete route?", message: msg, confirmLabel: "Delete route", danger: true })) {
       if (wantsRestore && route.prevCamera) {
         patchScene({ route: null, ...route.prevCamera });
       } else {

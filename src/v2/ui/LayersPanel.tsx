@@ -8,6 +8,7 @@ import {
   Radar, CalendarClock, CloudSnow, Satellite, Bookmark, Star,
 } from "lucide-react";
 import { useEditor } from "../store/editor";
+import { confirmDialog, promptDialog, alertDialog } from "./dialogs";
 import { LAYER_REGISTRY } from "../layers/registry";
 import type { LayerType } from "../doc/schema";
 import { parseTrackFile } from "../track";
@@ -52,8 +53,9 @@ export const LayersPanel: React.FC = () => {
   // saves from other projects/tabs show up immediately.
   const [elements, setElements] = useState<SavedElement[]>([]);
   useEffect(() => { if (addOpen) setElements(loadElements()); }, [addOpen]);
-  const saveAsElement = (l: (typeof allLayers)[number]) => {
-    const name = prompt("Save to My Elements as:", l.name || LAYER_REGISTRY[l.type].label);
+  const saveAsElement = async (l: (typeof allLayers)[number]) => {
+    const def = l.name || LAYER_REGISTRY[l.type].label;
+    const name = await promptDialog({ title: "Save to My Elements", placeholder: def, defaultValue: def, confirmLabel: "Save" });
     if (name === null) return;
     saveElement(name || l.name || l.type, l as unknown as Record<string, unknown>);
   };
@@ -78,7 +80,7 @@ export const LayersPanel: React.FC = () => {
       const cur = useEditor.getState().project.composition;
       patchComposition({ basemap: { ...cur.basemap, styleUrl: sb.baseStyleUrl }, look: { ...cur.look, bgColor: sb.bgColor } });
     } catch (e: any) {
-      alert(e?.message || "Couldn't import that track file.");
+      void alertDialog({ title: "Couldn't import that track", message: e?.message || "GPX, TCX, KML or GeoJSON files work best." });
     } finally { setImporting(false); }
   };
 
@@ -213,7 +215,7 @@ export const LayersPanel: React.FC = () => {
                   <button onClick={(e) => { e.stopPropagation(); moveLayer(l.id, 1); }} disabled={i === layers.length - 1} className="p-0.5 text-graphite/30 hover:text-graphite disabled:opacity-20"><ChevronDown size={12} /></button>
                   <button onClick={(e) => { e.stopPropagation(); duplicateLayer(l.id); }} className="p-0.5 text-graphite/30 hover:text-iris" title="Duplicate"><Copy size={11} /></button>
                   <button onClick={(e) => { e.stopPropagation(); saveAsElement(l); }} className="p-0.5 text-graphite/30 hover:text-amber-500" title="Save to My Elements — reuse in any project"><Bookmark size={11} /></button>
-                  <button onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${l.name || l.type}"?`)) removeLayer(l.id); }} className="p-0.5 text-graphite/30 hover:text-red-400"><Trash2 size={11} /></button>
+                  <button onClick={async (e) => { e.stopPropagation(); if (await confirmDialog({ title: `Delete "${l.name || l.type}"?`, confirmLabel: "Delete", danger: true })) removeLayer(l.id); }} className="p-0.5 text-graphite/30 hover:text-red-400"><Trash2 size={11} /></button>
                 </div>
               )}
             </div>

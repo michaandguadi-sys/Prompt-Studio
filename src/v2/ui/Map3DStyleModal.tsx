@@ -7,8 +7,30 @@ import { useEditor } from "../store/editor";
 import { recordTaste } from "@/lib/taste";
 import { createLayer } from "../doc/factory";
 import { MAP3D_STYLES, map3dStyleById } from "@/lib/presets/map3dStyles";
-import { PRO_MAP_STYLES } from "@/lib/presets/proMapStyles";
+import { PRO_MAP_STYLES, elementPaletteFor } from "@/lib/presets/proMapStyles";
 import { loadGoogleKey } from "./SettingsModal";
+
+/** The colour patch a style's palette applies to each overlay element, so
+ *  switching a style restyles the WHOLE scene — every route/marker/highlight/
+ *  label takes on the look — not just the basemap. Structural colours → the
+ *  style accent; text → readable ink; data ramps + the spotlight mask are left. */
+function elementRestyle(l: any, pal: { accent: string; ink: string; water: string }): Record<string, unknown> | null {
+  switch (l.type) {
+    case "highlight":   return { borderColor: pal.accent, glowColor: pal.accent, fillColor: pal.accent, labelColor: pal.ink };
+    case "route":       return { color: pal.accent };
+    case "track":       return { color: pal.accent };
+    case "flow":        return { color: pal.accent };
+    case "connections": return { color: pal.accent };
+    case "radius":      return { color: pal.accent };
+    case "marker":      return { color: pal.accent, labelColor: pal.ink };
+    case "label":       return { color: pal.ink, accent: pal.accent };
+    case "annotation":  return { color: pal.ink, accent: pal.accent };
+    case "timestamp":   return { accent: pal.accent };
+    case "title":       return { accent: pal.accent };
+    case "chart":       return { accent: pal.accent };
+    default:            return null; // choropleth/bubble/heatmap ramps, spotlight mask, atmosphere, image
+  }
+}
 
 /** LIVE EARTH — real NASA data as one-click looks. Each entry swaps the base
  *  style and lays a GIBS raster (date: "latest") over it — the planet as it
@@ -70,9 +92,17 @@ export const Map3DStyleModal: React.FC<{ open: boolean; onClose: () => void }> =
       basemap: { ...comp.basemap, ...style.basemap, style3d: style.id } as any,
       look: { ...comp.look, ...style.look } as any,
     });
-    const cam = layers.find((l) => l.type === "camera") as any;
-    if (cam && typeof style.pitch === "number") {
-      patchLayer(cam.id, { end: { ...cam.end, pitch: style.pitch } } as any);
+    // Restyle EVERY element to the style's palette so the whole scene changes,
+    // not just the map — routes, highlights, markers and labels all take on the
+    // look (same palette the landing preview derives, so preview == editor).
+    const pal = elementPaletteFor(style);
+    for (const l of layers) {
+      if (l.type === "camera") {
+        if (typeof style.pitch === "number") patchLayer(l.id, { end: { ...(l as any).end, pitch: style.pitch } } as any);
+        continue;
+      }
+      const patch = elementRestyle(l as any, pal);
+      if (patch) patchLayer(l.id, patch as any);
     }
   };
 

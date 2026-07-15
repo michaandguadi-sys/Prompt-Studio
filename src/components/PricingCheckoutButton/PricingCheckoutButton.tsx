@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { Loader2 } from "lucide-react";
+import { alertDialog } from "@/v2/ui/dialogs";
 
 export const PricingCheckoutButton: React.FC<{
   priceId: string | null;
@@ -23,11 +24,11 @@ export const PricingCheckoutButton: React.FC<{
       if (data.url) {
         window.location.href = data.url;
       } else {
-        alert(data.error ?? "Could not start checkout. Please try again.");
+        await alertDialog({ title: "Checkout unavailable", message: data.error ?? "Could not start checkout. Please try again." });
         setLoading(false);
       }
     } catch {
-      alert("Network error. Please try again.");
+      await alertDialog({ title: "Network error", message: "Please check your connection and try again." });
       setLoading(false);
     }
   };

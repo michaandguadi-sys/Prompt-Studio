@@ -7,6 +7,7 @@ import {
   PanelLeftClose, PanelRightClose,
 } from "lucide-react";
 import { useEditor } from "../store/editor";
+import { confirmDialog } from "./dialogs";
 import { LayersPanel } from "./LayersPanel";
 import { Canvas } from "./Canvas";
 import { Inspector } from "./Inspector";
@@ -154,7 +155,7 @@ export const Editor: React.FC = () => {
           <span className="mx-1 h-5 w-px bg-line" />
           <button onClick={undo} disabled={!past} title="Undo (⌘Z)" className={iconBtn}><Undo2 size={15} /></button>
           <button onClick={redo} disabled={!future} title="Redo (⌘⇧Z)" className={iconBtn}><Redo2 size={15} /></button>
-          <button onClick={() => { if (confirm("Start a fresh project? Unsaved changes will be lost.")) reset(); }} title="New project" className={iconBtn}><RotateCcw size={14} /></button>
+          <button onClick={async () => { if (await confirmDialog({ title: "Start a fresh project?", message: "Unsaved changes will be lost.", confirmLabel: "New project", danger: true })) reset(); }} title="New project" className={iconBtn}><RotateCcw size={14} /></button>
           <span className="mx-1 h-5 w-px bg-line" />
           <ProjectMenu />
           <button onClick={() => setStyle3dOpen(true)} title="Creative 3D map styles" className={accentBtn}><Boxes size={13} /> 3D</button>

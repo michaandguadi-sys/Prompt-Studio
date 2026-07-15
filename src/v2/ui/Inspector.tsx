@@ -5,6 +5,7 @@ import { MapPin, Upload, Sparkles, Boxes, Mic, Play, Square, X as XIcon, Loader2
 import { hasVoiceoverKey, loadVoiceoverSettings, generateVoiceover, measureAudioDuration } from "@/lib/voiceover";
 import { MAP3D_STYLES } from "@/lib/presets/map3dStyles";
 import { Field, Input, NumberInput, Select, Section, Slider, Toggle } from "./controls";
+import { confirmDialog, promptDialog } from "./dialogs";
 import { ColorInput } from "@/components/ui/ColorInput";
 import { ColorWheel } from "./ColorWheel";
 import { PlaceSearch } from "@/components/MapBuilder/PlaceSearch";
@@ -511,8 +512,8 @@ const QuickAdjust: React.FC = () => {
     const startZoom = m.v === "zoom-out" ? cam.end.zoom + delta : Math.max(1.4, cam.end.zoom - delta);
     patchLayer(cam.id, { style: m.v, end: { ...cam.end, pitch: m.pitch }, start: { ...cam.start, zoom: m.v === "hold" ? cam.end.zoom : startZoom, pitch: 0, bearing: 0 }, ...(m.v === "hold" ? { moveFraction: 0.2 } : {}) });
   };
-  const saveCurrent = () => {
-    const name = window.prompt("Name this preset (look + camera)")?.trim();
+  const saveCurrent = async () => {
+    const name = await promptDialog({ title: "Name this preset", message: "Saves the current look + camera.", confirmLabel: "Save preset" });
     if (!name) return;
     const p = { id: "ps_" + Math.random().toString(36).slice(2, 8), name, look: comp.look, styleUrl: (comp.basemap as any)?.styleUrl,
       cam: { style: cam.style, pitch: cam.end.pitch, bearing: cam.end.bearing, startZoom: cam.start.zoom, moveFraction: cam.moveFraction, easing: cam.easing } };
@@ -560,7 +561,7 @@ const QuickAdjust: React.FC = () => {
         <div className="flex flex-wrap gap-1.5">
           {presets.map((p) => (
             <button key={p.id} onClick={() => applyPreset(p)}
-              onContextMenu={(e) => { e.preventDefault(); if (window.confirm(`Delete preset "${p.name}"?`)) delPreset(p.id); }}
+              onContextMenu={async (e) => { e.preventDefault(); if (await confirmDialog({ title: `Delete preset "${p.name}"?`, confirmLabel: "Delete", danger: true })) delPreset(p.id); }}
               title={`${p.name} — click to apply, right-click to delete`}
               className="rounded-full border border-line px-2.5 py-1 text-[11px] font-medium text-graphite/70 transition-colors hover:border-iris hover:text-iris">
               {p.name}
@@ -606,8 +607,8 @@ const BrandKitPanel: React.FC = () => {
     if (k.look) patchComposition({ look: { ...comp.look, ...k.look } });
     setLogo(k.logo ?? null);
   };
-  const saveCurrent = () => {
-    const name = window.prompt("Name this brand kit")?.trim();
+  const saveCurrent = async () => {
+    const name = await promptDialog({ title: "Name this brand kit", confirmLabel: "Save kit" });
     if (!name) return;
     const lk = comp.look as any;
     persist([...kits.filter((k) => k.name !== name), {
@@ -624,7 +625,7 @@ const BrandKitPanel: React.FC = () => {
         <div className="flex flex-wrap gap-1.5">
           {kits.map((k) => (
             <button key={k.id} onClick={() => apply(k)}
-              onContextMenu={(e) => { e.preventDefault(); if (window.confirm(`Delete brand kit "${k.name}"?`)) persist(kits.filter((x) => x.id !== k.id)); }}
+              onContextMenu={async (e) => { e.preventDefault(); if (await confirmDialog({ title: `Delete brand kit "${k.name}"?`, confirmLabel: "Delete", danger: true })) persist(kits.filter((x) => x.id !== k.id)); }}
               title={`${k.name} — apply (right-click to delete)`}
               className="inline-flex items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-[11px] font-medium text-graphite/70 transition-colors hover:border-iris hover:text-iris">
               <span className="flex gap-0.5">{[k.theme.accent, k.theme.fill, k.theme.glow].map((c, i) => <span key={i} className="h-2.5 w-2.5 rounded-[2px]" style={{ background: c }} />)}</span>
@@ -867,7 +868,7 @@ const MapStylePanel: React.FC = () => {
             {stylePresets.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {stylePresets.map((p) => (
-                  <button key={p.id} onClick={() => loadStyle(p)} onContextMenu={(e) => { e.preventDefault(); if (window.confirm(`Delete style "${p.name}"?`)) delStyle(p.id); }}
+                  <button key={p.id} onClick={() => loadStyle(p)} onContextMenu={async (e) => { e.preventDefault(); if (await confirmDialog({ title: `Delete style "${p.name}"?`, confirmLabel: "Delete", danger: true })) delStyle(p.id); }}
                     title={`${p.name} — click to load, right-click to delete`}
                     className="rounded-full border border-line px-2.5 py-1 text-[11px] font-medium text-graphite/70 transition-colors hover:border-iris hover:text-iris">{p.name}</button>
                 ))}

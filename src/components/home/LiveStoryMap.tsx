@@ -200,7 +200,9 @@ function themeForPro(style: Map3DStyle): ElementTheme {
   const sw = (style.swatches as string[]) ?? ["#04060f", "#1a1d2e", "#6E7BFF"];
   const bg = String((style.look as any)?.bgColor || sw[0] || "#04060f");
   const light = isLightHex(bg) || isLightHex(String((style.basemap as any).landColor || ""));
-  const accent = String((style.basemap as any).boundaryGlow || sw[2] || IRIS);
+  // Same accent rule as elementPaletteFor (editor) — border colour, else a bright
+  // legible default; card swatches are too earth-toned for a route line.
+  const accent = String((style.basemap as any).boundaryGlow || (light ? "#3b4bd8" : IRIS));
   const water = String((style.basemap as any).waterColor || sw[1] || CYAN);
   return {
     accents: [accent, sw[1] || CYAN, sw[2] || VIOLET],

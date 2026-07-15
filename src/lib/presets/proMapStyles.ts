@@ -228,6 +228,20 @@ export const PRO_MAP_STYLES: Map3DStyle[] = [
     pitch: 0,
   },
   {
+    id: "synthwave", name: "Synthwave", tagline: "80s neon grid — magenta borders, cyan lines",
+    swatches: ["#1a0b2e", "#ff2e97", "#2de2e6"],
+    basemap: { styleUrl: DARK, landColor: "#1a0b2e", waterColor: "#0d0620", boundaryGlow: "#ff2e97", terrain: true, terrainStrength: 2.4, buildings3d: false, graticule: true, graticuleColor: "rgba(45,226,230,0.30)", graticuleStep: 10 },
+    look: { vignette: 0.5, grain: 0.05, mapFilter: "none", tintColor: "#2a0a45", tintOpacity: 0.14, gradeShadow: "#0a0018", gradeShadowAmt: 0.28, gradeHigh: "#ff6ec7", gradeHighAmt: 0.14, bgColor: "#0d0620" },
+    pitch: 60,
+  },
+  {
+    id: "copperplate", name: "Copperplate", tagline: "Antique copper engraving — warm metal atlas",
+    swatches: ["#241810", "#0e0a06", "#c98a4b"],
+    basemap: { styleUrl: DARK, landColor: "#241810", waterColor: "#0e0a06", boundaryGlow: "#c98a4b", terrain: true, terrainStrength: 1.8, buildings3d: false, graticule: true, graticuleColor: "rgba(201,138,75,0.24)", graticuleStep: 15 },
+    look: { texture: "paper", textureOpacity: 0.3, vignette: 0.44, grain: 0.08, mapFilter: "sepia", mapFilterAmount: 0.2, gradeHigh: "#e8b878", gradeHighAmt: 0.16, gradeShadow: "#1a0f06", gradeShadowAmt: 0.24, bgColor: "#120b05" },
+    pitch: 40,
+  },
+  {
     id: "satellite-night", name: "Satellite Night", tagline: "The earth-at-night hero — graded real imagery",
     swatches: ["#16241c", "#3d5a3a", "#0e1a2b"],
     basemap: { styleUrl: SAT, terrain: false, buildings3d: false },
@@ -256,6 +270,8 @@ const STYLE_PHRASE_TO_ID: [RegExp, string][] = [
   [/\brisograph|\briso\b|\bposter\b|\btwo[- ]?ink\b|\bscreen[- ]?print/i, "risograph"],
   [/\bthermal\b|\binfrared\b|\bmagma\b|\bheat vision\b/i, "thermal"],
   [/\bdrafting\b|\barchitect|\btechnical draw|\bblueprint (cream|light)\b/i, "drafting"],
+  [/\bsynthwave|\bvaporwave|\bretro[- ]?80s?\b|\bneon grid\b|\boutrun\b/i, "synthwave"],
+  [/\bcopperplate|\bcopper\b|\bengrav|\bbronze\b|\bmetal(lic)? atlas\b/i, "copperplate"],
   [/\bsatellite\b/i, "satellite-night"],
   // ── Common pro-style names, typed directly ──
   [/\bnat(ional)? ?geo(graphic)?\b/i, "natgeo"],
@@ -280,4 +296,32 @@ export function detectProStyle(text: string): string | null {
   if (!text) return null;
   for (const [re, id] of STYLE_PHRASE_TO_ID) if (re.test(text)) return id;
   return null;
+}
+
+/**
+ * The overlay-element palette a style implies — so applying a style restyles the
+ * WHOLE scene (routes, highlights, markers, labels), not just the basemap.
+ * `accent` = the style's signature line/marker colour; `ink` = a readable text
+ * colour for its background; `water` for water-hugging elements. Same derivation
+ * the landing preview uses, so preview == editor for element colour too.
+ */
+export function elementPaletteFor(style: Map3DStyle): { accent: string; ink: string; water: string } {
+  const sw = (style.swatches as string[] | undefined) ?? [];
+  const bm = style.basemap as Record<string, unknown>;
+  const bg = String((style.look as Record<string, unknown> | undefined)?.bgColor || sw[0] || "#04060f");
+  const lum = (hex: string) => {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex);
+    if (!m) return 0;
+    const n = parseInt(m[1], 16);
+    return 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
+  };
+  const light = lum(bg) > 150 || lum(String(bm.landColor || "")) > 150;
+  // The accent is the style's border colour when it sets one; otherwise a bright
+  // legible default (satellite/imagery styles have no vector border to borrow, and
+  // the card swatches are earth-toned — too dark for a route line).
+  return {
+    accent: String(bm.boundaryGlow || (light ? "#3b4bd8" : "#6E7BFF")),
+    ink: light ? "#141428" : "#ffffff",
+    water: String(bm.waterColor || sw[1] || "#2fe0ff"),
+  };
 }

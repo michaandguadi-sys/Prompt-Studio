@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { Save, FolderOpen, Loader2, Trash2, Check, Share2, Film } from "lucide-react";
 import { useEditor } from "../store/editor";
+import { promptDialog } from "./dialogs";
 import { dimsFor } from "../doc/schema";
 import { buildFcpxml, safeFileName } from "@/lib/nle/fcpxml";
 
@@ -29,7 +30,7 @@ export const ProjectMenu: React.FC = () => {
       const d = await r.json();
       if (d?.url) {
         const url = d.url.startsWith("http") ? d.url : `${window.location.origin}${d.url}`;
-        try { await navigator.clipboard.writeText(url); } catch { window.prompt("Copy your share link:", url); }
+        try { await navigator.clipboard.writeText(url); } catch { void promptDialog({ title: "Copy your share link", message: "Select the link below and copy it.", defaultValue: url, confirmLabel: "Done" }); }
         setSharedMsg(true); setTimeout(() => setSharedMsg(false), 1900);
       }
     } catch { /* ignore */ }

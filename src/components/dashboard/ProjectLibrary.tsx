@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Download, Trash2, Search, Film, Clock, FolderOpen, Loader2, ArrowUpRight, Plus, Share2, Check } from "lucide-react";
 import { useEditor } from "@/v2/store/editor";
+import { confirmDialog, promptDialog } from "@/v2/ui/dialogs";
 
 type Proj = { id: string; name: string; updatedAt: number; shared?: boolean };
 
@@ -85,7 +86,7 @@ export const ProjectLibrary: React.FC = () => {
     } catch {}
   };
   const del = async (id: string) => {
-    if (!confirm("Delete this animation? This can't be undone.")) return;
+    if (!(await confirmDialog({ title: "Delete this animation?", message: "This can't be undone.", confirmLabel: "Delete", danger: true }))) return;
     await fetch(`/api/v2/projects?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
     setProjects((ps) => (ps ?? []).filter((p) => p.id !== id));
   };
@@ -100,7 +101,7 @@ export const ProjectLibrary: React.FC = () => {
       const d = await r.json();
       if (d?.url) {
         const url = d.url.startsWith("http") ? d.url : `${window.location.origin}${d.url}`;
-        try { await navigator.clipboard.writeText(url); } catch { window.prompt("Copy this share link:", url); }
+        try { await navigator.clipboard.writeText(url); } catch { void promptDialog({ title: "Copy your share link", message: "Select the link below and copy it.", defaultValue: url, confirmLabel: "Done" }); }
         patchProject(id, { shared: true });
         setCopied(id); setTimeout(() => setCopied((c) => (c === id ? null : c)), 1800);
       }
@@ -108,7 +109,7 @@ export const ProjectLibrary: React.FC = () => {
     setShareBusy(null);
   };
   const unshare = async (id: string) => {
-    if (!confirm("Stop sharing? The existing link will stop working.")) return;
+    if (!(await confirmDialog({ title: "Stop sharing?", message: "The existing link will stop working.", confirmLabel: "Stop sharing", danger: true }))) return;
     setShareBusy(id);
     await fetch("/api/v2/projects/share", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -117,7 +118,7 @@ export const ProjectLibrary: React.FC = () => {
     patchProject(id, { shared: false });
     setShareBusy(null);
   };
-  const newFolder = (id: string) => { const name = prompt("New folder name")?.trim(); if (name) setFolder(id, name); };
+  const newFolder = async (id: string) => { const name = await promptDialog({ title: "New folder", placeholder: "Folder name", confirmLabel: "Create" }); if (name) setFolder(id, name); };
 
   return (
     <div className="rounded-xl border border-line/60 bg-paper-100 overflow-hidden anim-fade-up" style={{ animationDelay: "390ms" }}>
