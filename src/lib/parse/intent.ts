@@ -50,6 +50,11 @@ const NEVER_FIX = new Set([
   "north", "south", "east", "west", "central", "coast", "ocean", "river", "deep", "wide", "long",
   "trade", "trades", "route", "routes", "path", "paths", "land", "lands", "sea", "seas", "born",
   "king", "kings", "queen", "empire", "nation", "nations", "people", "peoples", "tribe", "tribes",
+  // Colour + look words the user types for styling ("in green", "bright blue",
+  // "orange route") must NEVER snap to a place (green→Greece, orange→Orange FR,
+  // navy→…). They're style, not geography.
+  "green", "red", "blue", "yellow", "orange", "purple", "violet", "pink", "teal", "cyan",
+  "white", "black", "crimson", "navy", "magenta", "lime", "bright", "dark", "light", "colour", "color",
 ]);
 
 function lev(a: string, b: string): number {

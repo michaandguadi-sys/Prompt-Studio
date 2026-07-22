@@ -1835,6 +1835,84 @@ function styleForMood(mood: string): { basemapStyle: string; look: Record<string
   }
 }
 
+/**
+ * LITERAL ELEMENT COMMAND — the creator explicitly named the elements to draw:
+ * "highlight France", "route from Paris to Rome", "highlight Japan then route
+ * from Tokyo to Osaka". Build EXACTLY those elements, deterministically — no AI,
+ * no title, no markers, no labels, no extras. This is the "I expect ONLY this"
+ * path. The requested look still applies (detectProStyle). Returns null when the
+ * prompt asks for anything beyond plain highlight/route, so the faithful AI path
+ * (which can build markers, data, titles, etc.) handles the rest.
+ */
+const LITERAL_COLORS: Record<string, string> = {
+  red: "#e0533a", blue: "#3b6ef4", green: "#2fae60", yellow: "#f4c020", orange: "#f0872b",
+  purple: "#8b5cf6", violet: "#8b5cf6", pink: "#ec4899", teal: "#14b8a6", cyan: "#22d3ee",
+  white: "#f5f5f5", gold: "#d4af37", crimson: "#b81d24", navy: "#1e3a8a", magenta: "#d6249f", lime: "#84cc16",
+};
+/** A colour word the creator named ("in blue", "red route") → a hex, so the
+ *  literal element actually takes that colour. */
+function literalColor(idea: string): string | null {
+  const m = idea.toLowerCase().match(/\b(red|blue|green|yellow|orange|purple|violet|pink|teal|cyan|white|gold|crimson|navy|magenta|lime)\b/);
+  return m ? LITERAL_COLORS[m[1]] : null;
+}
+
+function literalPlan(idea: string, it: ReturnType<typeof interpret>): Plan | null {
+  // If the prompt asks for ANY element beyond highlight/route, it isn't a clean
+  // literal highlight/route command — defer to the AI so those get built.
+  const OTHER = /\b(marker|pin\b|flag|chart|counter|graph|\bdata\b|bubble|choropleth|connection|network|\bflow|spotlight|annotation|timestamp|ticker|radius|\bring|sticker|weather|snow|rain|character|truesize|explosion|sword|\bfire\b|volcano|earthquake|nuclear|title|caption|\btext\b|\blabel|pin\b)\b/i;
+  if (OTHER.test(idea)) return null;
+
+  const route = it.route;
+  const routeSet = new Set(route ? [route.from, route.to, ...route.via].map((s) => s.toLowerCase()) : []);
+
+  let hlPlaces = (it.action === "highlight" || it.action === "mixed")
+    ? it.locations.filter((p) => !routeSet.has(p.toLowerCase())).slice(0, 18)
+    : [];
+  // COMBO "highlight X … route A→B": the parser keeps the route but drops the
+  // highlighted place (action becomes "route", locations empties). Recover it by
+  // re-interpreting just the clause BEFORE the route trigger.
+  if (route && hlPlaces.length === 0 && /\b(highlight|fill|colou?r|outline|shade)\b/i.test(idea)) {
+    const pre = idea.split(/\bthen\b/i)[0].split(/\b(route|fly|flight|drive|driving|sail|voyage|walk|trek|journey|travel|from)\b/i)[0];
+    const preIt = interpret(pre);
+    hlPlaces = preIt.locations.filter((p) => !routeSet.has(p.toLowerCase())).slice(0, 18);
+  }
+  if (!route && hlPlaces.length === 0) return null;
+
+  const color = literalColor(idea);
+  const layers: PlanLayer[] = [];
+  for (const p of hlPlaces) {
+    layers.push({ kind: "highlight", place: p, fill: "solid", ...(color ? { style: { fillColor: color, glowColor: color, borderColor: color } } : {}) } as PlanLayer);
+  }
+  if (route) {
+    const t = idea.toLowerCase();
+    const air = /flight|flew|\bfly\b|plane|airl/.test(t);
+    const sea = /sail|voyage|\bship\b|naval|fleet|\bsea\b|boat|cruise|ferry/.test(t);
+    const foot = /\bwalk|hike|trek|\brun\b|\bfoot\b/.test(t);
+    const rail = /train|rail/.test(t);
+    layers.push({
+      kind: "route", from: route.from, to: route.to,
+      transport: air ? "aircraft" : sea ? "boat" : foot ? "walking" : "driving",
+      icon: air ? "plane" : sea ? "boat" : foot ? "walk" : rail ? "train" : "car",
+      cameraMode: "chase", ...(color ? { style: { color, glowColor: color } } : {}),
+    } as PlanLayer);
+  }
+  if (!layers.length) return null;
+
+  const style = detectProStyle(idea);
+  const focus = route ? route.to : (it.context || hlPlaces[0]);
+  const cameraStops = route ? [route.from, ...route.via, route.to] : [];
+  const dur = Math.min(11, Math.max(6, Math.round(it.durationSec) || (route ? 9 : 7)));
+  return {
+    title: "", subtitle: "", durationSec: dur, aspect: "16:9", basemapStyle: "dark",
+    terrain: false, focus, mood: "neutral",
+    motion: route ? "fly-in" : (hlPlaces.length > 1 ? "zoom-out" : "push-in"),
+    palette: "Default", priority: route ? "route" : "highlight",
+    ...(cameraStops.length ? { cameraStops } : {}),
+    ...(style ? { map3dStyle: style } : {}),
+    layers,
+  } as Plan;
+}
+
 function heuristicPlan(idea: string): Plan {
   const t = idea.toLowerCase();
   const titleCase = (s: string) => s.replace(/\b\w/g, (c) => c.toUpperCase()).trim();
@@ -2201,6 +2279,15 @@ export async function POST(req: NextRequest) {
   // built FAITHFULLY and concisely (see FAITHFUL_MODE) — exactly what was asked.
   const isStory = body.mode === "story" || (!directPlan && !!idea && wantsDocumentary(idea));
 
+  // LITERAL ELEMENT COMMAND — "highlight France", "route from A to B", or both:
+  // build EXACTLY those elements deterministically (no AI, no titles/markers/
+  // extras). This is what "I expect ONLY this" means. Non-literal prompts fall
+  // through to the faithful AI path. Treated like a direct plan downstream.
+  const literal = (!directPlan && !arc && !isStory && framework)
+    ? literalPlan(idea, framework.interpretation)
+    : null;
+  const deterministicPlan = directPlan ?? literal;
+
   // ENGINE CHOICE: the user explicitly picks AI-directed vs "Smart (no AI)".
   // useAI:false → built-in director logic only (instant, no key, private).
   // Otherwise AI is REQUESTED — prefer their own provider/key (BYO) over env.
@@ -2234,7 +2321,7 @@ export async function POST(req: NextRequest) {
   // call that builds exactly what's described — minimal layers, no expansion.
   //
   // Phase 1: Director call (only for stories; direct plans, arcs, and no-AI skip).
-  const shouldRunDirector = !directPlan && !!aiCfg && !arc && isStory;
+  const shouldRunDirector = !deterministicPlan && !!aiCfg && !arc && isStory;
 
   // Pre-inject interpretation + archetype into the Director's user prompt.
   // The Director gets verified places, detected route, and archetype recipe BEFORE
@@ -2288,7 +2375,7 @@ export async function POST(req: NextRequest) {
   // the base system + FAITHFUL_MODE, NO doctrine: build the prompt exactly and
   // concisely, no research expansion.
   const composerSystem = isStory ? withDoctrine(STORY_SYSTEM) : `${SYSTEM}${FAITHFUL_MODE}`;
-  const ai = (directPlan || !aiCfg) ? { plan: null as Plan | null, warning: undefined as string | undefined, tokensUsed: 0 } : await aiPlan(composerInput, aiCfg, composerSystem);
+  const ai = (deterministicPlan || !aiCfg) ? { plan: null as Plan | null, warning: undefined as string | undefined, tokensUsed: 0 } : await aiPlan(composerInput, aiCfg, composerSystem);
   const llmPlan = ai.plan;
 
   // AI RESULT HANDLING:
@@ -2298,14 +2385,14 @@ export async function POST(req: NextRequest) {
   // • Key configured but model failed: surface the error so the user can fix it
   //   (wrong key, rate-limit, etc.). We do NOT silently fall back here because
   //   that would mask a real config problem the user needs to know about.
-  if (aiRequested && !directPlan && aiCfg && !llmPlan) {
+  if (aiRequested && !deterministicPlan && aiCfg && !llmPlan) {
     return NextResponse.json({
       error: `AI returned no usable plan: ${ai.error ?? "unknown error"}. Check your API key and model in Settings, then try again.`,
       aiConfigured: true,
     }, { status: 502 });
   }
 
-  const plan = directPlan ?? llmPlan ?? (isStory ? heuristicStoryPlan(idea) : heuristicPlan(idea));
+  const plan = deterministicPlan ?? llmPlan ?? (isStory ? heuristicStoryPlan(idea) : heuristicPlan(idea));
 
   // If the Director produced a script but the Composer didn't include narration,
   // inject the director's narration lines so storyboard review has content.
@@ -2345,11 +2432,11 @@ export async function POST(req: NextRequest) {
   // Verify every place the plan pins actually resolves to the RIGHT spot, and
   // AI-repair the wrong ones, BEFORE we build geometry. Templates (directPlan)
   // are already authored with real coords, so skip them.
-  const placeReport = !directPlan ? await groundPlaces(plan, aiCfg, `${idea}\n${(plan as any).title ?? ""}`) : null;
+  const placeReport = !deterministicPlan ? await groundPlaces(plan, aiCfg, `${idea}\n${(plan as any).title ?? ""}`) : null;
 
   // The fact-checked Director brief (thesis, facts + confidence, caveats) — shown
   // in the Storyboard Review so the user sees the journalism before scenes build.
-  const brief = directPlan ? null : ((plan as any).brief ?? heuristicBrief(idea));
+  const brief = deterministicPlan ? null : ((plan as any).brief ?? heuristicBrief(idea));
   if (brief) {
     brief.provider = llmPlan ? "ai" : "heuristic";
     if (!llmPlan && !(brief.caveats?.length)) brief.caveats = ["Planned by the built-in logic parser — facts were NOT independently researched or verified. Connect an AI provider for fact-checked, journalist-grade planning."];
@@ -2390,7 +2477,7 @@ export async function POST(req: NextRequest) {
       project,
       plan,
       usedLLM: !!llmPlan,
-      provider: directPlan ? "template" : llmPlan ? (aiCfg?.label ?? "ai") : "heuristic",
+      provider: directPlan ? "template" : literal ? "literal" : llmPlan ? (aiCfg?.label ?? "ai") : "heuristic",
       story: isStory,
       // The fact-checked Director brief (thesis, facts+confidence, caveats, disputed).
       verification: brief,
@@ -2404,7 +2491,7 @@ export async function POST(req: NextRequest) {
       dirScript: dirScript ? { thesis: dirScript.thesis, arc: dirScript.arc, inputType: dirScript.inputType, beats: dirScript.beats.map((b) => ({ title: b.title, narration: b.narration, focus: b.focus, energy: b.energy, pacing: b.pacing, cameraIntent: b.cameraIntent })) } : null,
       // Surface WHY the AI wasn't used (wrong key/model, rate limit, …) instead
       // of silently degrading to the heuristic — so the user can fix it.
-      aiError: !directPlan && !llmPlan && aiCfg ? (ai.error ?? "AI unavailable") : undefined,
+      aiError: !deterministicPlan && !llmPlan && aiCfg ? (ai.error ?? "AI unavailable") : undefined,
       aiConfigured: !!aiCfg,
       layers: project.composition.layers.length,
       // Place-accuracy report: which place names were verified, auto-corrected,
@@ -2421,7 +2508,7 @@ export async function POST(req: NextRequest) {
         warning: ai.warning ?? null,
         // Which pipeline handled it: "simple" = lightweight one-call path (no
         // Director, no research doctrine), "story"/"rich" = full two-phase.
-        intent: directPlan ? "template" : isStory ? "story" : "faithful",
+        intent: directPlan ? "template" : literal ? "literal" : isStory ? "story" : "faithful",
       },
     });
   } catch (e: any) {
