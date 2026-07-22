@@ -192,3 +192,47 @@ export const HighlightLabel: React.FC<LV<HighlightLayer>> = ({ layer: l, frame, 
     </div>
   );
 };
+
+/** Geographic bounding box of a GeoJSON geometry/feature, [minLon,minLat,maxLon,maxLat]. */
+function geoBBox(geojson: any): [number, number, number, number] | null {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const visit = (co: any) => {
+    if (typeof co?.[0] === "number") {
+      const [x, y] = co;
+      if (x < minX) minX = x; if (y < minY) minY = y;
+      if (x > maxX) maxX = x; if (y > maxY) maxY = y;
+    } else if (Array.isArray(co)) for (const c of co) visit(c);
+  };
+  const g = geojson?.type === "Feature" ? geojson.geometry : geojson;
+  if (!g?.coordinates) return null;
+  visit(g.coordinates);
+  return Number.isFinite(minX) ? [minX, minY, maxX, maxY] : null;
+}
+
+/**
+ * HighlightHitArea — an invisible, click-selectable rect over a highlighted
+ * region's projected bounds. The fill itself is a MapLibre canvas layer (no DOM),
+ * so without this the editor's hit-test couldn't reach it. Tagged with the layer
+ * id; markers/labels sit in smaller boxes and correctly win the pick. The geo
+ * bbox is memoised, then only its four corners are projected each frame (cheap).
+ */
+export const HighlightHitArea: React.FC<LV<HighlightLayer>> = ({ layer: l, frame, fps, totalFrames, project }) => {
+  const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
+  const bbox = useMemo(() => (l.geojson ? geoBBox(l.geojson) : null), [l.geojson]);
+  if (tr.opacity < 0.01 || !project || !bbox) return null;
+
+  const [minLon, minLat, maxLon, maxLat] = bbox;
+  const corners: [number, number][] = [[minLon, minLat], [maxLon, minLat], [maxLon, maxLat], [minLon, maxLat]];
+  let sMinX = Infinity, sMinY = Infinity, sMaxX = -Infinity, sMaxY = -Infinity;
+  for (const [lon, lat] of corners) {
+    const { x, y } = project(lon, lat);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    if (x < sMinX) sMinX = x; if (y < sMinY) sMinY = y;
+    if (x > sMaxX) sMaxX = x; if (y > sMaxY) sMaxY = y;
+  }
+  if (!Number.isFinite(sMinX)) return null;
+  return (
+    <div data-layer-id={l.id} style={{ position: "absolute", left: sMinX, top: sMinY, width: sMaxX - sMinX, height: sMaxY - sMinY, pointerEvents: "none" }} />
+  );
+};

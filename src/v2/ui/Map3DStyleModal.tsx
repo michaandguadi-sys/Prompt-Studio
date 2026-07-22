@@ -1,7 +1,7 @@
 "use client";
 
-import React from "react";
-import { RotateCcw, Sliders, Globe2 } from "lucide-react";
+import React, { useState } from "react";
+import { RotateCcw, Sliders, Globe2, ChevronDown } from "lucide-react";
 import { useEditor } from "../store/editor";
 import { recordTaste } from "@/lib/taste";
 import { createLayer } from "../doc/factory";
@@ -114,29 +114,49 @@ export const MapStyleGallery: React.FC = () => {
   };
 
   const anyStyle = !!activeId || !!(comp.basemap as any).photoreal3d;
+  const [tab, setTab] = useState<"pro" | "earth" | "creative">("pro");
+  const [showTune, setShowTune] = useState(false);
+
+  const TABS: { key: "pro" | "earth" | "creative"; label: string; count: number }[] = [
+    { key: "pro", label: "Documentary", count: PRO_MAP_STYLES.length },
+    { key: "earth", label: "Live Earth", count: LIVE_EARTH.length },
+    { key: "creative", label: "Creative", count: MAP3D_STYLES.length },
+  ];
 
   return (
     <div>
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-graphite/45">Documentary &amp; professional</span>
+      {/* Segmented category switch — one scannable grid at a time keeps the panel
+          calm (the whole gallery used to unroll ~50 cards and bury everything
+          below it). Fine-tune hides behind progressive disclosure. */}
+      <div className="mb-2.5 flex items-center justify-between gap-2">
+        <div className="flex rounded-lg bg-graphite/[0.05] p-0.5">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${tab === t.key ? "bg-white text-graphite shadow-sm" : "text-graphite/50 hover:text-graphite/75"}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
         {anyStyle && (
-          <button onClick={reset} className="inline-flex items-center gap-1 text-[10px] text-graphite/45 transition-colors hover:text-iris"><RotateCcw size={11} /> Reset to flat</button>
+          <button onClick={reset} className="inline-flex shrink-0 items-center gap-1 text-[10px] text-graphite/45 transition-colors hover:text-iris"><RotateCcw size={11} /> Reset</button>
         )}
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        {PRO_MAP_STYLES.map((s) => <StyleCard key={s.id} s={s} on={activeId === s.id} onApply={apply} />)}
-      </div>
 
-      {/* ── LIVE EARTH — the planet as real NASA data, one click ── */}
-      <div className="mb-2 mt-5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-graphite/45">
-        Live Earth
-        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/12 px-1.5 py-0.5 text-[8.5px] font-bold tracking-[0.1em] text-emerald-600">
+      {tab === "earth" && (
+        <div className="mb-2 flex items-center gap-1.5 text-[9.5px] font-bold uppercase tracking-[0.14em] text-emerald-600">
           <span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-70" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" /></span>
-          REAL DATA · NASA
-        </span>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        {LIVE_EARTH.map((le) => (
+          Real NASA data · updates daily
+        </div>
+      )}
+
+      {/* Bounded, internally-scrolling grid so the Map-style section stays a
+          predictable height no matter how many looks ship. */}
+      <div className="grid max-h-[44vh] grid-cols-2 gap-2 overflow-y-auto pr-0.5">
+        {tab === "pro" && PRO_MAP_STYLES.map((s) => <StyleCard key={s.id} s={s} on={activeId === s.id} onApply={apply} />)}
+        {tab === "earth" && LIVE_EARTH.map((le) => (
           <StyleCard
             key={le.key}
             s={{ id: le.key, name: le.name, tagline: le.tagline, swatches: le.swatches }}
@@ -144,17 +164,20 @@ export const MapStyleGallery: React.FC = () => {
             onApply={() => applyLiveEarth(le)}
           />
         ))}
+        {tab === "creative" && MAP3D_STYLES.map((s) => <StyleCard key={s.id} s={s} on={activeId === s.id} onApply={apply} />)}
       </div>
 
-      <div className="mb-2 mt-5 text-[10px] font-semibold uppercase tracking-[0.22em] text-graphite/45">Creative worlds</div>
-      <div className="grid grid-cols-2 gap-2">
-        {MAP3D_STYLES.map((s) => <StyleCard key={s.id} s={s} on={activeId === s.id} onApply={apply} />)}
-      </div>
+      {/* ── Fine-tune — every 3D knob, but out of the way until you want it ── */}
+      <button
+        onClick={() => setShowTune((v) => !v)}
+        className="mt-2.5 flex w-full items-center justify-between rounded-lg border border-line px-2.5 py-1.5 text-[11px] font-medium text-graphite/60 transition-colors hover:border-iris/40 hover:text-graphite"
+      >
+        <span className="inline-flex items-center gap-1.5"><Sliders size={11} className="text-iris/70" /> Fine-tune this world</span>
+        <ChevronDown size={13} className={`transition-transform duration-300 ${showTune ? "" : "-rotate-90"}`} />
+      </button>
+      {showTune && <FineTune comp={comp} patchComposition={patchComposition} layers={layers} patchLayer={patchLayer} />}
 
-      {/* ── Super-adjustable fine-tune — every 3D knob, live ───────────── */}
-      <FineTune comp={comp} patchComposition={patchComposition} layers={layers} patchLayer={patchLayer} />
-
-      <div className="mt-3 text-[10px] text-graphite/40">3D buildings show at city zoom; recolour, relief and grade carry every shot.</div>
+      <div className="mt-2.5 text-[10px] text-graphite/40">One tap restyles the whole scene — map, routes, markers and labels. 3D buildings show at city zoom.</div>
     </div>
   );
 };

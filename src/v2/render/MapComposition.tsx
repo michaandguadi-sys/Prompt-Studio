@@ -34,7 +34,7 @@ import {
   DEFAULT_THEME, ThemeCtx, updateLiveState, poseAt, highlightPose,
   followRoutePose, trackPose,
   sanitizePose, routeTravel, flagIsoOf, clampN,
-  HighlightSource, HighlightLabel,
+  HighlightSource, HighlightLabel, HighlightHitArea,
   RouteView, RouteSource, RouteEndpoints, RouteIconView, RouteHitArea, DistanceLabel,
   TrackView, TrackSource, TrackOverlay,
   HeatmapSource, HeatmapLegend,
@@ -727,7 +727,10 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
             );
           }
           case "highlight": return (
-            <HighlightLabel key={`${l.id}-hl`} layer={l} frame={frame} fps={fps} totalFrames={totalFrames} project={project} />
+            <React.Fragment key={`${l.id}-hl`}>
+              <HighlightHitArea layer={l} frame={frame} fps={fps} totalFrames={totalFrames} project={project} />
+              <HighlightLabel layer={l} frame={frame} fps={fps} totalFrames={totalFrames} project={project} />
+            </React.Fragment>
           );
           case "route": return l.coordinates.length > 1 ? (
             <React.Fragment key={`${l.id}-rt`}>
