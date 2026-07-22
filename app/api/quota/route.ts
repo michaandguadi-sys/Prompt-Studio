@@ -5,11 +5,16 @@
 import { auth } from "@clerk/nextjs/server";
 import { db, schema } from "@/lib/db";
 import { eq } from "drizzle-orm";
-import { checkQuota } from "@/lib/quota";
+import { checkQuota, grantAllPro, unlimitedProQuota } from "@/lib/quota";
 
 export async function GET() {
   const { userId: clerkId } = await auth();
   if (!clerkId) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+  // TEST MODE (TEST_UNLIMITED=true): every signed-in user is Pro/unlimited,
+  // even before the Clerk webhook has provisioned their users/subscriptions
+  // rows. Off by default. See src/lib/quota.ts.
+  if (grantAllPro()) return Response.json(unlimitedProQuota());
 
   if (!db) {
     // Dev mode without Supabase — return a dummy quota so the UI renders.

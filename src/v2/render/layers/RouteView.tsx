@@ -118,6 +118,34 @@ export const RouteEndpoints: React.FC<LV<RouteLayer>> = ({ layer: l, frame, fps,
   );
 };
 
+// ── RouteHitArea: invisible projected bbox so the route is click-selectable ─
+// The line itself is a MapLibre canvas layer (no DOM), so the editor's geometric
+// hit-test can't reach it. This transparent rect (the route's projected bounding
+// box) carries the layer id, so clicking on/near a route selects it for editing.
+// Markers/labels sit inside smaller boxes, so they correctly win the pick.
+export const RouteHitArea: React.FC<LV<RouteLayer>> = ({ layer: l, frame, fps, totalFrames, project }) => {
+  const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
+  const coords = useMemo(() => finalRouteCoords(l), [l]);
+  if (tr.opacity < 0.01 || !project || coords.length < 2) return null;
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const c of coords) {
+    const { x, y } = project(c[0], c[1]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    if (x < minX) minX = x; if (y < minY) minY = y;
+    if (x > maxX) maxX = x; if (y > maxY) maxY = y;
+  }
+  if (!Number.isFinite(minX)) return null;
+  const pad = 10;
+  return (
+    <div
+      data-layer-id={l.id}
+      style={{ position: "absolute", left: minX - pad, top: minY - pad, width: maxX - minX + pad * 2, height: maxY - minY + pad * 2, pointerEvents: "none" }}
+    />
+  );
+};
+
 // ── RouteIconView: DOM overlay for the animated vehicle head ───────────────
 
 const ICONS: Record<string, string> = {

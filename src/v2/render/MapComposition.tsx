@@ -35,7 +35,7 @@ import {
   followRoutePose, trackPose,
   sanitizePose, routeTravel, flagIsoOf, clampN,
   HighlightSource, HighlightLabel,
-  RouteView, RouteSource, RouteEndpoints, RouteIconView, DistanceLabel,
+  RouteView, RouteSource, RouteEndpoints, RouteIconView, RouteHitArea, DistanceLabel,
   TrackView, TrackSource, TrackOverlay,
   HeatmapSource, HeatmapLegend,
   ChoroplethSource, ChoroplethLegend,
@@ -731,6 +731,7 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
           );
           case "route": return l.coordinates.length > 1 ? (
             <React.Fragment key={`${l.id}-rt`}>
+              <RouteHitArea layer={l} frame={frame} fps={fps} totalFrames={totalFrames} project={project} />
               {(l as any).showEndpoints !== false && <RouteEndpoints layer={l} frame={frame} fps={fps} totalFrames={totalFrames} project={project} />}
               {l.icon !== "none" && <RouteIconView layer={l} frame={frame} fps={fps} totalFrames={totalFrames} project={project} />}
             </React.Fragment>

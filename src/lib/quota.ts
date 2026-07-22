@@ -12,6 +12,40 @@ import { db, schema } from "./db";
 import { eq, gte, and, sum, count } from "drizzle-orm";
 import { TIERS, type Tier } from "./tiers";
 
+/**
+ * TEST MODE — grant every logged-in user the Pro/unlimited plan.
+ *
+ * Set `TEST_UNLIMITED=true` in the environment to let the whole team exercise
+ * every paid feature (unlimited 4K renders, no watermark, data layers, brand
+ * kits, story arcs, premium AI, priority queue) without paying. It is an
+ * EXPLICIT opt-in and OFF by default, so it can never activate accidentally —
+ * the code below is completely inert unless the flag is set.
+ *
+ * ⚠️ REMOVE (unset the env var) BEFORE PUBLIC LAUNCH — while on, it gives away
+ *    every paid feature for free to anyone who can sign in.
+ *
+ * PRODUCTION FAIL-CLOSED: like the sibling BYPASS_QUOTA, the flag is IGNORED in
+ * production builds (NODE_ENV === "production") so a single forgotten/leaked env
+ * var can never hand out Pro on the live site. A deliberate staging build that
+ * runs NODE_ENV=production can still force it on with a second explicit opt-in,
+ * TEST_UNLIMITED_ALLOW_PROD=true. In development the single flag is enough.
+ */
+export function grantAllPro(): boolean {
+  if (process.env.TEST_UNLIMITED !== "true") return false;
+  if (process.env.NODE_ENV === "production" && process.env.TEST_UNLIMITED_ALLOW_PROD !== "true") return false;
+  return true;
+}
+
+if (process.env.TEST_UNLIMITED === "true") {
+  // Loud, once-per-process notice (error-level — this hands out every paid
+  // feature) so it can never quietly ride to launch.
+  if (!grantAllPro()) {
+    console.error("[entitlements] TEST_UNLIMITED=true is IGNORED in this production build. Set TEST_UNLIMITED_ALLOW_PROD=true to force it on a deliberate staging build, or remove it before launch.");
+  } else {
+    console.error("[entitlements] TEST_UNLIMITED active — every logged-in user is treated as Pro/unlimited. REMOVE before public launch.");
+  }
+}
+
 export type QuotaResult = {
   allowed: boolean;
   usedMinutes: number;
@@ -28,7 +62,30 @@ export type QuotaResult = {
   fraction: number;
 };
 
+/**
+ * A fully-unlocked Pro/unlimited quota. Shared by the TEST_UNLIMITED override
+ * and the dev BYPASS_QUOTA path so both hand out identical, always-allowed Pro
+ * entitlements (no watermark, full-scale renders, all features).
+ */
+export function unlimitedProQuota(): QuotaResult {
+  return {
+    allowed: true,
+    usedMinutes: 0,
+    limitMinutes: TIERS.pro.minutesPerMonth,
+    usedRenders: 0,
+    maxRenders: null,
+    unit: "minute",
+    tier: "pro",
+    periodStart: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+    fraction: 0,
+  };
+}
+
 export async function checkQuota(userId: string): Promise<QuotaResult> {
+  // TEST MODE: TEST_UNLIMITED=true → treat everyone as Pro/unlimited. Checked
+  // first so it applies on every path (with or without a DB). Off by default.
+  if (grantAllPro()) return unlimitedProQuota();
+
   // Dev/testing bypass: add BYPASS_QUOTA=true to .env.local to unlock all tiers.
   // REFUSED in production — it would disable all metering and branding, so a
   // leaked env var must never be able to hand out clean unlimited renders.

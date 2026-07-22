@@ -46,6 +46,10 @@ export const Canvas: React.FC = () => {
   // elements (they're pointer-events:none, so we test bounding rects and pick the
   // smallest one under the cursor). Makes editing direct — click the thing, then
   // drag/scale/rotate it. Editing handles stopPropagation, so they're unaffected.
+  //
+  // Tapping the canvas NEVER toggles playback (the Player has clickToPlay off).
+  // Instead we prioritise editing: hit an element → select it AND pause, so the
+  // frame holds still and the tapped element is ready to adjust.
   const pickAt = (e: React.PointerEvent) => {
     if (playStory) return; // story playback isn't per-layer editable
     const stage = stageRef.current;
@@ -60,7 +64,7 @@ export const Canvas: React.FC = () => {
         if (area < hitArea) { hitArea = area; hit = el.getAttribute("data-layer-id"); }
       }
     });
-    if (hit) select(hit);
+    if (hit) { select(hit); playerRef.current?.pause(); } // freeze the frame to edit
   };
 
   const sceneFrames = Math.max(1, Math.round(comp.durationSec * fps));
@@ -146,6 +150,7 @@ export const Canvas: React.FC = () => {
                 controls
                 loop
                 autoPlay
+                clickToPlay={false}
                 style={{ width: "100%", height: "100%", background: "#000", display: "block" }}
               />
               {/* Direct-manipulation handles only make sense while editing one scene. */}

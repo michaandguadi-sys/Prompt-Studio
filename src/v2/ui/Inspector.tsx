@@ -1,11 +1,11 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { MapPin, Upload, Sparkles, Boxes, Mic, Play, Square, X as XIcon, Loader2 } from "lucide-react";
+import { MapPin, Upload, Sparkles, Mic, Play, Square, X as XIcon, Loader2 } from "lucide-react";
 import { hasVoiceoverKey, loadVoiceoverSettings, generateVoiceover, measureAudioDuration } from "@/lib/voiceover";
-import { MAP3D_STYLES } from "@/lib/presets/map3dStyles";
 import { Field, Input, NumberInput, Select, Section, Slider, Toggle } from "./controls";
 import { confirmDialog, promptDialog } from "./dialogs";
+import { MapStyleGallery } from "./Map3DStyleModal";
 import { ColorInput } from "@/components/ui/ColorInput";
 import { ColorWheel } from "./ColorWheel";
 import { PlaceSearch } from "@/components/MapBuilder/PlaceSearch";
@@ -644,29 +644,9 @@ const BrandKitPanel: React.FC = () => {
   );
 };
 
-/** The selectable basemaps — a VISUAL picker (thumbnail swatch + name) so the
- *  map style is the first, most obvious choice. Swatches approximate each look. */
-type CuratedStyle = { id: string; name: string; hint: string; kind: "flat" | "photoreal" | "3d"; url?: string; preset3dId?: string; swatch: React.CSSProperties };
-/** ONE curated set of distinct looks — flat bases + the standout 3D worlds +
- *  real-building Photoreal, so the picker is clear (not 19 cramped swatches). */
-const CURATED_STYLES: CuratedStyle[] = [
-  { id: "satellite", name: "Satellite", hint: "real imagery", kind: "flat", url: "mapbox://styles/mapbox/satellite-streets-v12", swatch: { background: "linear-gradient(135deg,#243a1c,#3b5a2a 45%,#7a6b3e 75%,#274b63)" } },
-  { id: "dark", name: "Dark", hint: "cinematic default", kind: "flat", url: "mapbox://styles/mapbox/dark-v11", swatch: { background: "linear-gradient(135deg,#0a0e1a,#121830 60%,#1b2547)" } },
-  { id: "minimal", name: "Minimal", hint: "clean & light", kind: "flat", url: "mapbox://styles/mapbox/light-v11", swatch: { background: "linear-gradient(135deg,#f4f5f8,#e7ebf2 60%,#d6deea)" } },
-  { id: "terrain", name: "Terrain", hint: "topographic relief", kind: "flat", url: "mapbox://styles/mapbox/outdoors-v12", swatch: { background: "linear-gradient(135deg,#cfe3b8,#a9cf8e 55%,#8bbf7a)" } },
-  { id: "photoreal", name: "Photoreal 3D", hint: "real buildings · like Google Earth", kind: "photoreal", swatch: { background: "linear-gradient(135deg,#3a4a2c,#6b7a4a 45%,#9a8a5a 70%,#2a4b63)" } },
-  { id: "papercraft", name: "Paper-craft", hint: "folded-paper 3D", kind: "3d", preset3dId: "papercraft", swatch: { background: "linear-gradient(135deg,#efe7d6,#d8cdb6 60%,#b9a98a)" } },
-  { id: "holographic", name: "Holographic", hint: "cyan hologram 3D", kind: "3d", preset3dId: "holographic", swatch: { background: "linear-gradient(135deg,#06121f,#0b3a4a 45%,#2FE0FF)" } },
-  { id: "aurora", name: "Aurora", hint: "teal-violet relief 3D", kind: "3d", preset3dId: "aurora", swatch: { background: "linear-gradient(135deg,#06161a,#155e57 45%,#36d39a 72%,#6E7BFF)" } },
-  { id: "molten", name: "Molten", hint: "lava & ember 3D", kind: "3d", preset3dId: "molten", swatch: { background: "linear-gradient(135deg,#120806,#7a2410 45%,#ff6a2a 78%,#ff8a3a)" } },
-  { id: "neon-noir", name: "Neon Noir", hint: "synthwave magenta 3D", kind: "3d", preset3dId: "neon-noir", swatch: { background: "linear-gradient(135deg,#14061f,#5e0a55 45%,#ff3df0)" } },
-  { id: "blueprint", name: "Blueprint", hint: "glowing technical 3D", kind: "3d", preset3dId: "blueprint", swatch: { background: "linear-gradient(135deg,#0a1f4d,#1d3f86 50%,#bcd4ff)" } },
-  { id: "crystal-ice", name: "Crystal Ice", hint: "glacial translucent 3D", kind: "3d", preset3dId: "crystal-ice", swatch: { background: "linear-gradient(135deg,#0a1622,#3a6d8a 50%,#bfe9ff)" } },
-  { id: "sakura", name: "Sakura", hint: "cherry-blossom dusk 3D", kind: "3d", preset3dId: "sakura", swatch: { background: "linear-gradient(135deg,#1a0a12,#7a2a52 48%,#ff9ec9)" } },
-  { id: "emerald", name: "Emerald", hint: "bio-luminescent green 3D", kind: "3d", preset3dId: "emerald", swatch: { background: "linear-gradient(135deg,#04140c,#0f5e3a 48%,#2fd98a)" } },
-  { id: "war-room", name: "War Room", hint: "tactical sand-table 3D", kind: "3d", preset3dId: "war-room", swatch: { background: "linear-gradient(135deg,#0e1622,#3a4a63 55%,#ffb020)" } },
-];
-/** Niche bases kept available as a small text row (not in the visual grid). */
+/** Niche bases kept available as a small text row (the full style gallery lives
+ *  in <MapStyleGallery />): a clean graticule grid + the OpenHistoricalMap base
+ *  that unlocks the year time-travel controls. */
 const MORE_STYLES: { url: string; name: string }[] = [
   { url: "grid", name: "Grid" },
   { url: "https://www.openhistoricalmap.org/map-styles/main/main.json", name: "Historical" },
@@ -676,10 +656,7 @@ const MORE_STYLES: { url: string; name: string }[] = [
  *  the per-style options (terrain, labels, land/water, historical year). */
 const MapStylePanel: React.FC = () => {
   const basemap = useEditor((s) => s.project.composition.basemap);
-  const look = useEditor((s) => s.project.composition.look);
-  const layers = useEditor((s) => s.project.composition.layers);
   const patchComposition = useEditor((s) => s.patchComposition);
-  const patchLayer = useEditor((s) => s.patchLayer);
   const { tier } = useTier();
   const isPro = PRO_DATA_TIERS.has(tier ?? "");
   const [customUrl, setCustomUrl] = useState("");
@@ -701,56 +678,22 @@ const MapStylePanel: React.FC = () => {
   };
   const loadStyle = (p: { basemap: Record<string, unknown> }) => patchComposition({ basemap: { ...basemap, ...p.basemap, photoreal3d: false } as any });
   const delStyle = (id: string) => persistStyles(stylePresets.filter((x) => x.id !== id));
-  // Apply a creative 3D world: merge its basemap + look + tilt the camera (same as the old modal).
-  const apply3d = (st: (typeof MAP3D_STYLES)[number]) => {
-    patchComposition({ basemap: { ...basemap, ...(st.basemap as any), style3d: st.id, photoreal3d: false } as any, look: { ...look, ...(st.look as any) } as any });
-    const cam = layers.find((l) => l.type === "camera") as any;
-    if (cam && typeof st.pitch === "number") patchLayer(cam.id, { end: { ...cam.end, pitch: st.pitch } } as any);
-  };
-  // Photoreal 3D — Google's real-building tiles (live preview needs a Maps key; exports as 3D satellite).
-  const applyPhotoreal = () => {
-    patchComposition({ basemap: { ...basemap, photoreal3d: true, style3d: "", terrain: true, buildings3d: true } as any });
-    const cam = layers.find((l) => l.type === "camera") as any;
-    if (cam) patchLayer(cam.id, { end: { ...cam.end, pitch: Math.max(cam.end?.pitch ?? 0, 55) } } as any);
-  };
-  const clear3d = () => patchComposition({ basemap: { ...basemap, style3d: "", photoreal3d: false, buildings3d: false, landColor: "", waterColor: "", buildingColor: "", boundaryGlow: "" } as any });
-  const applyCurated = (c: CuratedStyle) => {
-    if (c.kind === "photoreal") return applyPhotoreal();
-    if (c.kind === "3d") { const st = MAP3D_STYLES.find((s) => s.id === c.preset3dId); if (st) apply3d(st); return; }
-    patchComposition({ basemap: { ...basemap, styleUrl: c.url!, style3d: "", photoreal3d: false } as any });
-  };
-  const curatedActive = (c: CuratedStyle) =>
-    c.kind === "photoreal" ? photoreal
-      : c.kind === "3d" ? (!photoreal && style3d === c.preset3dId)
-        : (!style3d && !photoreal && basemap.styleUrl === c.url);
   return (
     <Section title="Map style">
-      {/* Visual basemap chooser — the first thing you pick. */}
-      {/* ONE curated picker — distinct flat bases + standout 3D + real Photoreal. */}
-      <div className="grid grid-cols-4 gap-1.5">
-        {CURATED_STYLES.map((c) => {
-          const active = curatedActive(c);
-          return (
-            <button key={c.id} onClick={() => applyCurated(c)} title={`${c.name} — ${c.hint}`}
-              className="group text-center transition-transform hover:-translate-y-0.5">
-              <div className={`relative flex h-11 w-full items-center justify-center overflow-hidden rounded-md border ${active ? "border-iris ring-2 ring-iris/40" : "border-black/10"}`} style={c.swatch}>
-                {c.kind === "photoreal" && <Boxes size={14} className="text-white/90" />}
-                {active && <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-iris shadow-glow-iris" />}
-              </div>
-              <div className={`mt-0.5 truncate text-[9px] font-medium ${active ? "text-iris" : "text-graphite/55 group-hover:text-iris"}`}>{c.name}</div>
-            </button>
-          );
-        })}
-      </div>
-      <div className="flex items-center gap-2.5 text-[10px] text-graphite/45">
-        <span className="uppercase tracking-wider text-graphite/35">More</span>
+      {/* The studio's ONE style picker — 30 cinematic looks + Live Earth + creative
+          worlds + every 3D knob, inline. Available to everyone; replaces the old
+          curated quick-picker and the top-nav modal. */}
+      <MapStyleGallery />
+
+      {/* Two special bases the gallery doesn't cover: a clean graticule grid, and the
+          real OpenHistoricalMap base that unlocks the year time-travel controls below. */}
+      <div className="flex items-center gap-2.5 pt-1 text-[10px] text-graphite/45">
+        <span className="uppercase tracking-wider text-graphite/35">More bases</span>
         {MORE_STYLES.map((m) => {
           const active = !style3d && !photoreal && basemap.styleUrl === m.url;
           return <button key={m.url} onClick={() => patchComposition({ basemap: { ...basemap, styleUrl: m.url, style3d: "", photoreal3d: false } as any })} className={`transition-colors hover:text-iris ${active ? "font-semibold text-iris" : ""}`}>{m.name}</button>;
         })}
-        {(style3d || photoreal) && <button onClick={clear3d} className="ml-auto transition-colors hover:text-iris">↺ flat</button>}
       </div>
-      {photoreal && <p className="text-[10px] leading-snug text-graphite/40">Photoreal 3D streams Google&apos;s real, textured buildings (like Google Earth) — needs a Google Maps key in Settings for the live preview. The difference: <b>Satellite</b> = flat aerial imagery, <b>Photoreal</b> = a real 3-D city you fly through.</p>}
 
       {/* Pro — bring your own map style (MapTiler / MapLibre style JSON; key lives in the URL) */}
       {isPro ? (

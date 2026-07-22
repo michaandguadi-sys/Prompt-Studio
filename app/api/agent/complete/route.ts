@@ -9,6 +9,7 @@ import { eq } from "drizzle-orm";
 import { completeJob, getJob } from "@/lib/agentBridge";
 import { devUserIdForKey } from "@/lib/devAgentStore";
 import { TIERS, type Tier } from "@/lib/tiers";
+import { grantAllPro } from "@/lib/quota";
 
 /** Video length (seconds) of a job — sums scenes for a sequence, else the spec. */
 function jobVideoSeconds(job: ReturnType<typeof getJob>): number {
@@ -48,8 +49,9 @@ export async function POST(req: NextRequest) {
   // Log a completed render so the Free tier's 1-animation cap is metered on the
   // agent path. Paid (minute-metered) tiers render on their own machine and are
   // intentionally NOT logged here — that keeps agent renders quota-free for them.
-  // No-op without a DB or on failure.
-  if (db && !error && job) {
+  // No-op without a DB or on failure. Also skipped under TEST_UNLIMITED, where
+  // everyone is Pro/unlimited and no render should count against a Free cap.
+  if (db && !error && job && !grantAllPro()) {
     try {
       const [sub] = await db
         .select({ tier: schema.subscriptions.tier })

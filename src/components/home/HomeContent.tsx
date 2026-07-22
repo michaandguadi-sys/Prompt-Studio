@@ -6,6 +6,7 @@ import { Sparkles, Layers, MapPin, Clapperboard, Palette, Route, ArrowRight } fr
 import { ProjectsGrid } from "@/components/home/ProjectsGrid";
 import { ImportTrackBox } from "@/components/home/ImportTrackBox";
 import { GenerateExperience } from "@/components/home/GenerateExperience";
+import { Showcase } from "@/components/home/Showcase";
 
 const SERIF = "Newsreader, 'Playfair Display', Georgia, serif";
 
@@ -56,6 +57,17 @@ export const HomeContent: React.FC = () => {
             </Link>
           </div>
           <ProjectsGrid />
+        </div>
+
+        {/* Showcase — finished, polished films to open & play in one click */}
+        <div className="mx-auto max-w-6xl px-6 pt-16">
+          <div className="mb-5">
+            <h2 className="text-[20px] font-medium text-white/90" style={{ fontFamily: SERIF }}>
+              Start from a finished story
+            </h2>
+            <p className="text-[12px] text-white/40">Real films across styles — open one to play, then make it yours.</p>
+          </div>
+          <Showcase />
         </div>
 
         {/* Feature highlights — what makes it premium, in one calm row */}

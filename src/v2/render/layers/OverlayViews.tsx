@@ -41,7 +41,7 @@ export const LabelView: React.FC<LV<LabelLayer>> = ({ layer: l, frame, fps, tota
 
   if (l.variant === "pin") {
     return (
-      <div style={base}>
+      <div data-layer-id={l.id} style={base}>
         <div style={{ ...outlineStyle(l.outline, sz * 0.04), fontSize: sz, fontWeight: 800, color: l.color, textShadow: shadow, letterSpacing: 1 }}>{l.text}</div>
         {l.sub && <div style={{ fontSize: sz * 0.5, color: l.accent, marginTop: sz * 0.1, fontWeight: 600, textShadow: shadow }}>{l.sub}</div>}
         <div style={{ width: sz * 0.12, height: sz * 0.35, background: l.accent, margin: `${sz * 0.12}px auto 0`, borderRadius: sz * 0.06 }} />
@@ -51,7 +51,7 @@ export const LabelView: React.FC<LV<LabelLayer>> = ({ layer: l, frame, fps, tota
 
   if (l.variant === "card") {
     return (
-      <div style={{ ...base, transform: `translate(-50%,-50%) ${timingTransform(tr)}${tfStyle(l, vw, vh)}` }}>
+      <div data-layer-id={l.id} style={{ ...base, transform: `translate(-50%,-50%) ${timingTransform(tr)}${tfStyle(l, vw, vh)}` }}>
         <div style={{ display: "inline-block", padding: `${sz * 0.3}px ${sz * 0.6}px`, background: "rgba(6,8,15,0.85)", border: `${Math.max(2, sz * 0.04)}px solid ${l.accent}`, borderRadius: sz * 0.16, backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)" }}>
           <div style={{ fontSize: sz, fontWeight: 800, color: l.color, ...outlineStyle(l.outline, sz * 0.04) }}>{l.text}</div>
           {l.sub && <div style={{ fontSize: sz * 0.5, color: l.accent, marginTop: sz * 0.12, fontWeight: 600 }}>{l.sub}</div>}
@@ -62,7 +62,7 @@ export const LabelView: React.FC<LV<LabelLayer>> = ({ layer: l, frame, fps, tota
 
   if (l.variant === "lower-third") {
     return (
-      <div style={{ position: "absolute", left: "5%", bottom: "10%", transform: timingTransform(tr), opacity: tr.opacity, pointerEvents: "none", fontFamily: font }}>
+      <div data-layer-id={l.id} style={{ position: "absolute", left: "5%", bottom: "10%", transform: timingTransform(tr), opacity: tr.opacity, pointerEvents: "none", fontFamily: font }}>
         <div style={{ display: "inline-block", padding: `${sz * 0.22}px ${sz * 0.5}px`, borderLeft: `${Math.max(4, sz * 0.08)}px solid ${l.accent}`, background: "rgba(6,8,15,0.78)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)" }}>
           <div style={{ fontSize: sz, fontWeight: 800, color: l.color, ...outlineStyle(l.outline, sz * 0.04) }}>{l.text}</div>
           {l.sub && <div style={{ fontSize: sz * 0.5, color: l.accent, marginTop: sz * 0.1, fontWeight: 600 }}>{l.sub}</div>}
@@ -77,7 +77,7 @@ export const LabelView: React.FC<LV<LabelLayer>> = ({ layer: l, frame, fps, tota
   const bannerFit = Math.min(1, 26 / Math.max(10, l.text.length)); // long text → smaller
   const bSz = sz * (0.72 + 0.38 * bannerFit);
   return (
-    <div style={{ position: "absolute", left: "50%", top: "50%", transform: `translate(-50%,-50%) ${timingTransform(tr)}`, opacity: tr.opacity, pointerEvents: "none", textAlign: "center", maxWidth: "78%", fontFamily: font }}>
+    <div data-layer-id={l.id} style={{ position: "absolute", left: "50%", top: "50%", transform: `translate(-50%,-50%) ${timingTransform(tr)}`, opacity: tr.opacity, pointerEvents: "none", textAlign: "center", maxWidth: "78%", fontFamily: font }}>
       <div
         style={{
           padding: `${bSz * 0.45}px ${bSz * 1.4}px`,
@@ -113,6 +113,7 @@ export const FlagView: React.FC<LV<FlagLayer>> = ({ layer: l, frame, fps, totalF
 
   return (
     <div
+      data-layer-id={l.id}
       style={{
         position: "absolute",
         left: x,
@@ -167,6 +168,7 @@ export const MarkerView: React.FC<LV<MarkerLayer>> = ({ layer: l, frame, fps, to
 
   return (
     <div
+      data-layer-id={l.id}
       style={{
         position: "absolute",
         left: x,

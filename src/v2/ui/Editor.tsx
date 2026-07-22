@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import {
-  Undo2, Redo2, RotateCcw, Wand2, KeyRound, Boxes, Camera,
+  Undo2, Redo2, RotateCcw, Wand2, KeyRound, Camera, Keyboard,
   Layers as LayersIcon, SlidersHorizontal, PanelBottomClose, PanelBottom,
   PanelLeftClose, PanelRightClose,
 } from "lucide-react";
@@ -19,10 +19,11 @@ import { ProjectMenu } from "./ProjectMenu";
 import { Timeline } from "./Timeline";
 import { SceneStrip } from "./SceneStrip";
 import { RestyleModal } from "./RestyleModal";
-import { Map3DStyleModal } from "./Map3DStyleModal";
 import { SettingsModal } from "./SettingsModal";
 import { StillStudio } from "./StillStudio";
 import { CommandPalette } from "./CommandPalette";
+import { QuickAddMenu } from "./QuickAddMenu";
+import { ShortcutsModal } from "./ShortcutsModal";
 import { ErrorBoundary } from "./ErrorBoundary";
 
 /** Persisted panel size, read synchronously so there's no resize flash. */
@@ -58,7 +59,6 @@ export const Editor: React.FC = () => {
   const duplicateLayer = useEditor((s) => s.duplicateLayer);
   const select = useEditor((s) => s.select);
   const [restyleOpen, setRestyleOpen] = useState(false);
-  const [style3dOpen, setStyle3dOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [stillOpen, setStillOpen] = useState(false);
   const [layersOpen, setLayersOpen] = useState(true);
@@ -158,13 +158,13 @@ export const Editor: React.FC = () => {
           <button onClick={async () => { if (await confirmDialog({ title: "Start a fresh project?", message: "Unsaved changes will be lost.", confirmLabel: "New project", danger: true })) reset(); }} title="New project" className={iconBtn}><RotateCcw size={14} /></button>
           <span className="mx-1 h-5 w-px bg-line" />
           <ProjectMenu />
-          <button onClick={() => setStyle3dOpen(true)} title="Creative 3D map styles" className={accentBtn}><Boxes size={13} /> 3D</button>
           <button onClick={() => setRestyleOpen(true)} title="Restyle your render with AI" className={accentBtn}><Wand2 size={13} /> Restyle</button>
           <button onClick={() => setStillOpen(true)} title="Snapshot — extract this frame as a high-res image (annotate & export PNG/JPG/WebP/SVG/PDF)" className={accentBtn}><Camera size={13} /> Snapshot</button>
           <span className="mx-1 h-5 w-px bg-line" />
           <RenderButton />
           <RenderQueue />
           <ExportButton />
+          <button onClick={() => window.dispatchEvent(new CustomEvent("mapanisy:open-shortcuts"))} title="Keyboard shortcuts (?)" className={iconBtn}><Keyboard size={15} /></button>
           <button onClick={() => setSettingsOpen(true)} title="API keys & AI providers" className={iconBtn}><KeyRound size={15} /></button>
         </div>
       </header>
@@ -223,10 +223,11 @@ export const Editor: React.FC = () => {
       </div>
 
       <RestyleModal open={restyleOpen} onClose={() => setRestyleOpen(false)} onOpenSettings={() => { setRestyleOpen(false); setSettingsOpen(true); }} />
-      <Map3DStyleModal open={style3dOpen} onClose={() => setStyle3dOpen(false)} />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <StillStudio open={stillOpen} onClose={() => setStillOpen(false)} />
       <CommandPalette />
+      <QuickAddMenu />
+      <ShortcutsModal />
     </div>
   );
 };

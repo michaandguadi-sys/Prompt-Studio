@@ -1,8 +1,7 @@
 "use client";
 
 import React from "react";
-import { createPortal } from "react-dom";
-import { X, Boxes, RotateCcw, Sliders, Globe2 } from "lucide-react";
+import { RotateCcw, Sliders, Globe2 } from "lucide-react";
 import { useEditor } from "../store/editor";
 import { recordTaste } from "@/lib/taste";
 import { createLayer } from "../doc/factory";
@@ -55,18 +54,20 @@ const LIVE_EARTH: {
 ];
 
 /**
- * Creative 3D Map Styles — one click turns the whole map into a distinctive 3D
- * world (holographic, neon, miniature diorama, blueprint, molten…). Applies the
- * style's basemap + look over the current composition and sets the camera pitch.
+ * Map Style Gallery — the studio's ONE map-style picker, shown inline in the
+ * Inspector's "Map style" section. One click turns the whole scene into a
+ * distinctive look: 30 documentary/cinematic styles, real-data Live Earth, and
+ * creative 3D worlds (holographic, neon, miniature diorama, blueprint, molten…).
+ * Applies the style's basemap + look over the current composition, restyles
+ * every overlay element to match, and sets the camera pitch. Available to all.
  */
-export const Map3DStyleModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
+export const MapStyleGallery: React.FC = () => {
   const comp = useEditor((s) => s.project.composition);
   const patchComposition = useEditor((s) => s.patchComposition);
   const layers = useEditor((s) => s.project.composition.layers);
   const patchLayer = useEditor((s) => s.patchLayer);
   const addLayers = useEditor((s) => s.addLayers);
   const removeLayer = useEditor((s) => s.removeLayer);
-  if (!open || typeof document === "undefined") return null;
 
   /** Apply a LIVE EARTH look: swap the base style and (re)lay the GIBS raster. */
   const applyLiveEarth = (le: (typeof LIVE_EARTH)[number]) => {
@@ -112,62 +113,49 @@ export const Map3DStyleModal: React.FC<{ open: boolean; onClose: () => void }> =
     });
   };
 
-  return createPortal(
-    <div className="anim-fade-in fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-4 backdrop-blur-md" onClick={onClose}>
-      <div className="relative w-full max-w-2xl overflow-hidden rounded-2xl border border-line bg-white" onClick={(e) => e.stopPropagation()} style={{ boxShadow: "0 40px 110px -34px rgba(20,28,55,0.42), 0 6px 20px -8px rgba(20,28,55,0.18)" }}>
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#6E7BFF]/50 to-transparent" />
-        <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
-          <div className="flex items-center gap-2">
-            <span className="flex h-6 w-6 items-center justify-center rounded-lg text-white" style={{ background: "linear-gradient(135deg,#6E7BFF,#2FE0FF)" }}><Boxes size={13} /></span>
-            <h2 className="text-sm font-semibold text-graphite">Creative 3D map styles</h2>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <button onClick={reset} className="inline-flex items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-[11px] text-graphite/60 transition-colors hover:border-graphite/25 hover:text-graphite"><RotateCcw size={12} /> Reset</button>
-            <button onClick={onClose} className="rounded-lg p-1.5 text-graphite/45 transition-colors hover:bg-graphite/[0.05] hover:text-graphite"><X size={16} /></button>
-          </div>
-        </div>
+  const anyStyle = !!activeId || !!(comp.basemap as any).photoreal3d;
 
-        <div className="max-h-[74vh] overflow-y-auto px-5 py-4">
-          <p className="mb-3 text-[12px] leading-relaxed text-graphite/55">
-            One click restyles the whole map — recoloured land &amp; water, relief, grade, and (for the creative worlds) art-directed 3D buildings. Tweak any of it after in the inspector.
-          </p>
-
-          <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-graphite/45">Documentary &amp; professional</div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {PRO_MAP_STYLES.map((s) => <StyleCard key={s.id} s={s} on={activeId === s.id} onApply={apply} />)}
-          </div>
-
-          {/* ── LIVE EARTH — the planet as real NASA data, one click ── */}
-          <div className="mb-2 mt-5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-graphite/45">
-            Live Earth
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/12 px-1.5 py-0.5 text-[8.5px] font-bold tracking-[0.1em] text-emerald-600">
-              <span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-70" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" /></span>
-              REAL DATA · NASA
-            </span>
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {LIVE_EARTH.map((le) => (
-              <StyleCard
-                key={le.key}
-                s={{ id: le.key, name: le.name, tagline: le.tagline, swatches: le.swatches }}
-                on={layers.some((l) => l.type === "earthlayer" && (l as any).datasetId === le.cfg.datasetId)}
-                onApply={() => applyLiveEarth(le)}
-              />
-            ))}
-          </div>
-
-          <div className="mb-2 mt-5 text-[10px] font-semibold uppercase tracking-[0.22em] text-graphite/45">Creative worlds</div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {MAP3D_STYLES.map((s) => <StyleCard key={s.id} s={s} on={activeId === s.id} onApply={apply} />)}
-          </div>
-          {/* ── Super-adjustable fine-tune — every 3D knob, live ───────────── */}
-          <FineTune comp={comp} patchComposition={patchComposition} layers={layers} patchLayer={patchLayer} />
-
-          <div className="mt-3 text-[10px] text-graphite/40">3D buildings show at city zoom; recolour, relief and grade carry every shot. Switch the map style picker for a different base.</div>
-        </div>
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-graphite/45">Documentary &amp; professional</span>
+        {anyStyle && (
+          <button onClick={reset} className="inline-flex items-center gap-1 text-[10px] text-graphite/45 transition-colors hover:text-iris"><RotateCcw size={11} /> Reset to flat</button>
+        )}
       </div>
-    </div>,
-    document.body,
+      <div className="grid grid-cols-2 gap-2">
+        {PRO_MAP_STYLES.map((s) => <StyleCard key={s.id} s={s} on={activeId === s.id} onApply={apply} />)}
+      </div>
+
+      {/* ── LIVE EARTH — the planet as real NASA data, one click ── */}
+      <div className="mb-2 mt-5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-graphite/45">
+        Live Earth
+        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/12 px-1.5 py-0.5 text-[8.5px] font-bold tracking-[0.1em] text-emerald-600">
+          <span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-70" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500" /></span>
+          REAL DATA · NASA
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        {LIVE_EARTH.map((le) => (
+          <StyleCard
+            key={le.key}
+            s={{ id: le.key, name: le.name, tagline: le.tagline, swatches: le.swatches }}
+            on={layers.some((l) => l.type === "earthlayer" && (l as any).datasetId === le.cfg.datasetId)}
+            onApply={() => applyLiveEarth(le)}
+          />
+        ))}
+      </div>
+
+      <div className="mb-2 mt-5 text-[10px] font-semibold uppercase tracking-[0.22em] text-graphite/45">Creative worlds</div>
+      <div className="grid grid-cols-2 gap-2">
+        {MAP3D_STYLES.map((s) => <StyleCard key={s.id} s={s} on={activeId === s.id} onApply={apply} />)}
+      </div>
+
+      {/* ── Super-adjustable fine-tune — every 3D knob, live ───────────── */}
+      <FineTune comp={comp} patchComposition={patchComposition} layers={layers} patchLayer={patchLayer} />
+
+      <div className="mt-3 text-[10px] text-graphite/40">3D buildings show at city zoom; recolour, relief and grade carry every shot.</div>
+    </div>
   );
 };
 

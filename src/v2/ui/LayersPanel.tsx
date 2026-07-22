@@ -24,10 +24,10 @@ const ICONS: Record<string, React.ReactNode> = {
   Route: <Route size={14} />, CircleDot: <CircleDot size={14} />, Spline: <Spline size={14} />, Flame: <Flame size={14} />,
   Radar: <Radar size={14} />, CalendarClock: <CalendarClock size={14} />, CloudSnow: <CloudSnow size={14} />, Satellite: <Satellite size={14} />,
 };
-const iconFor = (t: LayerType) => ICONS[LAYER_REGISTRY[t].icon] ?? <MapPin size={14} />;
+export const iconFor = (t: LayerType) => ICONS[LAYER_REGISTRY[t].icon] ?? <MapPin size={14} />;
 
 /** Add-layer palette, grouped so every overlay (incl. Highlight) is easy to find. */
-const ADD_CATEGORIES: { label: string; types: LayerType[] }[] = [
+export const ADD_CATEGORIES: { label: string; types: LayerType[] }[] = [
   { label: "Places & pins", types: ["label", "marker", "flag", "annotation", "spotlight", "radius"] },
   { label: "Regions & data", types: ["highlight", "choropleth", "bubble", "heatmap", "chart"] },
   { label: "Routes & networks", types: ["route", "connections", "flow"] },
