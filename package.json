@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/ensure-bundle-fresh.mjs",
     "dev": "next dev -p 3030",
     "build": "npm run build:agent-bundle && next build",
     "build:agent-bundle": "node scripts/build-bundle.mjs",
