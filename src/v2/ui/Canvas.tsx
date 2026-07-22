@@ -75,8 +75,28 @@ export const Canvas: React.FC = () => {
   // Sync the scene Player's playback frame → store (drives the timeline playhead)
   // and register a seek fn so the timeline ruler can scrub the preview.
   const playerRef = useRef<PlayerRef>(null);
+  const storyPlayerRef = useRef<PlayerRef>(null);
   const setPlayheadFrame = useEditor((s) => s.setPlayheadFrame);
   const registerSeek = useEditor((s) => s.registerSeek);
+
+  // We own the spacebar (both Players have spaceKeyToPlayOrPause off) so plain
+  // Space = play/pause on the active player, leaving ⇧Space free for the
+  // quick-add element picker. Works even when the Player isn't focused, and
+  // never fires while typing in a field.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== "Space" || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = e.target as HTMLElement;
+      const tag = el?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el?.isContentEditable) return;
+      const p = (playStory ? storyPlayerRef : playerRef).current;
+      if (!p) return;
+      e.preventDefault();
+      p.toggle();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [playStory]);
   useEffect(() => {
     const p = playerRef.current;
     if (playStory || !p) return;
@@ -124,6 +144,7 @@ export const Canvas: React.FC = () => {
         >
           {playStory ? (
             <Player
+              ref={storyPlayerRef}
               key={`story-${scenes.length}-${totalFrames}`}
               component={StoryComposition as any}
               inputProps={storyProps}
@@ -134,6 +155,7 @@ export const Canvas: React.FC = () => {
               controls
               loop
               autoPlay
+              spaceKeyToPlayOrPause={false}
               style={{ width: "100%", height: "100%", background: "#000", display: "block" }}
             />
           ) : (
@@ -151,6 +173,7 @@ export const Canvas: React.FC = () => {
                 loop
                 autoPlay
                 clickToPlay={false}
+                spaceKeyToPlayOrPause={false}
                 style={{ width: "100%", height: "100%", background: "#000", display: "block" }}
               />
               {/* Direct-manipulation handles only make sense while editing one scene. */}
