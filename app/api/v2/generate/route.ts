@@ -341,19 +341,26 @@ const ADDON_INSTRUCTION = `\n\n══ OPTIONAL — INVENT A REUSABLE FEATURE (ad
 
 const withDoctrine = (base: string) => `${base}${DOCTRINE}${BRIEF_INSTRUCTION}${ADDON_INSTRUCTION}`;
 
-/** SIMPLE REQUEST MODE — the lightweight default for direct, non-story prompts.
- *  No documentary expansion, no deep research, no invented context: the user
- *  already knows what they want. Deep research is reserved for prompts that ask
- *  for it (or genuinely need factual grounding). */
-const SIMPLE_MODE = `\n\n══ SIMPLE REQUEST — keep it light ══\nThis is a direct, simple request: the user already knows exactly what they want. Do NOT expand it into a documentary. No research beyond resolving the named places, no extra "context" layers, no invented statistics, dates, or backstory. Produce exactly the requested visual: AT MOST 4 layers, ONE clean intentional camera move, a cohesive look, and at most one short title (only if a heading genuinely helps). Elegant simplicity wins. Include only a one-line "brief": {"thesis":"<what this shows>","angle":"","archetype":"","facts":[],"caveats":[],"disputed":[]}.`;
+/** FAITHFUL MODE — the DEFAULT for every prompt that isn't an explicit request
+ *  for a documentary/story. Build EXACTLY what the creator described, concisely.
+ *  No research, no invented context, no story expansion — their idea, cleanly
+ *  animated. This is the fix for "it's always way too long / not what I asked". */
+const FAITHFUL_MODE = `\n\n══ BUILD EXACTLY WHAT THEY ASKED — faithful & concise (this is NOT a documentary) ══
+The creator described a SPECIFIC animation. Build THAT — every element they named, and nothing they didn't.
+• FAITHFUL: animate precisely what the prompt says. Do NOT add research, statistics, dates, timestamps, extra "context" beats, narration, backstory, or a second story they didn't ask for. If they didn't mention it, it doesn't go in.
+• SHORT: durationSec 6-11 — the shortest length that shows their idea clearly, as ONE continuous camera move. Never 15+ unless they explicitly asked for a long piece.
+• FEW LAYERS — only what the prompt implies, AT MOST 5: "highlight France" → a highlight (+ maybe one title). "flight from A to B" → a route. "show Tokyo" → a city push-in + one pin. Never pad with layers they didn't request.
+• THEIR STYLE, EXACTLY: if they named a look / colour / mood / style, use it (map3dStyle, palette, colours). Match it; don't override with your own taste.
+• At most ONE short title, and only if it helps. Prefer showing over writing.
+• brief: {"thesis":"<what this shows>","angle":"","archetype":"","facts":[],"caveats":[],"disputed":[]}.
+A clean 8-second animation that IS their idea beats a 30-second documentary that isn't. Restraint wins.`;
 
-/** True when a prompt should get the lightweight path: short, direct, ≤2 places,
- *  and no signal that the user wants a researched story. */
-function isSimpleIntent(idea: string, locationCount: number): boolean {
-  if (idea.length >= 140) return false;
-  if (locationCount > 2) return false;
-  const RESEARCHY = /documentar|research|story|history|histor|explain|why\s|how\s|war|battle|empire|evolution|crisis|conflict|migra|trade|econom|gdp|population|statistic|data|timeline|deep|fact|journal/i;
-  return !RESEARCHY.test(idea);
+/** TRUE only when the creator EXPLICITLY wants a researched documentary / multi-
+ *  chapter story / historical explainer — the only case that earns the long,
+ *  research-driven pipeline. A prompt merely mentioning "war" or "trade" or being
+ *  a few sentences long is NOT a documentary request; it's built faithfully. */
+function wantsDocumentary(idea: string): boolean {
+  return /\b(document(a|ary)|the (history|story|rise|fall|origins?|evolution|saga|making|collapse|decline)( and (fall|rise|decline|collapse))? of|tell (me )?(the|a|its) story|explain (why|how|the)|deep[-\s]?dive|full story|over the (years|centuries|decades|ages)|through (the )?(centuries|history|time|ages)|timeline of|chapter by chapter|beat[-\s]by[-\s]beat|step[-\s]by[-\s]step|the (whole|entire) story|how .{0,40}(happened|unfolded|began|came to be|rose|fell|collapsed|spread|conquered)|why .{0,40}(happened|matters|collapsed|fell|rose))\b/i.test(idea);
 }
 
 /* ── Phase 1: Story Director ─────────────────────────────────────────────────
@@ -2187,9 +2194,12 @@ export async function POST(req: NextRequest) {
   // crude length check.
   const framework = (!directPlan && idea) ? buildFramework(idea, { styleId: body.style, interview: iv ?? undefined }) : null;
 
-  // STORY MODE: explicit toggle, OR the framework says this is a multi-scene
-  // story (journey/multi-entity/etc.), OR a clearly narrative input.
-  const isStory = body.mode === "story" || (framework?.multiScene ?? false) || (!directPlan && (idea.length > 220 || ((idea.match(/[.!?]/g) || []).length >= 3)));
+  // STORY / DOCUMENTARY MODE is OPT-IN — only when the caller sets mode:"story"
+  // or the prompt EXPLICITLY asks for a documentary / history / multi-chapter
+  // story. Length, sentence count, and the auto-storyboard's scene count no
+  // longer inflate a plain request into a 15-45s documentary. Everything else is
+  // built FAITHFULLY and concisely (see FAITHFUL_MODE) — exactly what was asked.
+  const isStory = body.mode === "story" || (!directPlan && !!idea && wantsDocumentary(idea));
 
   // ENGINE CHOICE: the user explicitly picks AI-directed vs "Smart (no AI)".
   // useAI:false → built-in director logic only (instant, no key, private).
@@ -2217,16 +2227,14 @@ export async function POST(req: NextRequest) {
   //   schema, outputs the complete Plan JSON with timing, colors, animations specified.
   //   Heuristics are NOT responsible for creative decisions — they're fallback only.
 
-  // INTENT GATE: simple, direct prompts ("route from Paris to Rome", "highlight
-  // Japan") skip the Director phase AND the research doctrine entirely — one
-  // fast Composer call, minimal layers, no documentary expansion. Deep research
-  // is reserved for stories and prompts that actually ask for it.
-  const simpleIntent = !directPlan && !arc && !isStory
-    && isSimpleIntent(idea, framework?.interpretation?.locations?.length ?? 0);
-
-  // Phase 1: Director call (skip for direct plans, arcs with full spec, no-AI
-  // mode, and simple requests — the arc/simple context needs no story script).
-  const shouldRunDirector = !directPlan && !!aiCfg && !arc && !simpleIntent;
+  // INTENT GATE: the multi-phase DOCUMENTARY pipeline (Director story-script +
+  // research doctrine) is reserved for explicit story/documentary requests only.
+  // Every faithful request ("a flight from A to B, cinematic satellite",
+  // "highlight France, Italy and Japan in bright colours") gets ONE fast Composer
+  // call that builds exactly what's described — minimal layers, no expansion.
+  //
+  // Phase 1: Director call (only for stories; direct plans, arcs, and no-AI skip).
+  const shouldRunDirector = !directPlan && !!aiCfg && !arc && isStory;
 
   // Pre-inject interpretation + archetype into the Director's user prompt.
   // The Director gets verified places, detected route, and archetype recipe BEFORE
@@ -2263,8 +2271,10 @@ export async function POST(req: NextRequest) {
   // so the composer focuses purely on technical animation — not story structure.
   const composerInput = [
     dirScript ? scriptToComposerContext(dirScript) : idea,
-    // Framework instruction still shapes structure when no director script (arc mode).
-    !dirScript && framework && aiCfg ? frameworkInstruction(framework) : "",
+    // Framework storyboard structure is imposed ONLY for stories/arcs. Faithful
+    // requests must NOT be reshaped into a multi-beat storyboard — that's the
+    // over-expansion we're fixing; the Composer builds the prompt verbatim.
+    !dirScript && framework && aiCfg && (isStory || !!arc) ? frameworkInstruction(framework) : "",
     // Interview decisions flow to the Composer when no Director script carried
     // them (arc mode / director skipped) — same binding form.
     !dirScript ? interviewDirectives(iv, ivText) : "",
@@ -2274,7 +2284,10 @@ export async function POST(req: NextRequest) {
     taste && aiCfg ? `USER TASTE PROFILE (bias look & palette toward this unless the brief contradicts it): ${taste}` : "",
   ].filter(Boolean).join("\n\n");
 
-  const composerSystem = simpleIntent ? `${SYSTEM}${SIMPLE_MODE}` : withDoctrine(isStory ? STORY_SYSTEM : SYSTEM);
+  // STORY → full documentary system + research doctrine. FAITHFUL (default) →
+  // the base system + FAITHFUL_MODE, NO doctrine: build the prompt exactly and
+  // concisely, no research expansion.
+  const composerSystem = isStory ? withDoctrine(STORY_SYSTEM) : `${SYSTEM}${FAITHFUL_MODE}`;
   const ai = (directPlan || !aiCfg) ? { plan: null as Plan | null, warning: undefined as string | undefined, tokensUsed: 0 } : await aiPlan(composerInput, aiCfg, composerSystem);
   const llmPlan = ai.plan;
 
@@ -2408,7 +2421,7 @@ export async function POST(req: NextRequest) {
         warning: ai.warning ?? null,
         // Which pipeline handled it: "simple" = lightweight one-call path (no
         // Director, no research doctrine), "story"/"rich" = full two-phase.
-        intent: directPlan ? "template" : simpleIntent ? "simple" : isStory ? "story" : "rich",
+        intent: directPlan ? "template" : isStory ? "story" : "faithful",
       },
     });
   } catch (e: any) {
