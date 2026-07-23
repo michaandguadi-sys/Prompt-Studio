@@ -8,6 +8,7 @@ import Map, { MapRef, Source, Layer as MapLayer } from "react-map-gl/maplibre";
 import { LngLat } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { resolveMapStyle, demSource, ML_TERRAIN_SOURCE_ID, isDarkStyle, applyBasemapIdentity } from "@/lib/maplibre";
+import { resolveEarthDate } from "@/lib/presets/earthLayers";
 import { safeInterpolate, easings, catmullRomChain, linearChain } from "@/lib/interp";
 import { centroidOf } from "@/lib/geo";
 import { makePatternImageData, patternImageId } from "@/lib/mapPatterns";
@@ -621,12 +622,13 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
           const fmt = el.tileFormat ?? "jpg";
           const matrix = el.tileMatrix ?? "GoogleMapsCompatible_Level9";
           const mz: number = el.maxzoom ?? 9;
-          // GIBS WMTS wants a real YYYY-MM-DD time slot. "latest"/"" is NOT valid
-          // (it 404s → the layer never shows), so resolve those to a recent real
-          // date — 2 days back, since today's tiles aren't always processed yet.
-          const ymd = (d: any) => (/^\d{4}-\d{2}-\d{2}$/.test(String(d ?? "")) ? String(d) : new Date(Date.now() - 172800000).toISOString().slice(0, 10));
-          const date = ymd(el.date);
-          const tileUrl = `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${dsId}/default/${date}/${matrix}/{z}/{y}/{x}.${fmt}`;
+          // GIBS WMTS wants a real YYYY-MM-DD time slot (or NO date for static
+          // layers like Blue Marble). "latest"/relative "-30" resolve to a real
+          // recent date — an invalid slot silently 404s and the layer never shows.
+          const isStatic = !!el.staticTime;
+          const date = resolveEarthDate(el.date);
+          const timeSeg = isStatic ? "" : `/${date}`;
+          const tileUrl = `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${dsId}/default${timeSeg}/${matrix}/{z}/{y}/{x}.${fmt}`;
           const srcId = `gibs-${l.id}`;
           const lyrId = `gibs-lyr-${l.id}`;
           // Compare layer: cross-fade between two earth states (before / after).
@@ -634,7 +636,7 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
           // creating a smooth temporal transition driven by the timing system.
           const hasCmp = !!(el.compareDatasetId);
           const cmpOpacity = hasCmp ? Math.min(1, (el.opacity ?? 0.75) * Math.max(0, 1 - tr.opacity) * 1.2) : 0;
-          const cDate = ymd(el.compareDate && el.compareDate !== "" ? el.compareDate : date);
+          const cDate = resolveEarthDate(el.compareDate && el.compareDate !== "" ? el.compareDate : date);
           const cMatrix = el.tileMatrix ?? "GoogleMapsCompatible_Level9";
           const cMz: number = el.compareMaxzoom ?? mz;
           const cUrl = hasCmp

@@ -474,6 +474,9 @@ export const EarthLayer = z.object({
   tileMatrix: z.string().default("GoogleMapsCompatible_Level9"),
   /** Max zoom level this GIBS dataset supports (MODIS=9, Landsat=12, VIIRS=8). */
   maxzoom: z.number().min(1).max(15).default(9),
+  /** True for time-invariant layers (Blue Marble, Black Marble city lights) — the
+   *  GIBS URL then omits the date segment. Dated layers leave this false. */
+  staticTime: z.boolean().default(false),
   /** Animated max opacity (0–1). The timing controls fade-in/out on top of this. */
   opacity: z.number().min(0).max(1).default(0.75),
   /** Human-readable label shown as an in-map legend chip. */

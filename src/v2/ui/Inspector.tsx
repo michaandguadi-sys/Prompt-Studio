@@ -7,6 +7,7 @@ import { Field, Input, NumberInput, Select, Section, Slider, Toggle, SegTabs, Ad
 import { confirmDialog, promptDialog } from "./dialogs";
 import { MapStyleGallery } from "./Map3DStyleModal";
 import { KfSlider } from "./KfControl";
+import { EARTH_PRESETS, EARTH_DATE_OPTIONS } from "@/lib/presets/earthLayers";
 import { ColorInput } from "@/components/ui/ColorInput";
 import { ColorWheel } from "./ColorWheel";
 import { PlaceSearch } from "@/components/MapBuilder/PlaceSearch";
@@ -1306,38 +1307,36 @@ const LayerFields: React.FC<{ layer: Layer; set: (p: Record<string, unknown>) =>
 
 /* ── Live Earth (NASA GIBS) — real-world imagery/data layered OVER the style ── */
 
-const EARTH_DATASETS: { id: string; name: string; cfg: Record<string, unknown> }[] = [
-  { id: "MODIS_Terra_CorrectedReflectance_TrueColor", name: "Earth today (true colour)", cfg: { datasetId: "MODIS_Terra_CorrectedReflectance_TrueColor", tileFormat: "jpg", tileMatrix: "GoogleMapsCompatible_Level9", maxzoom: 9, attribution: "NASA GIBS / Earthdata" } },
-  { id: "VIIRS_SNPP_DayNightBand_ENCC", name: "Earth at night (city lights)", cfg: { datasetId: "VIIRS_SNPP_DayNightBand_ENCC", tileFormat: "png", tileMatrix: "GoogleMapsCompatible_Level8", maxzoom: 8, attribution: "NASA VIIRS / Earthdata GIBS" } },
-  { id: "MODIS_Terra_Thermal_Anomalies_All", name: "Active fires (thermal)", cfg: { datasetId: "MODIS_Terra_Thermal_Anomalies_All", tileFormat: "png", tileMatrix: "GoogleMapsCompatible_Level9", maxzoom: 9, attribution: "NASA MODIS Thermal / Earthdata GIBS" } },
-  { id: "MODIS_Terra_NDVI_8Day", name: "Vegetation (NDVI)", cfg: { datasetId: "MODIS_Terra_NDVI_8Day", tileFormat: "png", tileMatrix: "GoogleMapsCompatible_Level9", maxzoom: 9, attribution: "NASA MODIS NDVI / Earthdata GIBS" } },
-  { id: "MODIS_Aqua_Sea_Surface_Temp_Night", name: "Ocean temperature", cfg: { datasetId: "MODIS_Aqua_Sea_Surface_Temp_Night", tileFormat: "png", tileMatrix: "GoogleMapsCompatible_Level9", maxzoom: 9, attribution: "NASA MODIS SST / Earthdata GIBS" } },
-  { id: "MODIS_Terra_Snow_Cover_Daily_L3_Global_500m", name: "Snow & ice", cfg: { datasetId: "MODIS_Terra_Snow_Cover_Daily_L3_Global_500m", tileFormat: "png", tileMatrix: "GoogleMapsCompatible_Level9", maxzoom: 9, attribution: "NASA MODIS Snow / Earthdata GIBS" } },
-];
-
 const EarthLayerFields: React.FC<{ layer: any; set: (p: Record<string, unknown>) => void }> = ({ layer, set }) => {
-  const dsId = layer.datasetId ?? EARTH_DATASETS[0].id;
+  const dsId = layer.datasetId ?? EARTH_PRESETS[0].cfg.datasetId;
+  const isStatic = !!layer.staticTime;
   return (
     <Section title="Live Earth · NASA">
       <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/[0.06] px-3 py-2 text-[11px] leading-relaxed text-emerald-700">
-        Real NASA satellite imagery, laid <b>over your chosen map style</b> — the style's borders &amp; labels stay on top. Blend the two with Opacity.
+        Real NASA satellite imagery/data, laid <b>over your chosen map style</b> — the style's borders &amp; labels stay on top. Blend with Opacity.
       </div>
       <Field label="Data / imagery">
         <Select value={dsId} onChange={(e) => {
-          const ds = EARTH_DATASETS.find((d) => d.id === e.target.value);
-          if (ds) set({ ...ds.cfg, name: ds.name });
+          const p = EARTH_PRESETS.find((d) => d.cfg.datasetId === e.target.value);
+          if (p) set({ ...p.cfg, name: p.name, date: p.cfg.staticTime ? "" : "latest", opacity: p.opacity });
         }}>
-          {EARTH_DATASETS.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          {EARTH_PRESETS.map((p) => <option key={p.key} value={p.cfg.datasetId}>{p.name} — {p.tagline}</option>)}
         </Select>
       </Field>
-      <Slider label="Opacity" hint="blend with your map style" value={layer.opacity ?? 0.85} min={0} max={1} step={0.02} onChange={(v) => set({ opacity: v })} format={(v) => `${Math.round(v * 100)}%`} />
+      <Slider label="Opacity" hint="blend with your map style" value={layer.opacity ?? 0.9} min={0} max={1} step={0.02} onChange={(v) => set({ opacity: v })} format={(v) => `${Math.round(v * 100)}%`} />
       <div className="grid grid-cols-2 gap-2">
-        <Field label="Date" hint="empty = latest">
-          <Input value={layer.date === "latest" ? "" : (layer.date ?? "")} placeholder="latest" onChange={(e) => set({ date: e.target.value || "latest" })} />
-        </Field>
+        {isStatic ? (
+          <Field label="Date" hint="seamless — no date"><div className="rounded-lg border border-line bg-paper-50 px-3 py-2 text-[12px] text-graphite/45">Timeless</div></Field>
+        ) : (
+          <Field label="Date">
+            <Select value={/^\d{4}-\d{2}-\d{2}$/.test(String(layer.date)) ? "latest" : (layer.date || "latest")} onChange={(e) => set({ date: e.target.value })}>
+              {EARTH_DATE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </Select>
+          </Field>
+        )}
         <Field label="Caption" hint="on-frame credit"><Input value={layer.label ?? ""} onChange={(e) => set({ label: e.target.value })} /></Field>
       </div>
-      <div className="text-[10px] text-graphite/45">Tip: pick your favourite look in <b>Project → Style</b> first, then add this — it renders through the style, not instead of it.</div>
+      <div className="text-[10px] text-graphite/45">Tip: <b>Blue Marble</b> is a seamless, cloud-free whole-Earth base that fits any view. Pick your look in <b>Project → Style</b> first — this renders through it, not instead of it.</div>
     </Section>
   );
 };

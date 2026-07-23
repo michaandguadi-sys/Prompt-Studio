@@ -7,6 +7,7 @@ import { recordTaste } from "@/lib/taste";
 import { createLayer } from "../doc/factory";
 import { MAP3D_STYLES, map3dStyleById } from "@/lib/presets/map3dStyles";
 import { PRO_MAP_STYLES, elementPaletteFor } from "@/lib/presets/proMapStyles";
+import { EARTH_PRESETS, earthLayerOverrides, type EarthPreset } from "@/lib/presets/earthLayers";
 import { loadGoogleKey } from "./SettingsModal";
 
 /** The colour patch a style's palette applies to each overlay element, so
@@ -32,26 +33,11 @@ function elementRestyle(l: any, pal: { accent: string; ink: string; water: strin
 }
 
 /** LIVE EARTH — real NASA data as one-click looks. Each entry swaps the base
- *  style and lays a GIBS raster (date: "latest") over it — the planet as it
- *  actually is today: city lights, active fires, vegetation, ocean heat. */
-const LIVE_EARTH: {
-  key: string; name: string; tagline: string; swatches: [string, string, string];
-  base: string; opacity: number;
-  cfg: { datasetId: string; tileFormat: string; tileMatrix: string; maxzoom: number; label: string; attribution: string };
-}[] = [
-  { key: "live-satellite", name: "Earth Today", tagline: "Today's real satellite imagery", swatches: ["#0a1b2e", "#2e5f4e", "#c2b48a"], base: "dark", opacity: 0.92,
-    cfg: { datasetId: "MODIS_Terra_CorrectedReflectance_TrueColor", tileFormat: "jpg", tileMatrix: "GoogleMapsCompatible_Level9", maxzoom: 9, label: "Earth today — NASA MODIS", attribution: "NASA GIBS / Earthdata" } },
-  { key: "night-lights", name: "Earth at Night", tagline: "Live city lights (VIIRS)", swatches: ["#02030a", "#1a1f3a", "#ffd9a0"], base: "dark", opacity: 0.95,
-    cfg: { datasetId: "VIIRS_SNPP_DayNightBand_ENCC", tileFormat: "png", tileMatrix: "GoogleMapsCompatible_Level8", maxzoom: 8, label: "Nighttime lights — VIIRS", attribution: "NASA VIIRS / Earthdata GIBS" } },
-  { key: "wildfires", name: "Active Fires", tagline: "Thermal hotspots, near-real-time", swatches: ["#140a06", "#7a2410", "#ff7a30"], base: "satellite", opacity: 0.9,
-    cfg: { datasetId: "MODIS_Terra_Thermal_Anomalies_All", tileFormat: "png", tileMatrix: "GoogleMapsCompatible_Level9", maxzoom: 9, label: "Active fires — MODIS", attribution: "NASA MODIS Thermal / Earthdata GIBS" } },
-  { key: "vegetation", name: "Living Earth", tagline: "Vegetation index (NDVI)", swatches: ["#08140c", "#1e5a30", "#8fd06a"], base: "dark", opacity: 0.88,
-    cfg: { datasetId: "MODIS_Terra_NDVI_8Day", tileFormat: "png", tileMatrix: "GoogleMapsCompatible_Level9", maxzoom: 9, label: "Vegetation — NDVI", attribution: "NASA MODIS NDVI / Earthdata GIBS" } },
-  { key: "ocean-heat", name: "Ocean Heat", tagline: "Sea-surface temperature", swatches: ["#040a18", "#0c3a6e", "#ff5a44"], base: "dark", opacity: 0.9,
-    cfg: { datasetId: "MODIS_Aqua_Sea_Surface_Temp_Night", tileFormat: "png", tileMatrix: "GoogleMapsCompatible_Level9", maxzoom: 9, label: "Sea temperature — MODIS", attribution: "NASA MODIS SST / Earthdata GIBS" } },
-  { key: "snow-ice", name: "Snow & Ice", tagline: "Live snow cover", swatches: ["#0a1420", "#3c5a78", "#e8f2ff"], base: "satellite", opacity: 0.85,
-    cfg: { datasetId: "MODIS_Terra_Snow_Cover_Daily_L3_Global_500m", tileFormat: "png", tileMatrix: "GoogleMapsCompatible_Level9", maxzoom: 9, label: "Snow & ice — MODIS", attribution: "NASA MODIS Snow / Earthdata GIBS" } },
-];
+ *  style and lays a verified GIBS raster over it — the planet as it actually is:
+ *  Blue Marble, city lights, active fires, vegetation, ocean heat, snow. All
+ *  configs live in one place (src/lib/presets/earthLayers) and are verified to
+ *  return imagery in Web Mercator (the old set silently 404'd for most). */
+const LIVE_EARTH = EARTH_PRESETS;
 
 /**
  * Map Style Gallery — the studio's ONE map-style picker, shown inline in the
@@ -73,17 +59,13 @@ export const MapStyleGallery: React.FC = () => {
    *  already chosen — it does NOT replace the style. The raster renders under the
    *  style's borders/labels/grid (see MapComposition's beforeId), so the creator
    *  keeps their favourite look AND sees the live NASA imagery/data through it.
+   *  Shows INSTANTLY (no fade delay) and every dataset is verified to load.
    *  Tune the blend with the earth layer's Opacity in the inspector. */
-  const applyLiveEarth = (le: (typeof LIVE_EARTH)[number]) => {
+  const applyLiveEarth = (le: EarthPreset) => {
     recordTaste("style", le.key);
     // One live layer at a time — replace any existing earth observation layer.
     for (const l of layers) if (l.type === "earthlayer") removeLayer(l.id);
-    addLayers([
-      createLayer("earthlayer", {
-        name: le.name, ...le.cfg, date: "latest", opacity: le.opacity,
-        timing: { inSec: 0.2, outSec: null, enter: "fade", exit: "fade", easing: "easeInOut" },
-      }),
-    ]);
+    addLayers([createLayer("earthlayer", earthLayerOverrides(le))]);
   };
 
   const activeId = (comp.basemap as any).style3d || "";
