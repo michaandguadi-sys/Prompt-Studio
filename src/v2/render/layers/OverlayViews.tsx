@@ -1,7 +1,7 @@
 import React from "react";
 import { useVideoConfig } from "remotion";
 import { LabelLayer, FlagLayer, MarkerLayer } from "../../doc/schema";
-import { evalTiming, timingTransform } from "../timing";
+import { evalTiming, timingTransform, kfNum } from "../timing";
 import { LV, kfOpacityMul, displayFont, useTheme, outlineStyle, textShadow, tfStyle } from "./renderHelpers";
 
 // ── LabelView ───────────────────────────────────────────────────────────────
@@ -150,7 +150,8 @@ export const MarkerView: React.FC<LV<MarkerLayer>> = ({ layer: l, frame, fps, to
   if (tr.opacity < 0.01 || !project) return null;
 
   const { x, y } = project(l.anchor.lon, l.anchor.lat);
-  const sz = l.sizePx;
+  const sz = kfNum(l, "sizePx", l.sizePx, frame, totalFrames);
+  const glow = kfNum(l, "glow", l.glow, frame, totalFrames);
   const icon = l.emoji || MARKER_ICONS[l.icon] || "📍";
 
   // Animation modifiers
@@ -164,7 +165,7 @@ export const MarkerView: React.FC<LV<MarkerLayer>> = ({ layer: l, frame, fps, to
     ? (Math.floor(frame / 8) % 2 === 0 ? 1 : 0.3)
     : 1;
 
-  const glowSz = sz * 1.6 * (1 + l.glow * 0.4);
+  const glowSz = sz * 1.6 * (1 + glow * 0.4);
 
   return (
     <div
@@ -180,7 +181,7 @@ export const MarkerView: React.FC<LV<MarkerLayer>> = ({ layer: l, frame, fps, to
         fontFamily: displayFont(theme),
       }}
     >
-      {l.glow > 0 && l.ring && (
+      {glow > 0 && l.ring && (
         <div
           style={{
             position: "absolute",
@@ -191,11 +192,11 @@ export const MarkerView: React.FC<LV<MarkerLayer>> = ({ layer: l, frame, fps, to
             transform: "translate(-50%,-50%)",
             borderRadius: "50%",
             border: `${Math.max(2, sz * 0.06)}px solid ${l.color}`,
-            opacity: 0.4 * l.glow * (0.5 + 0.5 * Math.sin((frame / fps) * Math.PI * 2)),
+            opacity: 0.4 * glow * (0.5 + 0.5 * Math.sin((frame / fps) * Math.PI * 2)),
           }}
         />
       )}
-      <div style={{ fontSize: sz, lineHeight: 1, ...spin, filter: l.glow > 0 ? `drop-shadow(0 0 ${sz * l.glow * 0.3}px ${l.color})` : undefined }}>{icon}</div>
+      <div style={{ fontSize: sz, lineHeight: 1, ...spin, filter: glow > 0 ? `drop-shadow(0 0 ${sz * glow * 0.3}px ${l.color})` : undefined }}>{icon}</div>
       {l.label && (
         <div style={{ fontSize: sz * 0.28, fontWeight: 700, color: l.labelColor, marginTop: sz * 0.08, textShadow: textShadow(0.7), whiteSpace: "nowrap" }}>
           {l.label}

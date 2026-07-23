@@ -6,6 +6,7 @@ import { hasVoiceoverKey, loadVoiceoverSettings, generateVoiceover, measureAudio
 import { Field, Input, NumberInput, Select, Section, Slider, Toggle } from "./controls";
 import { confirmDialog, promptDialog } from "./dialogs";
 import { MapStyleGallery } from "./Map3DStyleModal";
+import { KfSlider } from "./KfControl";
 import { ColorInput } from "@/components/ui/ColorInput";
 import { ColorWheel } from "./ColorWheel";
 import { PlaceSearch } from "@/components/MapBuilder/PlaceSearch";
@@ -1635,11 +1636,14 @@ const MarkerFields: React.FC<{ layer: Extract<Layer, { type: "marker" }>; set: (
         <option value="none">None</option>
       </Select>
     </Field>
-    <div className="grid grid-cols-2 gap-2">
-      <Field label="Size"><NumberInput value={layer.sizePx} step={5} min={16} max={400} unit="px" onChange={(v) => set({ sizePx: v })} /></Field>
-      <Field label="Tint" hint="Ring & glow"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
+    <Field label="Tint" hint="Ring & glow"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
+    <div className="space-y-2.5 rounded-xl border border-iris/20 bg-iris/[0.03] p-3">
+      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-iris/70">
+        <span className="h-[8px] w-[8px] rotate-45 rounded-[1.5px] bg-iris" /> Animate <span className="font-normal normal-case tracking-normal text-graphite/45">· tap ◆ to keyframe</span>
+      </div>
+      <KfSlider layerId={layer.id} prop="sizePx" label="Size" value={layer.sizePx} min={16} max={400} step={5} format={(v) => Math.round(v) + "px"} />
+      <KfSlider layerId={layer.id} prop="glow" label="Glow" value={layer.glow} min={0} max={1.5} step={0.05} format={(v) => v.toFixed(2)} />
     </div>
-    <Slider label="Glow" value={layer.glow} min={0} max={1.5} onChange={(v) => set({ glow: v })} />
     <div className="grid grid-cols-2 gap-2">
       <Toggle label="Locator ring" checked={layer.ring} onChange={(v) => set({ ring: v })} />
       <Field label="Label colour"><ColorInput value={layer.labelColor} onChange={(v) => set({ labelColor: v })} /></Field>
@@ -2037,9 +2041,13 @@ const RouteFields: React.FC<{ layer: Extract<Layer, { type: "route" }>; set: (p:
           <option value="orbit">Orbit the journey</option>
         </Select>
       </Field>
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="Colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
-        <Field label="Width"><NumberInput value={layer.width} step={1} min={1} max={40} onChange={(v) => set({ width: v })} /></Field>
+      <Field label="Colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
+      <div className="space-y-2.5 rounded-xl border border-iris/20 bg-iris/[0.03] p-3">
+        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-iris/70">
+          <span className="h-[8px] w-[8px] rotate-45 rounded-[1.5px] bg-iris" /> Animate <span className="font-normal normal-case tracking-normal text-graphite/45">· tap ◆ to keyframe</span>
+        </div>
+        <KfSlider layerId={layer.id} prop="width" label="Line width" value={layer.width} min={1} max={40} step={1} format={(v) => Math.round(v) + "px"} />
+        <KfSlider layerId={layer.id} prop="glow" label="Glow" value={layer.glow ?? 0.35} min={0} max={1.5} step={0.05} format={(v) => v.toFixed(2)} />
       </div>
       <div className="space-y-2 rounded-lg border border-line bg-paper-50 p-2.5">
         <div className="flex items-center justify-between">
@@ -2055,7 +2063,6 @@ const RouteFields: React.FC<{ layer: Extract<Layer, { type: "route" }>; set: (p:
           </Select>
         </Field>
         <Slider label="Opacity" value={layer.opacity ?? 1} onChange={(v) => set({ opacity: v })} />
-        <Slider label="Glow" value={layer.glow ?? 0.35} min={0} max={1.5} onChange={(v) => set({ glow: v })} />
         <Slider label="Smooth (bezier)" value={layer.smoothness ?? 0} onChange={(v) => set({ smoothness: v })} />
       </div>
       <div className="grid grid-cols-2 gap-2">
@@ -2176,10 +2183,7 @@ const HighlightFields: React.FC<{ layer: Extract<Layer, { type: "highlight" }>; 
           </Field>
         </div>
       )}
-      <div className="grid grid-cols-2 gap-2">
-        <Field label={layer.fillType === "flag" ? "Flag opacity" : "Fill opacity"}><NumberInput value={layer.fillOpacity} step={0.02} min={0} max={1} onChange={(v) => set({ fillOpacity: v })} /></Field>
-        <Field label="Animation"><Select value={layer.animation} onChange={(e) => set({ animation: e.target.value })}><option value="fade">Fade</option><option value="sweep">Sweep</option><option value="pulse">Pulse</option><option value="border-first">Border first</option><option value="grow">Grow (expansion)</option><option value="shrink">Shrink (contraction)</option><option value="static">Static</option></Select></Field>
-      </div>
+      <Field label="Animation"><Select value={layer.animation} onChange={(e) => set({ animation: e.target.value })}><option value="fade">Fade</option><option value="sweep">Sweep</option><option value="pulse">Pulse</option><option value="border-first">Border first</option><option value="grow">Grow (expansion)</option><option value="shrink">Shrink (contraction)</option><option value="static">Static</option></Select></Field>
       {layer.animation === "border-first" && (
         <Field label="Fill delay" hint="how long the border stays alone">
           <NumberInput value={(layer as any).fillDelaySec ?? 1.2} step={0.1} min={0.2} max={5} unit="s" onChange={(v) => set({ fillDelaySec: v })} />
@@ -2204,15 +2208,19 @@ const HighlightFields: React.FC<{ layer: Extract<Layer, { type: "highlight" }>; 
       </div>
       <div className="grid grid-cols-2 gap-2">
         <Field label="Glow colour"><ColorInput value={layer.glowColor} onChange={(v) => set({ glowColor: v })} /></Field>
-        <Field label="Glow size"><NumberInput value={layer.glowWidth} step={1} min={0} max={60} onChange={(v) => set({ glowWidth: v })} /></Field>
-      </div>
-
-      {/* Border thickness + style + 3D extrusion */}
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="Border width" hint="0 = no border"><NumberInput value={(layer as any).borderWidth ?? 3.5} step={0.5} min={0} max={20} onChange={(v) => set({ borderWidth: v })} /></Field>
         <Field label="Border style"><Select value={(layer as any).borderDash ?? "solid"} onChange={(e) => set({ borderDash: e.target.value })}><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></Select></Field>
         <Field label="Border opacity"><NumberInput value={Math.round(((layer as any).borderOpacity ?? 1) * 100)} step={5} min={0} max={100} unit="%" onChange={(v) => set({ borderOpacity: v / 100 })} /></Field>
-        <Field label="3D extrude" hint="Raise the region (needs camera tilt)"><NumberInput value={(layer as any).extrude ?? 0} step={2} min={0} max={100} onChange={(v) => set({ extrude: v })} /></Field>
+      </div>
+
+      {/* ── Animate — tap the diamond to keyframe any of these over the timeline ── */}
+      <div className="space-y-2.5 rounded-xl border border-iris/20 bg-iris/[0.03] p-3">
+        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-iris/70">
+          <span className="h-[8px] w-[8px] rotate-45 rounded-[1.5px] bg-iris" /> Animate <span className="font-normal normal-case tracking-normal text-graphite/45">· tap ◆ to keyframe, move the playhead, tap again</span>
+        </div>
+        <KfSlider layerId={layer.id} prop="fillOpacity" label={layer.fillType === "flag" ? "Flag opacity" : "Fill opacity"} value={layer.fillOpacity} min={0} max={1} step={0.02} />
+        <KfSlider layerId={layer.id} prop="borderWidth" label="Border width" hint="0 = none" value={(layer as any).borderWidth ?? 3.5} min={0} max={20} step={0.5} format={(v) => v.toFixed(1)} />
+        <KfSlider layerId={layer.id} prop="glowWidth" label="Glow size" value={layer.glowWidth} min={0} max={60} step={1} format={(v) => Math.round(v).toString()} />
+        <KfSlider layerId={layer.id} prop="extrude" label="3D extrude" hint="needs camera tilt" value={(layer as any).extrude ?? 0} min={0} max={100} step={1} format={(v) => Math.round(v).toString()} />
       </div>
 
       {/* Editable on-map label */}

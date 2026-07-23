@@ -4,7 +4,7 @@ import { delayRender, continueRender, getRemotionEnvironment } from "remotion";
 import { HighlightLayer } from "../../doc/schema";
 import { cleanCountryGeo } from "../../../lib/geoClean";
 import { centroidOf } from "../../../lib/geo";
-import { evalTiming, timingTransform } from "../timing";
+import { evalTiming, timingTransform, kfNum } from "../timing";
 import {
   LV, kfOpacityMul, fillSource, flagIsoOf, exteriorRings,
   growClipGeometry, ringsCenter, clampN, textShadow, displayFont, useTheme
@@ -14,6 +14,11 @@ export const HighlightSource: React.FC<LV<HighlightLayer> & { terrain?: boolean 
   const tr = evalTiming(l.timing, frame, fps, totalFrames);
   tr.opacity *= kfOpacityMul(l);
   const a = tr.opacity;
+  // Keyframable numerics — animate when a track exists, else the static field.
+  const fillOpacity = kfNum(l, "fillOpacity", l.fillOpacity, frame, totalFrames);
+  const borderWidth = kfNum(l, "borderWidth", l.borderWidth, frame, totalFrames);
+  const glowWidth = kfNum(l, "glowWidth", l.glowWidth, frame, totalFrames);
+  const extrude = kfNum(l, "extrude", (l as any).extrude ?? 0, frame, totalFrames);
   const cleanGeo = useMemo(() => cleanCountryGeo(l.geojson), [l.geojson]);
   const data = useMemo(() => (
     cleanGeo?.type === "FeatureCollection" || cleanGeo?.type === "Feature"
@@ -37,24 +42,24 @@ export const HighlightSource: React.FC<LV<HighlightLayer> & { terrain?: boolean 
     isGrow ? { type: "Feature" as const, properties: {}, geometry: growClipGeometry(cleanGeo, origin, growProg) } : data
   ), [isGrow, cleanGeo, origin, growProg, data]);
 
-  let borderPaint: any = { "line-opacity": a, "line-width": l.borderWidth };
-  let fillExtra: any = { "fill-opacity": a * l.fillOpacity };
+  let borderPaint: any = { "line-opacity": a, "line-width": borderWidth };
+  let fillExtra: any = { "fill-opacity": a * fillOpacity };
   let glowPaint: any = { "line-opacity": a * 0.55 };
   switch (l.animation) {
     case "static":
-      borderPaint = { "line-opacity": 1, "line-width": l.borderWidth };
-      fillExtra = { "fill-opacity": l.fillOpacity };
+      borderPaint = { "line-opacity": 1, "line-width": borderWidth };
+      fillExtra = { "fill-opacity": fillOpacity };
       glowPaint = { "line-opacity": 0.55 };
       break;
     case "sweep": {
-      borderPaint = { "line-opacity": a, "line-width": l.borderWidth };
-      fillExtra = { "fill-opacity": Math.max(0, (a - 0.6) / 0.4) * l.fillOpacity };
+      borderPaint = { "line-opacity": a, "line-width": borderWidth };
+      fillExtra = { "fill-opacity": Math.max(0, (a - 0.6) / 0.4) * fillOpacity };
       glowPaint = { "line-opacity": a * 0.55 };
       break;
     }
     case "pulse":
-      borderPaint = { "line-opacity": a, "line-width": a * l.borderWidth };
-      fillExtra = { "fill-opacity": a * l.fillOpacity };
+      borderPaint = { "line-opacity": a, "line-width": a * borderWidth };
+      fillExtra = { "fill-opacity": a * fillOpacity };
       glowPaint = { "line-opacity": a * (0.55 + 0.15 * pulse) };
       break;
     case "border-first": {
@@ -62,44 +67,44 @@ export const HighlightSource: React.FC<LV<HighlightLayer> & { terrain?: boolean 
       const bp = clampN((frame - inF) / Math.max(1, Math.round(1.0 * fps)), 0, 1);
       const fd = Math.round(((l as any).fillDelaySec ?? 1.2) * fps);
       const fp = clampN((frame - inF - fd) / Math.max(1, Math.round(0.8 * fps)), 0, 1);
-      borderPaint = { "line-opacity": bp, "line-width": l.borderWidth };
-      fillExtra = { "fill-opacity": fp * l.fillOpacity };
+      borderPaint = { "line-opacity": bp, "line-width": borderWidth };
+      fillExtra = { "fill-opacity": fp * fillOpacity };
       glowPaint = { "line-opacity": bp * 0.55 };
       break;
     }
     case "grow":
     case "shrink":
-      borderPaint = { "line-opacity": a, "line-width": l.borderWidth };
-      fillExtra = { "fill-opacity": a * l.fillOpacity };
+      borderPaint = { "line-opacity": a, "line-width": borderWidth };
+      fillExtra = { "fill-opacity": a * fillOpacity };
       glowPaint = { "line-opacity": a * 0.5 };
       break;
     default:
-      borderPaint = { "line-opacity": a, "line-width": l.borderWidth };
-      fillExtra = { "fill-opacity": a * l.fillOpacity };
+      borderPaint = { "line-opacity": a, "line-width": borderWidth };
+      fillExtra = { "fill-opacity": a * fillOpacity };
       glowPaint = { "line-opacity": a * 0.55 };
   }
 
   return (
     <>
       <Source id={`${l.id}-glowS`} type="geojson" data={data}>
-        <MapLayer id={`${l.id}-glow`} type="line" paint={{ "line-color": l.glowColor, "line-width": terrain ? Math.min(l.glowWidth, 5) : l.glowWidth, "line-blur": terrain ? 2 : 10, ...glowPaint, ...(terrain ? { "line-opacity": 0 } : {}) }} layout={{ "line-cap": "round", "line-join": "round" }} />
+        <MapLayer id={`${l.id}-glow`} type="line" paint={{ "line-color": l.glowColor, "line-width": terrain ? Math.min(glowWidth, 5) : glowWidth, "line-blur": terrain ? 2 : 10, ...glowPaint, ...(terrain ? { "line-opacity": 0 } : {}) }} layout={{ "line-cap": "round", "line-join": "round" }} />
       </Source>
       <Source id={`${l.id}-fillS`} type="geojson" data={fillData}>
         <MapLayer id={`${l.id}-fill`} type="fill" paint={l.fillType === "flag" ? { "fill-opacity": 0 } : { ...fillSource(l), ...fillExtra, ...(terrain ? { "fill-antialias": false } : {}) }} />
-        {((l as any).extrude ?? 0) > 0 && (
+        {extrude > 0 && (
           <MapLayer
             id={`${l.id}-extrude`}
             type="fill-extrusion"
             paint={{
               "fill-extrusion-color": l.fillColor,
-              "fill-extrusion-height": ((l as any).extrude ?? 0) * 4000,
+              "fill-extrusion-height": extrude * 4000,
               "fill-extrusion-base": 0,
-              "fill-extrusion-opacity": Math.min(0.92, a * (l.fillOpacity + 0.45)),
+              "fill-extrusion-opacity": Math.min(0.92, a * (fillOpacity + 0.45)),
             }}
           />
         )}
       </Source>
-      {l.fillType === "flag" && <FlagRasterSource layer={l} opacity={a * Math.max(l.fillOpacity, 0.85)} />}
+      {l.fillType === "flag" && <FlagRasterSource layer={l} opacity={a * Math.max(fillOpacity, 0.85)} />}
       <Source id={l.id} type="geojson" data={data}>
         <MapLayer
           id={`${l.id}-border`}

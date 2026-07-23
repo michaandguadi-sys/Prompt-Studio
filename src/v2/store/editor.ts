@@ -18,6 +18,15 @@ import { recolorLayer } from "../doc/themes";
 
 const MAX_HISTORY = 80;
 
+/** Current playhead as scene-time t (0..1) plus a "same keyframe" epsilon
+ *  (~0.75 frames), so the keyframe button toggles the one under the playhead. */
+function playheadT(p: Project, playheadFrame: number): { t: number; eps: number } {
+  const tf = Math.max(1, Math.round((p.composition.durationSec || 1) * (p.composition.fps || 30)));
+  const t = tf > 1 ? Math.min(1, Math.max(0, (playheadFrame || 0) / (tf - 1))) : 0;
+  const eps = 0.75 / Math.max(1, tf - 1);
+  return { t, eps };
+}
+
 type EditorState = {
   project: Project;
   selectedId: string | null;
@@ -39,6 +48,21 @@ type EditorState = {
 
   patchLayer: (id: string, patch: Record<string, unknown>) => void;
   patchTiming: (id: string, patch: Partial<Timing>) => void;
+
+  // ── Property keyframes (the universal animation system) ──
+  /** Smart numeric setter. If `prop` is keyframed, writes the value to the
+   *  keyframe at the current playhead (inserting one if none is there — After
+   *  Effects style); otherwise sets the plain static field. */
+  setLayerProp: (id: string, prop: string, value: number) => void;
+  /** Toggle a keyframe for `prop` at the current playhead (add with the given
+   *  value, or remove the one already there). Enables/anchors an animation. */
+  toggleKeyframe: (id: string, prop: string, value: number) => void;
+  /** Set the easing of the keyframe at/just-before the playhead on `prop`. */
+  setKfEaseAtPlayhead: (id: string, prop: string, ease: "linear" | "smooth" | "easeIn" | "easeOut" | "hold") => void;
+  /** Remove a property's whole keyframe track (back to a static value). */
+  clearTrack: (id: string, prop: string, value?: number) => void;
+  /** Jump the playhead to the next/prev keyframe of `prop` (−1 prev, +1 next). */
+  gotoKeyframe: (id: string, prop: string, dir: -1 | 1) => void;
   patchComposition: (patch: Partial<Composition>) => void;
   /** Change the scene duration AND proportionally rescale every layer's timing
    *  (in/out points, narration beats, choreography spans) so the whole film
@@ -193,6 +217,76 @@ export const useEditor = create<EditorState>()(
           const l = p.composition.layers.find((x) => x.id === id) as any;
           if (l && l.timing) l.timing = { ...l.timing, ...patch };
         }),
+
+        // ── Property keyframes ──────────────────────────────────────────────
+        setLayerProp: (id, prop, value) => commit((p) => {
+          const l = p.composition.layers.find((x) => x.id === id) as any;
+          if (!l) return;
+          const track = l.tracks?.[prop] as { t: number; value: number; ease: string }[] | undefined;
+          if (track && track.length) {
+            // Keyframed → edit the keyframe at the playhead (insert if none there).
+            const { t, eps } = playheadT(p, get().playheadFrame);
+            const next = [...track];
+            const i = next.findIndex((k) => Math.abs(k.t - t) < eps);
+            if (i >= 0) next[i] = { ...next[i], value };
+            else { next.push({ t, value, ease: "smooth" }); next.sort((a, b) => a.t - b.t); }
+            l.tracks = { ...l.tracks, [prop]: next };
+          }
+          // Always mirror to the static field too (used when the track is empty
+          // and as the value shown when the playhead sits off any keyframe).
+          l[prop] = value;
+        }),
+
+        toggleKeyframe: (id, prop, value) => commit((p) => {
+          const l = p.composition.layers.find((x) => x.id === id) as any;
+          if (!l) return;
+          if (!l.tracks) l.tracks = {};
+          const { t, eps } = playheadT(p, get().playheadFrame);
+          const track: { t: number; value: number; ease: string }[] = l.tracks[prop] ? [...l.tracks[prop]] : [];
+          const i = track.findIndex((k) => Math.abs(k.t - t) < eps);
+          if (i >= 0) {
+            track.splice(i, 1); // remove the keyframe under the playhead
+            if (track.length === 0) { const { [prop]: _drop, ...rest } = l.tracks; l.tracks = rest; return; }
+          } else {
+            track.push({ t, value, ease: "smooth" });
+            track.sort((a, b) => a.t - b.t);
+          }
+          l.tracks = { ...l.tracks, [prop]: track };
+        }),
+
+        setKfEaseAtPlayhead: (id, prop, ease) => commit((p) => {
+          const l = p.composition.layers.find((x) => x.id === id) as any;
+          const track = l?.tracks?.[prop] as { t: number; value: number; ease: string }[] | undefined;
+          if (!track?.length) return;
+          const { t } = playheadT(p, get().playheadFrame);
+          // The keyframe governing the segment at the playhead is the last one ≤ t.
+          let idx = 0;
+          for (let i = 0; i < track.length; i++) if (track[i].t <= t + 1e-6) idx = i;
+          const next = [...track];
+          next[idx] = { ...next[idx], ease };
+          l.tracks = { ...l.tracks, [prop]: next };
+        }),
+
+        clearTrack: (id, prop, value) => commit((p) => {
+          const l = p.composition.layers.find((x) => x.id === id) as any;
+          if (!l?.tracks?.[prop]) return;
+          const { [prop]: _drop, ...rest } = l.tracks;
+          l.tracks = rest;
+          if (typeof value === "number") l[prop] = value; // freeze on the last-seen value
+        }),
+
+        gotoKeyframe: (id, prop, dir) => {
+          const st = get();
+          const l = st.project.composition.layers.find((x) => x.id === id) as any;
+          const track = l?.tracks?.[prop] as { t: number }[] | undefined;
+          if (!track?.length) return;
+          const c = st.project.composition;
+          const tf = Math.max(1, Math.round(c.durationSec * c.fps));
+          const cur = st.playheadFrame ?? 0;
+          const frames = track.map((k) => Math.round(k.t * (tf - 1))).sort((a, b) => a - b);
+          const target = dir > 0 ? frames.find((f) => f > cur + 0.5) : [...frames].reverse().find((f) => f < cur - 0.5);
+          if (target != null) { st.setPlayheadFrame(target); st.requestSeek?.(target); }
+        },
 
         patchComposition: (patch) => commit((p) => { p.composition = { ...p.composition, ...patch }; }),
 

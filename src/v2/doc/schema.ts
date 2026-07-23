@@ -89,12 +89,30 @@ export const Keyframe = z.object({
 });
 export type Keyframe = z.infer<typeof Keyframe>;
 
+/** Interpolation FROM a keyframe to the next one. */
+export const KfEase = z.enum(["linear", "smooth", "easeIn", "easeOut", "hold"]);
+export type KfEase = z.infer<typeof KfEase>;
+/** A keyframe on ONE numeric property: `value` at time `t` (0..1 of the scene),
+ *  with `ease` describing how it interpolates to the NEXT keyframe. Property
+ *  tracks power the universal "set a keyframe, move the playhead, set another"
+ *  workflow on any adjustable number (fill opacity, extrusion, glow, size…). */
+export const PropKeyframe = z.object({
+  t: z.number().min(0).max(1),
+  value: z.number(),
+  ease: KfEase.default("smooth"),
+});
+export type PropKeyframe = z.infer<typeof PropKeyframe>;
+
 const layerBase = {
   id: z.string(),
   name: z.string().default(""),
   enabled: z.boolean().default(true),
   /** Optional transform keyframes (position/scale/rotation along the scene). */
   kf: z.array(Keyframe).default([]),
+  /** Per-property animation tracks: { "fillOpacity": [{t,value,ease}, …], … }.
+   *  A property with a track ANIMATES between its keyframes; otherwise the plain
+   *  static field value is used. Sampled per-frame in the render via kfNum(). */
+  tracks: z.record(z.string(), z.array(PropKeyframe)).default({}),
 };
 
 // ── Layer: Camera (the base move — exactly one per composition) ──────────────
