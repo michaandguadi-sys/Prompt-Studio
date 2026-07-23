@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { MapPin, Upload, Sparkles, Mic, Play, Square, X as XIcon, Loader2 } from "lucide-react";
 import { hasVoiceoverKey, loadVoiceoverSettings, generateVoiceover, measureAudioDuration } from "@/lib/voiceover";
-import { Field, Input, NumberInput, Select, Section, Slider, Toggle } from "./controls";
+import { Field, Input, NumberInput, Select, Section, Slider, Toggle, SegTabs, Advanced } from "./controls";
 import { confirmDialog, promptDialog } from "./dialogs";
 import { MapStyleGallery } from "./Map3DStyleModal";
 import { KfSlider } from "./KfControl";
@@ -895,21 +895,48 @@ const Trash2Icon: React.FC = () => <span className="text-[11px] leading-none">�
 /** The project-wide sections shown regardless of selection. Map style is FIRST
  *  (the priority choice), then the camera, then grading, then palette / brand. */
 const GlobalSections: React.FC = () => {
+  // ONE context at a time — how a person actually works: "I'm styling now" vs
+  // "I'm setting up the format". Style gathers EVERYTHING look-related (map
+  // style, film grade, palette & fonts) in one place; Brand holds identity
+  // assets; Scene is the film's format. No more scrolling past five stacked
+  // panels to find the one knob you came for.
+  const [ctx, setCtx] = useState<"style" | "brand" | "scene">("style");
+  return (
+    <>
+      <div className="px-3 pt-3">
+        <SegTabs
+          tabs={[{ key: "style", label: "Style" }, { key: "brand", label: "Brand" }, { key: "scene", label: "Scene" }]}
+          active={ctx}
+          onChange={(k) => setCtx(k as any)}
+        />
+      </div>
+      {ctx === "style" && (
+        <>
+          {/* Everything that shapes the LOOK, together: map style → grade → type. */}
+          <MapStylePanel />
+          <LookPanel />
+          <ThemePanel />
+        </>
+      )}
+      {ctx === "brand" && (
+        <>
+          <BrandKitPanel />
+          <AddonsPanel />
+        </>
+      )}
+      {ctx === "scene" && <ScenePanel />}
+    </>
+  );
+};
+
+/** Scene — the film's format: duration, aspect, and one-tap retiming. */
+const ScenePanel: React.FC = () => {
   const aspect = useEditor((s) => s.project.composition.aspect);
   const durationSec = useEditor((s) => s.project.composition.durationSec);
   const patchComposition = useEditor((s) => s.patchComposition);
   const retimeScene = useEditor((s) => s.retimeScene);
   return (
     <>
-      <MapStylePanel />
-      {/* Camera controls live ON the Camera layer (every project has one) —
-          no duplicate "camera move" section here. */}
-      <AddonsPanel />
-      <LookPanel />
-      <ThemePanel />
-      <BrandKitPanel />
-
-      {/* Scene-level controls always available at the bottom */}
       <Section title="Scene">
         <div className="grid grid-cols-2 gap-2">
           <Field label="Duration">
@@ -1112,13 +1139,18 @@ const LayerFields: React.FC<{ layer: Layer; set: (p: Record<string, unknown>) =>
             <Field label="Colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
             <Field label="Accent"><ColorInput value={layer.accent} onChange={(v) => set({ accent: v })} /></Field>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <Field label="Size"><NumberInput value={layer.sizePx} step={2} min={16} max={200} unit="px" onChange={(v) => set({ sizePx: v })} /></Field>
-            <FontField value={layer.fontFamily} onChange={(v) => set({ fontFamily: v })} />
+          <div className="space-y-2.5 rounded-xl border border-iris/20 bg-iris/[0.03] p-3">
+            <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-iris/70">
+              <span className="h-[8px] w-[8px] rotate-45 rounded-[1.5px] bg-iris" /> Animate <span className="font-normal normal-case tracking-normal text-graphite/45">· tap ◆ to keyframe</span>
+            </div>
+            <KfSlider layerId={layer.id} prop="sizePx" label="Size" value={layer.sizePx} min={16} max={200} step={2} format={(v) => Math.round(v) + "px"} />
           </div>
-          <Slider label="Text shadow" value={(layer as any).shadow ?? 0.55} onChange={(v) => set({ shadow: v })} format={(v) => v <= 0 ? "off" : `${Math.round(v * 100)}%`} />
-          <Toggle label="Text outline" checked={(layer as any).outline ?? false} onChange={(v) => set({ outline: v })} />
-          <TransformControls t={(layer as any).transform} onChange={(tf) => set({ transform: tf })} kf={(layer as any).kf} onKf={(k) => set({ kf: k })} />
+          <Advanced label="Type & effects">
+            <FontField value={layer.fontFamily} onChange={(v) => set({ fontFamily: v })} />
+            <Slider label="Text shadow" value={(layer as any).shadow ?? 0.55} onChange={(v) => set({ shadow: v })} format={(v) => v <= 0 ? "off" : `${Math.round(v * 100)}%`} />
+            <Toggle label="Text outline" checked={(layer as any).outline ?? false} onChange={(v) => set({ outline: v })} />
+            <TransformControls t={(layer as any).transform} onChange={(tf) => set({ transform: tf })} kf={(layer as any).kf} onKf={(k) => set({ kf: k })} />
+          </Advanced>
         </Section>
       );
 
@@ -1622,21 +1654,9 @@ const MarkerFields: React.FC<{ layer: Extract<Layer, { type: "marker" }>; set: (
       </div>
     </Field>
     <div className="grid grid-cols-2 gap-2">
-      <Field label="Custom emoji" hint="Overrides the symbol"><Input value={layer.emoji} placeholder="e.g. 🛢️" onChange={(e) => set({ emoji: e.target.value })} /></Field>
       <Field label="Label" hint="Caption beneath"><Input value={layer.label} onChange={(e) => set({ label: e.target.value })} /></Field>
+      <Field label="Tint" hint="Ring & glow"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
     </div>
-    <Field label="Entrance">
-      <Select value={layer.animation} onChange={(e) => set({ animation: e.target.value })}>
-        <option value="pop">Pop in</option>
-        <option value="drop">Drop in</option>
-        <option value="pulse">Pulse</option>
-        <option value="throb">Throb (breathe)</option>
-        <option value="spin">Spin in</option>
-        <option value="flash">Flash</option>
-        <option value="none">None</option>
-      </Select>
-    </Field>
-    <Field label="Tint" hint="Ring & glow"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
     <div className="space-y-2.5 rounded-xl border border-iris/20 bg-iris/[0.03] p-3">
       <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-iris/70">
         <span className="h-[8px] w-[8px] rotate-45 rounded-[1.5px] bg-iris" /> Animate <span className="font-normal normal-case tracking-normal text-graphite/45">· tap ◆ to keyframe</span>
@@ -1644,11 +1664,25 @@ const MarkerFields: React.FC<{ layer: Extract<Layer, { type: "marker" }>; set: (
       <KfSlider layerId={layer.id} prop="sizePx" label="Size" value={layer.sizePx} min={16} max={400} step={5} format={(v) => Math.round(v) + "px"} />
       <KfSlider layerId={layer.id} prop="glow" label="Glow" value={layer.glow} min={0} max={1.5} step={0.05} format={(v) => v.toFixed(2)} />
     </div>
-    <div className="grid grid-cols-2 gap-2">
+    <Advanced label="Entrance & details">
+      <Field label="Entrance">
+        <Select value={layer.animation} onChange={(e) => set({ animation: e.target.value })}>
+          <option value="pop">Pop in</option>
+          <option value="drop">Drop in</option>
+          <option value="pulse">Pulse</option>
+          <option value="throb">Throb (breathe)</option>
+          <option value="spin">Spin in</option>
+          <option value="flash">Flash</option>
+          <option value="none">None</option>
+        </Select>
+      </Field>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Custom emoji" hint="Overrides the symbol"><Input value={layer.emoji} placeholder="e.g. 🛢️" onChange={(e) => set({ emoji: e.target.value })} /></Field>
+        <Field label="Label colour"><ColorInput value={layer.labelColor} onChange={(v) => set({ labelColor: v })} /></Field>
+      </div>
       <Toggle label="Locator ring" checked={layer.ring} onChange={(v) => set({ ring: v })} />
-      <Field label="Label colour"><ColorInput value={layer.labelColor} onChange={(v) => set({ labelColor: v })} /></Field>
-    </div>
-    <TransformControls t={(layer as any).transform} onChange={(tf) => set({ transform: tf })} kf={(layer as any).kf} onKf={(k) => set({ kf: k })} />
+      <TransformControls t={(layer as any).transform} onChange={(tf) => set({ transform: tf })} kf={(layer as any).kf} onKf={(k) => set({ kf: k })} />
+    </Advanced>
   </Section>
 );
 
@@ -2020,51 +2054,9 @@ const RouteFields: React.FC<{ layer: Extract<Layer, { type: "route" }>; set: (p:
           )}
         </div>
       </Field>
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="Path" hint="Follow roads/sea, or a straight line">
-          <Select value={layer.pathStyle ?? "auto"} onChange={(e) => changePath(e.target.value)}>
-            <option value="auto">Follow roads / sea</option>
-            <option value="direct">Direct line</option>
-          </Select>
-        </Field>
-        <Field label="Direction"><Select value={layer.direction ?? "forward"} onChange={(e) => set({ direction: e.target.value })}><option value="forward">Start → End</option><option value="reverse">End → Start</option></Select></Field>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="Transport"><Select value={layer.transport} onChange={(e) => changeTransport(e.target.value)} disabled={(layer.pathStyle ?? "auto") === "direct"}><option value="driving">Driving</option><option value="walking">Walking</option><option value="cycling">Cycling</option><option value="boat">Boat</option><option value="aircraft">Aircraft</option></Select></Field>
-        <Field label="Reveal"><Select value={layer.reveal === "dotted" ? "draw" : layer.reveal} onChange={(e) => set({ reveal: e.target.value })}><option value="draw">Draw on</option><option value="grow">Grow in</option><option value="fade">Fade in</option><option value="pulse">Pulse</option><option value="static">Static</option></Select></Field>
-      </div>
-      <Field label="Camera (when priority)" hint="How the camera moves if this route is on top">
-        <Select value={layer.cameraMode ?? "follow"} onChange={(e) => set({ cameraMode: e.target.value })}>
-          <option value="follow">Follow the vehicle</option>
-          <option value="frame">Frame the whole journey</option>
-          <option value="chase">Chase (turn into each leg)</option>
-          <option value="orbit">Orbit the journey</option>
-        </Select>
-      </Field>
-      <Field label="Colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
-      <div className="space-y-2.5 rounded-xl border border-iris/20 bg-iris/[0.03] p-3">
-        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-iris/70">
-          <span className="h-[8px] w-[8px] rotate-45 rounded-[1.5px] bg-iris" /> Animate <span className="font-normal normal-case tracking-normal text-graphite/45">· tap ◆ to keyframe</span>
-        </div>
-        <KfSlider layerId={layer.id} prop="width" label="Line width" value={layer.width} min={1} max={40} step={1} format={(v) => Math.round(v) + "px"} />
-        <KfSlider layerId={layer.id} prop="glow" label="Glow" value={layer.glow ?? 0.35} min={0} max={1.5} step={0.05} format={(v) => v.toFixed(2)} />
-      </div>
-      <div className="space-y-2 rounded-lg border border-line bg-paper-50 p-2.5">
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] uppercase tracking-wider text-graphite/45">Line style</span>
-          <Toggle label="Show line" checked={layer.showLine !== false} onChange={(v) => set({ showLine: v })} />
-          <Toggle label="Endpoint pins" checked={(layer as any).showEndpoints !== false} onChange={(v) => set({ showEndpoints: v })} />
-        </div>
-        <Field label="Pattern">
-          <Select value={layer.dashStyle ?? "solid"} onChange={(e) => set({ dashStyle: e.target.value })}>
-            <option value="solid">Solid</option>
-            <option value="dotted">Dotted</option>
-            <option value="dashed">Dashed</option>
-          </Select>
-        </Field>
-        <Slider label="Opacity" value={layer.opacity ?? 1} onChange={(v) => set({ opacity: v })} />
-        <Slider label="Smooth (bezier)" value={layer.smoothness ?? 0} onChange={(v) => set({ smoothness: v })} />
-      </div>
+      {/* Vehicle IS the journey's character — one pick sets the icon AND routes
+          the path correctly (roads / water / air). Colour + speed complete the
+          essentials; everything mechanical lives in Advanced. */}
       <div className="grid grid-cols-2 gap-2">
         <Field label="Vehicle" hint="Sets the icon + routes it correctly">
           <Select value={layer.icon} onChange={(e) => pickVehicle(e.target.value)}>
@@ -2083,13 +2075,59 @@ const RouteFields: React.FC<{ layer: Extract<Layer, { type: "route" }>; set: (p:
             <option value="pin">📍 Pin</option>
           </Select>
         </Field>
-        <Field label="Custom icon" hint="Any emoji — overrides">
-          <Input value={(layer as any).iconEmoji ?? ""} placeholder="e.g. 🦅 🛸 🐎" maxLength={4} onChange={(e) => set({ iconEmoji: e.target.value })} />
-        </Field>
+        <Field label="Colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
       </div>
       <Field label="Travel time" hint="Line, vehicle & follow-camera speed">
         <NumberInput value={Math.round(layer.drawFraction * 100)} step={5} min={10} max={100} unit="%" onChange={(v) => set({ drawFraction: v / 100 })} />
       </Field>
+      <div className="space-y-2.5 rounded-xl border border-iris/20 bg-iris/[0.03] p-3">
+        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-iris/70">
+          <span className="h-[8px] w-[8px] rotate-45 rounded-[1.5px] bg-iris" /> Animate <span className="font-normal normal-case tracking-normal text-graphite/45">· tap ◆ to keyframe</span>
+        </div>
+        <KfSlider layerId={layer.id} prop="width" label="Line width" value={layer.width} min={1} max={40} step={1} format={(v) => Math.round(v) + "px"} />
+        <KfSlider layerId={layer.id} prop="glow" label="Glow" value={layer.glow ?? 0.35} min={0} max={1.5} step={0.05} format={(v) => v.toFixed(2)} />
+      </div>
+
+      <Advanced label="Path & camera">
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Path" hint="Follow roads/sea, or a straight line">
+            <Select value={layer.pathStyle ?? "auto"} onChange={(e) => changePath(e.target.value)}>
+              <option value="auto">Follow roads / sea</option>
+              <option value="direct">Direct line</option>
+            </Select>
+          </Field>
+          <Field label="Direction"><Select value={layer.direction ?? "forward"} onChange={(e) => set({ direction: e.target.value })}><option value="forward">Start → End</option><option value="reverse">End → Start</option></Select></Field>
+          <Field label="Transport"><Select value={layer.transport} onChange={(e) => changeTransport(e.target.value)} disabled={(layer.pathStyle ?? "auto") === "direct"}><option value="driving">Driving</option><option value="walking">Walking</option><option value="cycling">Cycling</option><option value="boat">Boat</option><option value="aircraft">Aircraft</option></Select></Field>
+          <Field label="Reveal"><Select value={layer.reveal === "dotted" ? "draw" : layer.reveal} onChange={(e) => set({ reveal: e.target.value })}><option value="draw">Draw on</option><option value="grow">Grow in</option><option value="fade">Fade in</option><option value="pulse">Pulse</option><option value="static">Static</option></Select></Field>
+        </div>
+        <Field label="Camera (when priority)" hint="How the camera moves if this route is on top">
+          <Select value={layer.cameraMode ?? "follow"} onChange={(e) => set({ cameraMode: e.target.value })}>
+            <option value="follow">Follow the vehicle</option>
+            <option value="frame">Frame the whole journey</option>
+            <option value="chase">Chase (turn into each leg)</option>
+            <option value="orbit">Orbit the journey</option>
+          </Select>
+        </Field>
+        <Field label="Custom icon" hint="Any emoji — overrides the vehicle">
+          <Input value={(layer as any).iconEmoji ?? ""} placeholder="e.g. 🦅 🛸 🐎" maxLength={4} onChange={(e) => set({ iconEmoji: e.target.value })} />
+        </Field>
+      </Advanced>
+
+      <Advanced label="Line style">
+        <div className="flex items-center justify-between">
+          <Toggle label="Show line" checked={layer.showLine !== false} onChange={(v) => set({ showLine: v })} />
+          <Toggle label="Endpoint pins" checked={(layer as any).showEndpoints !== false} onChange={(v) => set({ showEndpoints: v })} />
+        </div>
+        <Field label="Pattern">
+          <Select value={layer.dashStyle ?? "solid"} onChange={(e) => set({ dashStyle: e.target.value })}>
+            <option value="solid">Solid</option>
+            <option value="dotted">Dotted</option>
+            <option value="dashed">Dashed</option>
+          </Select>
+        </Field>
+        <Slider label="Opacity" value={layer.opacity ?? 1} onChange={(v) => set({ opacity: v })} />
+        <Slider label="Smooth (bezier)" value={layer.smoothness ?? 0} onChange={(v) => set({ smoothness: v })} />
+      </Advanced>
       <div className="text-[10px] text-graphite/45">
         {busy ? "Resolving path…" : resolved ? `Path resolved (${layer.coordinates.length} points). The vehicle, the drawn line and (when this route is the priority) the camera all travel together.` : "Pick From + To to draw the route."}
       </div>
@@ -2202,15 +2240,7 @@ const HighlightFields: React.FC<{ layer: Extract<Layer, { type: "highlight" }>; 
           </div>
         </div>
       )}
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="Fill colour"><ColorInput value={layer.fillColor} onChange={(v) => set({ fillColor: v })} /></Field>
-        <Field label="Border"><ColorInput value={layer.borderColor} onChange={(v) => set({ borderColor: v })} /></Field>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="Glow colour"><ColorInput value={layer.glowColor} onChange={(v) => set({ glowColor: v })} /></Field>
-        <Field label="Border style"><Select value={(layer as any).borderDash ?? "solid"} onChange={(e) => set({ borderDash: e.target.value })}><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></Select></Field>
-        <Field label="Border opacity"><NumberInput value={Math.round(((layer as any).borderOpacity ?? 1) * 100)} step={5} min={0} max={100} unit="%" onChange={(v) => set({ borderOpacity: v / 100 })} /></Field>
-      </div>
+      <Field label="Fill colour"><ColorInput value={layer.fillColor} onChange={(v) => set({ fillColor: v })} /></Field>
 
       {/* ── Animate — tap the diamond to keyframe any of these over the timeline ── */}
       <div className="space-y-2.5 rounded-xl border border-iris/20 bg-iris/[0.03] p-3">
@@ -2223,7 +2253,7 @@ const HighlightFields: React.FC<{ layer: Extract<Layer, { type: "highlight" }>; 
         <KfSlider layerId={layer.id} prop="extrude" label="3D extrude" hint="needs camera tilt" value={(layer as any).extrude ?? 0} min={0} max={100} step={1} format={(v) => Math.round(v).toString()} />
       </div>
 
-      {/* Editable on-map label */}
+      {/* Editable on-map label — the storytelling text ON the region. */}
       <div className="space-y-2 rounded-lg border border-line bg-paper-50 p-2.5">
         <Field label="On-map label" hint={layer.place ? "Overrides the region name" : "Type a label to show"}>
           <Input value={(layer as any).labelText ?? ""} placeholder={layer.place || "e.g. THE FRONTIER"} onChange={(e) => set({ labelText: e.target.value })} />
@@ -2233,6 +2263,16 @@ const HighlightFields: React.FC<{ layer: Extract<Layer, { type: "highlight" }>; 
           <Field label="Text colour"><ColorInput value={(layer as any).labelColor ?? "#ffffff"} onChange={(v) => set({ labelColor: v })} /></Field>
         </div>
       </div>
+
+      {/* The long tail — border & glow details, out of the way until wanted. */}
+      <Advanced label="Border & glow">
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Border colour"><ColorInput value={layer.borderColor} onChange={(v) => set({ borderColor: v })} /></Field>
+          <Field label="Glow colour"><ColorInput value={layer.glowColor} onChange={(v) => set({ glowColor: v })} /></Field>
+          <Field label="Border style"><Select value={(layer as any).borderDash ?? "solid"} onChange={(e) => set({ borderDash: e.target.value })}><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></Select></Field>
+          <Field label="Border opacity"><NumberInput value={Math.round(((layer as any).borderOpacity ?? 1) * 100)} step={5} min={0} max={100} unit="%" onChange={(v) => set({ borderOpacity: v / 100 })} /></Field>
+        </div>
+      </Advanced>
     </Section>
   );
 };

@@ -129,6 +129,57 @@ export const Slider: React.FC<{
 };
 
 /**
+ * SegTabs — a compact segmented control for switching CONTEXTS (not pages).
+ * The backbone of the "edit one thing at a time" inspector: pick Style and you
+ * see everything style-related together; pick Scene and only scene settings
+ * show. Mirrors how people think — one intent, one focused set of controls.
+ */
+export const SegTabs: React.FC<{
+  tabs: { key: string; label: string; icon?: React.ReactNode }[];
+  active: string;
+  onChange: (key: string) => void;
+}> = ({ tabs, active, onChange }) => (
+  <div className="flex rounded-xl bg-graphite/[0.05] p-0.5">
+    {tabs.map((t) => (
+      <button
+        key={t.key}
+        onClick={() => onChange(t.key)}
+        className={`flex flex-1 items-center justify-center gap-1.5 rounded-[10px] px-2 py-1.5 text-[11.5px] font-medium transition-all ${
+          active === t.key ? "bg-white text-graphite shadow-sm" : "text-graphite/50 hover:text-graphite/80"
+        }`}
+      >
+        {t.icon}{t.label}
+      </button>
+    ))}
+  </div>
+);
+
+/**
+ * Advanced — progressive disclosure for the long tail. Essentials stay visible;
+ * everything a first-time creator doesn't need collapses behind this quiet
+ * "Advanced" row (closed by default). Power is one tap away, never in the way.
+ */
+export const Advanced: React.FC<{ label?: string; children: React.ReactNode }> = ({ label = "Advanced", children }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={open ? "rounded-lg border border-line/60 bg-graphite/[0.015]" : ""}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-graphite/40 transition-colors hover:text-graphite/70"
+      >
+        {label}
+        <ChevronDown size={12} className={`transition-transform duration-300 ${open ? "" : "-rotate-90"}`} />
+      </button>
+      <div className={`grid transition-[grid-template-rows] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+        <div className="overflow-hidden">
+          <div className="space-y-2.5 px-2 pb-2.5 pt-1">{children}</div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/**
  * Collapsible section. Default open so nothing hides on you, but every group can
  * be folded away to tame the long Inspector — smooth grid-rows height animation,
  * a soft iris tick, and a rotating chevron. Same `<Section title>…</Section>` API.

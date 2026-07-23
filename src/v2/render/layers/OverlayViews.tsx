@@ -14,7 +14,7 @@ export const LabelView: React.FC<LV<LabelLayer>> = ({ layer: l, frame, fps, tota
   if (tr.opacity < 0.01) return null;
 
   const font = displayFont(theme, l.fontFamily);
-  const sz = l.sizePx;
+  const sz = kfNum(l, "sizePx", l.sizePx, frame, totalFrames);
   const shadow = l.shadow > 0 ? textShadow(l.shadow) : undefined;
 
   let x: number | string = "50%";
