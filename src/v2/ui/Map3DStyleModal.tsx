@@ -69,12 +69,15 @@ export const MapStyleGallery: React.FC = () => {
   const addLayers = useEditor((s) => s.addLayers);
   const removeLayer = useEditor((s) => s.removeLayer);
 
-  /** Apply a LIVE EARTH look: swap the base style and (re)lay the GIBS raster. */
+  /** Apply a LIVE EARTH look: lay the real NASA raster OVER whatever map style is
+   *  already chosen — it does NOT replace the style. The raster renders under the
+   *  style's borders/labels/grid (see MapComposition's beforeId), so the creator
+   *  keeps their favourite look AND sees the live NASA imagery/data through it.
+   *  Tune the blend with the earth layer's Opacity in the inspector. */
   const applyLiveEarth = (le: (typeof LIVE_EARTH)[number]) => {
     recordTaste("style", le.key);
     // One live layer at a time — replace any existing earth observation layer.
     for (const l of layers) if (l.type === "earthlayer") removeLayer(l.id);
-    patchComposition({ basemap: { ...comp.basemap, styleUrl: le.base, style3d: "" } as any });
     addLayers([
       createLayer("earthlayer", {
         name: le.name, ...le.cfg, date: "latest", opacity: le.opacity,

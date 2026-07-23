@@ -179,6 +179,10 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
   const photoreal3d = !!(comp.basemap as any).photoreal3d && !!googleKey && (!isRendering || !!googleApiKey);
   const [googleCredit, setGoogleCredit] = useState("");
   const [googleStatus, setGoogleStatus] = useState<"loading" | "ready" | "error" | null>(null);
+  // The style's first label (symbol) layer id — NASA/earth rasters insert BELOW
+  // it so the chosen map style's borders, labels, grid and relief stay visible
+  // ON TOP of the real-world imagery (the "data layered over your style" look).
+  const [firstSymbolId, setFirstSymbolId] = useState<string | undefined>(undefined);
   // EXPORT FALLBACK: the headless render can't stream Google's 3D tiles frame-by-
   // frame, so a photoreal scene EXPORTS as a rich satellite + 3D-terrain +
   // 3D-buildings world (the closest faithful 3D look) instead of a flat map.
@@ -311,6 +315,10 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
           return isCountryLabel(id) || (isCityLabel(id) && !isMinorLabel(id)) || (!isMinorLabel(id));
         };
         const style = map.getStyle();
+        // Remember where labels/borders begin so earth-observation rasters slot in
+        // UNDER them (keeping the style's cartography readable over NASA imagery).
+        const firstSym = (style?.layers ?? []).find((ly: any) => ly.type === "symbol")?.id;
+        setFirstSymbolId((prev) => (prev === firstSym ? prev : firstSym));
         for (const layer of style?.layers ?? []) {
           const id = (layer.id || "").toLowerCase();
           const isRoad = /road|street|highway|motorway|path|bridge|tunnel|trunk/.test(id);
@@ -613,11 +621,12 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
           const fmt = el.tileFormat ?? "jpg";
           const matrix = el.tileMatrix ?? "GoogleMapsCompatible_Level9";
           const mz: number = el.maxzoom ?? 9;
-          // GIBS URL: static datasets use the default slot (no date); dated datasets
-          // use YYYY-MM-DD. Both patterns served by the same WMTS endpoint.
-          const date = (el.date && el.date !== "") ? el.date : new Date(Date.now() - 172800000).toISOString().slice(0, 10);
-          const datePart = (el.date === "") ? "/default" : `/${date}`;
-          const tileUrl = `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${dsId}/default${datePart}/${matrix}/{z}/{y}/{x}.${fmt}`;
+          // GIBS WMTS wants a real YYYY-MM-DD time slot. "latest"/"" is NOT valid
+          // (it 404s → the layer never shows), so resolve those to a recent real
+          // date — 2 days back, since today's tiles aren't always processed yet.
+          const ymd = (d: any) => (/^\d{4}-\d{2}-\d{2}$/.test(String(d ?? "")) ? String(d) : new Date(Date.now() - 172800000).toISOString().slice(0, 10));
+          const date = ymd(el.date);
+          const tileUrl = `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${dsId}/default/${date}/${matrix}/{z}/{y}/{x}.${fmt}`;
           const srcId = `gibs-${l.id}`;
           const lyrId = `gibs-lyr-${l.id}`;
           // Compare layer: cross-fade between two earth states (before / after).
@@ -625,23 +634,25 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
           // creating a smooth temporal transition driven by the timing system.
           const hasCmp = !!(el.compareDatasetId);
           const cmpOpacity = hasCmp ? Math.min(1, (el.opacity ?? 0.75) * Math.max(0, 1 - tr.opacity) * 1.2) : 0;
-          const cDate = el.compareDate && el.compareDate !== "" ? el.compareDate : date;
+          const cDate = ymd(el.compareDate && el.compareDate !== "" ? el.compareDate : date);
           const cMatrix = el.tileMatrix ?? "GoogleMapsCompatible_Level9";
           const cMz: number = el.compareMaxzoom ?? mz;
-          const cDatePart = (el.compareDate === "") ? "/default" : `/${cDate}`;
           const cUrl = hasCmp
-            ? `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${el.compareDatasetId}/default${cDatePart}/${cMatrix}/{z}/{y}/{x}.${el.tileFormat ?? "png"}`
+            ? `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${el.compareDatasetId}/default/${cDate}/${cMatrix}/{z}/{y}/{x}.${el.tileFormat ?? "png"}`
             : null;
           const cSrcId = `gibs-cmp-${l.id}`;
           const cLyrId = `gibs-cmp-lyr-${l.id}`;
           return (
             <React.Fragment key={l.id}>
               <Source id={srcId} type="raster" tiles={[tileUrl]} tileSize={256} minzoom={0} maxzoom={mz} attribution={el.attribution ?? "NASA GIBS / Earthdata"} />
-              <MapLayer id={lyrId} type="raster" source={srcId} paint={{ "raster-opacity": opacity, "raster-fade-duration": 0 }} />
+              {/* beforeId → the raster paints OVER the style's land/water but UNDER
+                  its borders, labels, grid and relief, so a chosen map style stays
+                  fully legible layered on top of the real-world NASA imagery. */}
+              <MapLayer id={lyrId} type="raster" source={srcId} beforeId={firstSymbolId} paint={{ "raster-opacity": opacity, "raster-fade-duration": 0 }} />
               {cUrl && cmpOpacity > 0.005 && (
                 <>
                   <Source id={cSrcId} type="raster" tiles={[cUrl]} tileSize={256} minzoom={0} maxzoom={cMz} />
-                  <MapLayer id={cLyrId} type="raster" source={cSrcId} paint={{ "raster-opacity": cmpOpacity, "raster-fade-duration": 0 }} />
+                  <MapLayer id={cLyrId} type="raster" source={cSrcId} beforeId={firstSymbolId} paint={{ "raster-opacity": cmpOpacity, "raster-fade-duration": 0 }} />
                 </>
               )}
             </React.Fragment>
