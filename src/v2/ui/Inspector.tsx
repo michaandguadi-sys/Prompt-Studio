@@ -1741,17 +1741,19 @@ const AnnotationFields: React.FC<{ layer: Extract<Layer, { type: "annotation" }>
       <Field label="Box side"><Select value={layer.side} onChange={(e) => set({ side: e.target.value })}><option value="auto">Auto</option><option value="top">Above</option><option value="bottom">Below</option><option value="left">Left</option><option value="right">Right</option></Select></Field>
       <Field label="Box style"><Select value={layer.boxStyle} onChange={(e) => set({ boxStyle: e.target.value })}><option value="card">Card</option><option value="bracket">Bracket</option><option value="underline">Underline</option><option value="none">Text only</option></Select></Field>
     </div>
-    <Slider label="Distance" value={layer.distance} min={0} max={60} onChange={(v) => set({ distance: v })} format={(v) => `${Math.round(v)}%`} />
     <div className="grid grid-cols-2 gap-2">
       <Field label="Text colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
       <Field label="Accent" hint="Line + box edge"><ColorInput value={layer.accent} onChange={(v) => set({ accent: v })} /></Field>
     </div>
-    <div className="grid grid-cols-2 gap-2">
-      <Field label="Size"><NumberInput value={layer.sizePx} step={2} min={14} max={160} unit="px" onChange={(v) => set({ sizePx: v })} /></Field>
-      <Toggle label="Draw line in" checked={layer.draw} onChange={(v) => set({ draw: v })} />
-    </div>
-    <FontField value={layer.fontFamily} onChange={(v) => set({ fontFamily: v })} />
-    <TransformControls t={(layer as any).transform} onChange={(tf) => set({ transform: tf })} kf={(layer as any).kf} onKf={(k) => set({ kf: k })} />
+    <Advanced label="Placement & type">
+      <Slider label="Distance" value={layer.distance} min={0} max={60} onChange={(v) => set({ distance: v })} format={(v) => `${Math.round(v)}%`} />
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Size"><NumberInput value={layer.sizePx} step={2} min={14} max={160} unit="px" onChange={(v) => set({ sizePx: v })} /></Field>
+        <Toggle label="Draw line in" checked={layer.draw} onChange={(v) => set({ draw: v })} />
+      </div>
+      <FontField value={layer.fontFamily} onChange={(v) => set({ fontFamily: v })} />
+      <TransformControls t={(layer as any).transform} onChange={(tf) => set({ transform: tf })} kf={(layer as any).kf} onKf={(k) => set({ kf: k })} />
+    </Advanced>
   </Section>
 );
 
@@ -1786,18 +1788,20 @@ const ConnectionsFields: React.FC<{ layer: Extract<Layer, { type: "connections" 
       <Field label="Colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
       <Field label="Node colour"><ColorInput value={layer.dotColor} onChange={(v) => set({ dotColor: v })} /></Field>
     </div>
-    <div className="grid grid-cols-2 gap-2">
-      <Field label="Line width"><NumberInput value={layer.width} step={1} min={1} max={40} unit="px" onChange={(v) => set({ width: v })} /></Field>
-      <Field label="Pattern"><Select value={layer.dashStyle} onChange={(e) => set({ dashStyle: e.target.value })}><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></Select></Field>
-    </div>
-    <Slider label="Arc bow" value={layer.curve} onChange={(v) => set({ curve: v })} />
-    <Slider label="Glow" value={layer.glow} min={0} max={1.5} onChange={(v) => set({ glow: v })} />
-    <Slider label="Stagger" value={layer.stagger} onChange={(v) => set({ stagger: v })} />
     <Field label="Reveal"><Select value={layer.reveal} onChange={(e) => set({ reveal: e.target.value })}><option value="draw">Draw on</option><option value="grow">Grow</option><option value="fade">Fade</option><option value="static">Static</option></Select></Field>
-    <div className="grid grid-cols-2 gap-2">
-      <Toggle label="Node dots" checked={layer.dots} onChange={(v) => set({ dots: v })} />
-      <Toggle label="Place labels" checked={layer.showLabels} onChange={(v) => set({ showLabels: v })} />
-    </div>
+    <Advanced label="Line & nodes">
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Line width"><NumberInput value={layer.width} step={1} min={1} max={40} unit="px" onChange={(v) => set({ width: v })} /></Field>
+        <Field label="Pattern"><Select value={layer.dashStyle} onChange={(e) => set({ dashStyle: e.target.value })}><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></Select></Field>
+      </div>
+      <Slider label="Arc bow" value={layer.curve} onChange={(v) => set({ curve: v })} />
+      <Slider label="Glow" value={layer.glow} min={0} max={1.5} onChange={(v) => set({ glow: v })} />
+      <Slider label="Stagger" value={layer.stagger} onChange={(v) => set({ stagger: v })} />
+      <div className="grid grid-cols-2 gap-2">
+        <Toggle label="Node dots" checked={layer.dots} onChange={(v) => set({ dots: v })} />
+        <Toggle label="Place labels" checked={layer.showLabels} onChange={(v) => set({ showLabels: v })} />
+      </div>
+    </Advanced>
   </Section>
 );
 
@@ -1844,27 +1848,27 @@ const RadiusFields: React.FC<{ layer: Extract<Layer, { type: "radius" }>; set: (
         <option value="static">Static</option>
       </Select>
     </Field>
-    <div className="grid grid-cols-2 gap-2">
-      <Field label={layer.mode === "ripple" ? "Pulse takes" : "Grow over"}><NumberInput value={layer.growSec} step={0.2} min={0.3} max={10} unit="s" onChange={(v) => set({ growSec: v })} /></Field>
-      {layer.mode === "ripple"
-        ? <Field label="Every"><NumberInput value={layer.intervalSec} step={0.2} min={0.5} max={10} unit="s" onChange={(v) => set({ intervalSec: v })} /></Field>
-        : <Field label="Line width"><NumberInput value={layer.width} step={0.5} min={0.5} max={20} unit="px" onChange={(v) => set({ width: v })} /></Field>}
-    </div>
-    <div className="grid grid-cols-2 gap-2">
-      <Field label="Colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
-      <Field label="Unit">
-        <Select value={layer.labelUnit} onChange={(e) => set({ labelUnit: e.target.value })}>
-          <option value="km">Kilometres</option>
-          <option value="mi">Miles</option>
-        </Select>
-      </Field>
-    </div>
-    <Slider label="Fill tint" value={layer.fillOpacity} min={0} max={0.5} onChange={(v) => set({ fillOpacity: v })} />
-    <div className="grid grid-cols-2 gap-2">
-      <Toggle label="Distance labels" checked={layer.showLabels} onChange={(v) => set({ showLabels: v })} />
-      <Toggle label="Dashed" checked={layer.dashed} onChange={(v) => set({ dashed: v })} />
-    </div>
-    <Toggle label="Centre dot" checked={layer.centerDot} onChange={(v) => set({ centerDot: v })} />
+    <Field label="Colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
+    <Advanced label="Timing & style">
+      <div className="grid grid-cols-2 gap-2">
+        <Field label={layer.mode === "ripple" ? "Pulse takes" : "Grow over"}><NumberInput value={layer.growSec} step={0.2} min={0.3} max={10} unit="s" onChange={(v) => set({ growSec: v })} /></Field>
+        {layer.mode === "ripple"
+          ? <Field label="Every"><NumberInput value={layer.intervalSec} step={0.2} min={0.5} max={10} unit="s" onChange={(v) => set({ intervalSec: v })} /></Field>
+          : <Field label="Line width"><NumberInput value={layer.width} step={0.5} min={0.5} max={20} unit="px" onChange={(v) => set({ width: v })} /></Field>}
+        <Field label="Unit">
+          <Select value={layer.labelUnit} onChange={(e) => set({ labelUnit: e.target.value })}>
+            <option value="km">Kilometres</option>
+            <option value="mi">Miles</option>
+          </Select>
+        </Field>
+      </div>
+      <Slider label="Fill tint" value={layer.fillOpacity} min={0} max={0.5} onChange={(v) => set({ fillOpacity: v })} />
+      <div className="grid grid-cols-2 gap-2">
+        <Toggle label="Distance labels" checked={layer.showLabels} onChange={(v) => set({ showLabels: v })} />
+        <Toggle label="Dashed" checked={layer.dashed} onChange={(v) => set({ dashed: v })} />
+      </div>
+      <Toggle label="Centre dot" checked={layer.centerDot} onChange={(v) => set({ centerDot: v })} />
+    </Advanced>
   </Section>
 );
 
@@ -1904,29 +1908,31 @@ const TimestampFields: React.FC<{ layer: Extract<Layer, { type: "timestamp" }>; 
     {layer.mode === "fixed" && (
       <Field label="Text"><Input value={layer.fixedText} onChange={(e) => set({ fixedText: e.target.value })} placeholder="MARCH 1944" /></Field>
     )}
-    <div className="grid grid-cols-2 gap-2">
-      <Field label="Position">
-        <Select value={layer.position} onChange={(e) => set({ position: e.target.value })}>
-          <option value="top-left">Top left</option>
-          <option value="top-center">Top centre</option>
-          <option value="top-right">Top right</option>
-          <option value="bottom-left">Bottom left</option>
-          <option value="bottom-center">Bottom centre</option>
-          <option value="bottom-right">Bottom right</option>
-        </Select>
-      </Field>
-      <Field label="Style">
-        <Select value={layer.style} onChange={(e) => set({ style: e.target.value })}>
-          <option value="chip">Chip (glass badge)</option>
-          <option value="minimal">Minimal (bare text)</option>
-        </Select>
-      </Field>
-    </div>
-    <Slider label="Size" value={layer.sizeVh} min={1} max={14} onChange={(v) => set({ sizeVh: v })} format={(v) => `${v.toFixed(1)}vh`} />
-    <div className="grid grid-cols-2 gap-2">
-      <Field label="Text colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
-      <Field label="Accent dot"><ColorInput value={layer.accent} onChange={(v) => set({ accent: v })} /></Field>
-    </div>
+    <Advanced label="Placement & style">
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Position">
+          <Select value={layer.position} onChange={(e) => set({ position: e.target.value })}>
+            <option value="top-left">Top left</option>
+            <option value="top-center">Top centre</option>
+            <option value="top-right">Top right</option>
+            <option value="bottom-left">Bottom left</option>
+            <option value="bottom-center">Bottom centre</option>
+            <option value="bottom-right">Bottom right</option>
+          </Select>
+        </Field>
+        <Field label="Style">
+          <Select value={layer.style} onChange={(e) => set({ style: e.target.value })}>
+            <option value="chip">Chip (glass badge)</option>
+            <option value="minimal">Minimal (bare text)</option>
+          </Select>
+        </Field>
+      </div>
+      <Slider label="Size" value={layer.sizeVh} min={1} max={14} onChange={(v) => set({ sizeVh: v })} format={(v) => `${v.toFixed(1)}vh`} />
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Text colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
+        <Field label="Accent dot"><ColorInput value={layer.accent} onChange={(v) => set({ accent: v })} /></Field>
+      </div>
+    </Advanced>
   </Section>
 );
 
