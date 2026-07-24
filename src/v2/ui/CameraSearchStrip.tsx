@@ -68,7 +68,6 @@ export const CameraSearchStrip: React.FC = () => {
           </div>
         )}
       </div>
-      <span className="hidden text-[11px] text-graphite-muted/70 sm:block">Turn the ring to rotate · drag the bars to tilt & zoom · drag the map to pan</span>
     </div>
   );
 };
