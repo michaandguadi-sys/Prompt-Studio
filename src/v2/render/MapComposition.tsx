@@ -638,6 +638,17 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
           const tileSig = `${dsId}-${matrix}-${fmt}-${isStatic ? "s" : date}`.replace(/[^a-z0-9]/gi, "").slice(-42);
           const srcId = `gibs-${l.id}-${tileSig}`;
           const lyrId = `gibs-lyr-${l.id}-${tileSig}`;
+          // Blend "looks" from real raster paint props (MapLibre has no true blend
+          // mode). screen → brighter/desaturated-lift (night lights, fires on dark);
+          // multiply → darker/contrasty (data over a light style); vivid → punchy.
+          const BLENDS: Record<string, any> = {
+            normal:   {},
+            vivid:    { "raster-saturation": 0.5, "raster-contrast": 0.25 },
+            screen:   { "raster-brightness-min": 0.18, "raster-contrast": 0.12, "raster-saturation": 0.15 },
+            multiply: { "raster-brightness-max": 0.78, "raster-contrast": 0.35, "raster-saturation": 0.2 },
+            ghost:    { "raster-saturation": -0.4, "raster-contrast": -0.1 },
+          };
+          const blendPaint = BLENDS[el.blend ?? "normal"] ?? {};
           // Compare layer: cross-fade between two earth states (before / after).
           // The "before" layer fades IN (inverse opacity) as the "after" fades OUT,
           // creating a smooth temporal transition driven by the timing system.
@@ -657,7 +668,7 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
               {/* beforeId → the raster paints OVER the style's land/water but UNDER
                   its borders, labels, grid and relief, so a chosen map style stays
                   fully legible layered on top of the real-world NASA imagery. */}
-              <MapLayer id={lyrId} type="raster" source={srcId} beforeId={firstSymbolId} paint={{ "raster-opacity": opacity, "raster-fade-duration": 0 }} />
+              <MapLayer id={lyrId} type="raster" source={srcId} beforeId={firstSymbolId} paint={{ "raster-opacity": opacity, "raster-fade-duration": 0, ...blendPaint }} />
               {cUrl && cmpOpacity > 0.005 && (
                 <>
                   <Source id={cSrcId} type="raster" tiles={[cUrl]} tileSize={256} minzoom={0} maxzoom={cMz} />

@@ -1329,7 +1329,18 @@ const EarthLayerFields: React.FC<{ layer: any; set: (p: Record<string, unknown>)
           ))}
         </Select>
       </Field>
-      <Slider label="Opacity" hint="blend with your map style" value={layer.opacity ?? 0.9} min={0} max={1} step={0.02} onChange={(v) => set({ opacity: v })} format={(v) => `${Math.round(v * 100)}%`} />
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Opacity"><NumberInput value={Math.round((layer.opacity ?? 0.9) * 100)} step={5} min={0} max={100} unit="%" onChange={(v) => set({ opacity: v / 100 })} /></Field>
+        <Field label="Blend" hint="how it sits on your style">
+          <Select value={layer.blend ?? "normal"} onChange={(e) => set({ blend: e.target.value })}>
+            <option value="normal">Normal</option>
+            <option value="vivid">Vivid (punchy)</option>
+            <option value="screen">Screen (glow on dark)</option>
+            <option value="multiply">Multiply (deepen on light)</option>
+            <option value="ghost">Ghost (subtle)</option>
+          </Select>
+        </Field>
+      </div>
       <div className="grid grid-cols-2 gap-2">
         {isStatic ? (
           <Field label="Date" hint="seamless — no date"><div className="rounded-lg border border-line bg-paper-50 px-3 py-2 text-[12px] text-graphite/45">Timeless</div></Field>

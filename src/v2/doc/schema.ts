@@ -477,6 +477,11 @@ export const EarthLayer = z.object({
   /** True for time-invariant layers (Blue Marble, Black Marble city lights) — the
    *  GIBS URL then omits the date segment. Dated layers leave this false. */
   staticTime: z.boolean().default(false),
+  /** How the data blends onto the map beneath it. MapLibre rasters have no true
+   *  blend-mode, so these are art-directed looks built from raster paint props
+   *  (saturation/contrast/brightness) — "screen" brightens (great for night
+   *  lights/fires on a dark style), "multiply" deepens over light styles. */
+  blend: z.enum(["normal", "vivid", "screen", "multiply", "ghost"]).default("normal"),
   /** Animated max opacity (0–1). The timing controls fade-in/out on top of this. */
   opacity: z.number().min(0).max(1).default(0.75),
   /** Human-readable label shown as an in-map legend chip. */

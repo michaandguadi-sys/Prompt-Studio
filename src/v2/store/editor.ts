@@ -63,6 +63,9 @@ type EditorState = {
   clearTrack: (id: string, prop: string, value?: number) => void;
   /** Jump the playhead to the next/prev keyframe of `prop` (−1 prev, +1 next). */
   gotoKeyframe: (id: string, prop: string, dir: -1 | 1) => void;
+  /** Move a keyframe (identified by its current time `fromT`) to a new time on
+   *  the timeline — powers dragging a diamond in the keyframe lane. */
+  moveKeyframe: (id: string, prop: string, fromT: number, toT: number) => void;
   patchComposition: (patch: Partial<Composition>) => void;
   /** Change the scene duration AND proportionally rescale every layer's timing
    *  (in/out points, narration beats, choreography spans) so the whole film
@@ -273,6 +276,18 @@ export const useEditor = create<EditorState>()(
           const { [prop]: _drop, ...rest } = l.tracks;
           l.tracks = rest;
           if (typeof value === "number") l[prop] = value; // freeze on the last-seen value
+        }),
+
+        moveKeyframe: (id, prop, fromT, toT) => commit((p) => {
+          const l = p.composition.layers.find((x) => x.id === id) as any;
+          const track = l?.tracks?.[prop] as { t: number; value: number; ease: string }[] | undefined;
+          if (!track?.length) return;
+          const next = track.map((k) => k);
+          let best = 0, bestD = Infinity;
+          next.forEach((k, i) => { const d = Math.abs(k.t - fromT); if (d < bestD) { bestD = d; best = i; } });
+          next[best] = { ...next[best], t: Math.min(1, Math.max(0, toT)) };
+          next.sort((a, b) => a.t - b.t);
+          l.tracks = { ...l.tracks, [prop]: next };
         }),
 
         gotoKeyframe: (id, prop, dir) => {
