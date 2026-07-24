@@ -7,7 +7,7 @@ import { recordTaste } from "@/lib/taste";
 import { createLayer } from "../doc/factory";
 import { MAP3D_STYLES, map3dStyleById } from "@/lib/presets/map3dStyles";
 import { PRO_MAP_STYLES, elementPaletteFor } from "@/lib/presets/proMapStyles";
-import { EARTH_PRESETS, earthLayerOverrides, type EarthPreset } from "@/lib/presets/earthLayers";
+import { EARTH_PRESETS, EARTH_CATEGORIES, earthLayerOverrides, type EarthPreset } from "@/lib/presets/earthLayers";
 import { loadGoogleKey } from "./SettingsModal";
 
 /** The colour patch a style's palette applies to each overlay element, so
@@ -141,13 +141,18 @@ export const MapStyleGallery: React.FC = () => {
           predictable height no matter how many looks ship. */}
       <div className="grid max-h-[44vh] grid-cols-2 gap-2 overflow-y-auto pr-0.5">
         {tab === "pro" && PRO_MAP_STYLES.map((s) => <StyleCard key={s.id} s={s} on={activeId === s.id} onApply={apply} />)}
-        {tab === "earth" && LIVE_EARTH.map((le) => (
-          <StyleCard
-            key={le.key}
-            s={{ id: le.key, name: le.name, tagline: le.tagline, swatches: le.swatches }}
-            on={layers.some((l) => l.type === "earthlayer" && (l as any).datasetId === le.cfg.datasetId)}
-            onApply={() => applyLiveEarth(le)}
-          />
+        {tab === "earth" && EARTH_CATEGORIES.map((cat) => (
+          <React.Fragment key={cat}>
+            <div className="col-span-2 mt-1.5 text-[9.5px] font-semibold uppercase tracking-[0.16em] text-graphite/40 first:mt-0">{cat}</div>
+            {LIVE_EARTH.filter((le) => le.category === cat).map((le) => (
+              <StyleCard
+                key={le.key}
+                s={{ id: le.key, name: le.name, tagline: le.tagline, swatches: le.swatches }}
+                on={layers.some((l) => l.type === "earthlayer" && (l as any).datasetId === le.cfg.datasetId)}
+                onApply={() => applyLiveEarth(le)}
+              />
+            ))}
+          </React.Fragment>
         ))}
         {tab === "creative" && MAP3D_STYLES.map((s) => <StyleCard key={s.id} s={s} on={activeId === s.id} onApply={apply} />)}
       </div>

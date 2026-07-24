@@ -629,8 +629,15 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
           const date = resolveEarthDate(el.date);
           const timeSeg = isStatic ? "" : `/${date}`;
           const tileUrl = `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${dsId}/default${timeSeg}/${matrix}/{z}/{y}/{x}.${fmt}`;
-          const srcId = `gibs-${l.id}`;
-          const lyrId = `gibs-lyr-${l.id}`;
+          // The source id encodes the tile params. A raster Source is immutable
+          // once created — if the id stayed constant, switching dataset/date only
+          // changed the URL string and MapLibre kept serving the OLD tiles (the
+          // "doesn't update when I pick a different type" bug). A params-derived
+          // id makes react-map-gl drop the stale source and mount a fresh one, so
+          // every selection reloads instantly.
+          const tileSig = `${dsId}-${matrix}-${fmt}-${isStatic ? "s" : date}`.replace(/[^a-z0-9]/gi, "").slice(-42);
+          const srcId = `gibs-${l.id}-${tileSig}`;
+          const lyrId = `gibs-lyr-${l.id}-${tileSig}`;
           // Compare layer: cross-fade between two earth states (before / after).
           // The "before" layer fades IN (inverse opacity) as the "after" fades OUT,
           // creating a smooth temporal transition driven by the timing system.

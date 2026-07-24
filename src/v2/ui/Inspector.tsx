@@ -7,7 +7,7 @@ import { Field, Input, NumberInput, Select, Section, Slider, Toggle, SegTabs, Ad
 import { confirmDialog, promptDialog } from "./dialogs";
 import { MapStyleGallery } from "./Map3DStyleModal";
 import { KfSlider } from "./KfControl";
-import { EARTH_PRESETS, EARTH_DATE_OPTIONS } from "@/lib/presets/earthLayers";
+import { EARTH_PRESETS, EARTH_CATEGORIES, EARTH_DATE_OPTIONS } from "@/lib/presets/earthLayers";
 import { ColorInput } from "@/components/ui/ColorInput";
 import { ColorWheel } from "./ColorWheel";
 import { PlaceSearch } from "@/components/MapBuilder/PlaceSearch";
@@ -1320,7 +1320,13 @@ const EarthLayerFields: React.FC<{ layer: any; set: (p: Record<string, unknown>)
           const p = EARTH_PRESETS.find((d) => d.cfg.datasetId === e.target.value);
           if (p) set({ ...p.cfg, name: p.name, date: p.cfg.staticTime ? "" : "latest", opacity: p.opacity });
         }}>
-          {EARTH_PRESETS.map((p) => <option key={p.key} value={p.cfg.datasetId}>{p.name} — {p.tagline}</option>)}
+          {EARTH_CATEGORIES.map((cat) => (
+            <optgroup key={cat} label={cat}>
+              {EARTH_PRESETS.filter((p) => p.category === cat).map((p) => (
+                <option key={p.key} value={p.cfg.datasetId}>{p.name} — {p.tagline}</option>
+              ))}
+            </optgroup>
+          ))}
         </Select>
       </Field>
       <Slider label="Opacity" hint="blend with your map style" value={layer.opacity ?? 0.9} min={0} max={1} step={0.02} onChange={(v) => set({ opacity: v })} format={(v) => `${Math.round(v * 100)}%`} />
