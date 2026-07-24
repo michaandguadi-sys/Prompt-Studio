@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, GripVertical } from "lucide-react";
 
 /** Polished form primitives for the v2 editor — token-themed, soft + tactile. */
 
@@ -53,9 +53,45 @@ export const NumberInput: React.FC<{
   };
   const bounded = min != null && max != null && !noSlider;
   const pct = bounded ? ((clamp(value) - (min as number)) / ((max as number) - (min as number) || 1)) * 100 : 0;
+
+  // Scrubby drag (Figma/Blender): grab the grip and drag horizontally to change
+  // the value — bounded fields span their full range across ~one field width,
+  // unbounded step per 3px. Shift = fine (×0.25). Snaps to `step`, never fights
+  // typing (separate zone). Round to the step's precision to avoid float dust.
+  const dec = step < 1 ? (String(step).split(".")[1]?.length ?? 0) : 0;
+  const range = min != null && max != null ? (max as number) - (min as number) : null;
+  const scrub = (e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    setText(null);
+    const startX = e.clientX;
+    const startVal = value;
+    const perPx = range != null ? range / 240 : step / 3;
+    const move = (ev: PointerEvent) => {
+      const dx = ev.clientX - startX;
+      let v = startVal + dx * perPx * (ev.shiftKey ? 0.25 : 1);
+      v = Number((Math.round(v / step) * step).toFixed(dec));
+      onChange(clamp(v));
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
   return (
     <div>
       <div className="flex items-center rounded-lg border border-line bg-paper-50 transition-all duration-150 hover:border-graphite/25 focus-within:border-iris/70 focus-within:ring-[3px] focus-within:ring-iris/15">
+        <span
+          onPointerDown={scrub}
+          title="Drag to scrub · hold Shift for fine control"
+          className="flex shrink-0 cursor-ew-resize touch-none select-none items-center self-stretch pl-1.5 pr-0.5 text-graphite-muted/35 transition-colors hover:text-iris"
+        >
+          <GripVertical size={13} />
+        </span>
         <input
           type="number"
           value={text ?? String(value)}
@@ -66,7 +102,7 @@ export const NumberInput: React.FC<{
             if (e.target.value !== "" && !Number.isNaN(v)) onChange(clamp(v));
           }}
           onBlur={() => setText(null)}
-          className="w-full bg-transparent px-3 py-2 text-[13px] tabular-nums text-graphite focus:outline-none"
+          className="w-full bg-transparent py-2 pl-1 pr-3 text-[13px] tabular-nums text-graphite focus:outline-none"
         />
         {unit && <span className="pr-3 text-[11px] font-medium text-graphite-muted">{unit}</span>}
       </div>
