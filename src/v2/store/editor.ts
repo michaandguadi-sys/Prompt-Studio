@@ -82,6 +82,14 @@ type EditorState = {
   clearCameraKeys: () => void;
   /** Jump the playhead to the next/prev camera keyframe (−1 prev, +1 next). */
   gotoCameraKey: (dir: -1 | 1) => void;
+  /** Upsert a camera keyframe at an ARBITRARY time (timeline Option-click add). */
+  setCameraKeyAt: (t: number, pose: CameraPose, ease?: KfEase) => void;
+  /** Delete the camera keyframe nearest `t` (timeline Delete key). */
+  deleteCameraKeyAt: (t: number) => void;
+  /** Upsert a property keyframe at an arbitrary time (timeline Option-click add). */
+  addKeyframeAt: (id: string, prop: string, t: number, value: number) => void;
+  /** Delete the property keyframe nearest `t` (timeline Delete key). */
+  deleteKeyframeAt: (id: string, prop: string, t: number) => void;
 
   patchComposition: (patch: Partial<Composition>) => void;
   /** Change the scene duration AND proportionally rescale every layer's timing
@@ -372,6 +380,61 @@ export const useEditor = create<EditorState>()(
           const target = dir > 0 ? frames.find((f: number) => f > cur + 0.5) : [...frames].reverse().find((f: number) => f < cur - 0.5);
           if (target != null) { st.setPlayheadFrame(target); st.requestSeek?.(target); }
         },
+
+        setCameraKeyAt: (t, pose, ease = "smooth") => commit((p) => {
+          const cam = p.composition.layers.find((x) => x.type === "camera") as any;
+          if (!cam) return;
+          const tf = Math.max(1, Math.round((p.composition.durationSec || 1) * (p.composition.fps || 30)));
+          const eps = 0.75 / Math.max(1, tf - 1);
+          const clean = {
+            lon: pose.lon,
+            lat: Math.min(85, Math.max(-85, pose.lat)),
+            zoom: Math.min(22, Math.max(0, pose.zoom)),
+            pitch: Math.min(85, Math.max(0, pose.pitch)),
+            bearing: ((pose.bearing % 360) + 360) % 360,
+          };
+          const tc = Math.min(1, Math.max(0, t));
+          const keys = Array.isArray(cam.keys) ? [...cam.keys] : [];
+          const i = keys.findIndex((k: any) => Math.abs(k.t - tc) < eps);
+          if (i >= 0) keys[i] = { ...keys[i], pose: clean };
+          else keys.push({ t: tc, pose: clean, ease });
+          keys.sort((a: any, b: any) => a.t - b.t);
+          cam.keys = keys;
+        }),
+
+        deleteCameraKeyAt: (t) => commit((p) => {
+          const cam = p.composition.layers.find((x) => x.type === "camera") as any;
+          if (!cam?.keys?.length) return;
+          let best = 0, bestD = Infinity;
+          cam.keys.forEach((k: any, i: number) => { const d = Math.abs(k.t - t); if (d < bestD) { bestD = d; best = i; } });
+          cam.keys = cam.keys.filter((_: any, i: number) => i !== best);
+        }),
+
+        addKeyframeAt: (id, prop, t, value) => commit((p) => {
+          const l = p.composition.layers.find((x) => x.id === id) as any;
+          if (!l) return;
+          if (!l.tracks) l.tracks = {};
+          const tf = Math.max(1, Math.round((p.composition.durationSec || 1) * (p.composition.fps || 30)));
+          const eps = 0.75 / Math.max(1, tf - 1);
+          const tc = Math.min(1, Math.max(0, t));
+          const track = l.tracks[prop] ? [...l.tracks[prop]] : [];
+          const i = track.findIndex((k: any) => Math.abs(k.t - tc) < eps);
+          if (i >= 0) track[i] = { ...track[i], value };
+          else track.push({ t: tc, value, ease: "smooth" });
+          track.sort((a: any, b: any) => a.t - b.t);
+          l.tracks = { ...l.tracks, [prop]: track };
+        }),
+
+        deleteKeyframeAt: (id, prop, t) => commit((p) => {
+          const l = p.composition.layers.find((x) => x.id === id) as any;
+          const track = l?.tracks?.[prop] as { t: number }[] | undefined;
+          if (!track?.length) return;
+          let best = 0, bestD = Infinity;
+          track.forEach((k, i) => { const d = Math.abs(k.t - t); if (d < bestD) { bestD = d; best = i; } });
+          const next = track.filter((_, i) => i !== best);
+          if (next.length) l.tracks = { ...l.tracks, [prop]: next };
+          else { const { [prop]: _drop, ...rest } = l.tracks; l.tracks = rest; }
+        }),
 
         gotoKeyframe: (id, prop, dir) => {
           const st = get();
