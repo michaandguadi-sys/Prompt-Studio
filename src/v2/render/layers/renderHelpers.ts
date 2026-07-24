@@ -9,12 +9,18 @@ import { linearChain } from "../../../lib/interp";
 export let LIVE_ZOOM = 8;
 export let LIVE_FRAME = 0;
 export let LIVE_TOTAL = 1;
+/** The exact camera pose the preview is showing at the current frame — written
+ *  every render, read by the "Adjust camera" gizmo so a fresh keyframe seeds
+ *  from whatever the camera is doing right now (any director: camera/route/…). */
+export let LIVE_POSE: CameraPose = { lon: 0, lat: 20, zoom: 3, pitch: 0, bearing: 0 };
 
 export function updateLiveState(zoom: number, frame: number, total: number) {
   LIVE_ZOOM = zoom;
   LIVE_FRAME = frame;
   LIVE_TOTAL = total;
 }
+export function updateLivePose(p: CameraPose) { LIVE_POSE = p; }
+export function getLivePose(): CameraPose { return LIVE_POSE; }
 
 /* ── Theme (fonts) propagation ──────────────────────────────────────────────── */
 export const DEFAULT_THEME: Theme = { name: "Default", accent: "#6E7BFF", fill: "#6E7BFF", border: "#6E7BFF", glow: "#6E7BFF", text: "#ffffff", fontDisplay: "Inter", fontBody: "Inter" };
@@ -179,6 +185,46 @@ function pathPose(cam: CameraLayer, progress: number, reverse = false): CameraPo
       : linearChain(vals, progress);
   };
   return { lon: pick("lon"), lat: pick("lat"), zoom: pick("zoom"), pitch: pick("pitch"), bearing: pick("bearing") };
+}
+
+/** Does this camera have explicit time-based keyframes driving it? */
+export function hasCamKeys(cam?: CameraLayer | null): boolean {
+  return !!cam && Array.isArray((cam as any).keys) && (cam as any).keys.length > 0;
+}
+
+const kfEase = (ease: string, t: number): number => {
+  switch (ease) {
+    case "linear": return t;
+    case "easeIn": return t * t;
+    case "easeOut": return t * (2 - t);
+    case "hold": return 0; // step: hold this key's pose until the next
+    default: return t * t * (3 - 2 * t); // "smooth" (ease-in-out)
+  }
+};
+
+/**
+ * Sample the camera pose from explicit time-based keyframes at scene-time `t`
+ * (0..1) — the Earth-Studio model. Interpolates between the two surrounding
+ * keys with the earlier key's easing; bearing takes the shortest arc; before
+ * the first / after the last key it holds. Assumes ≥1 key (see hasCamKeys).
+ */
+export function keyframedPose(cam: CameraLayer, t: number): CameraPose {
+  const keys = [...(cam as any).keys as { t: number; pose: CameraPose; ease: string }[]].sort((a, b) => a.t - b.t);
+  if (keys.length === 0) return poseAt(cam, t); // safety — caller should guard
+  if (keys.length === 1 || t <= keys[0].t) return { ...keys[0].pose };
+  if (t >= keys[keys.length - 1].t) return { ...keys[keys.length - 1].pose };
+  let i = 0;
+  while (i < keys.length - 1 && t > keys[i + 1].t) i++;
+  const a = keys[i], b = keys[i + 1];
+  const span = Math.max(1e-6, b.t - a.t);
+  const e = kfEase(a.ease, clampN((t - a.t) / span, 0, 1));
+  return {
+    lon: lerp(a.pose.lon, b.pose.lon, e),
+    lat: lerp(a.pose.lat, b.pose.lat, e),
+    zoom: lerp(a.pose.zoom, b.pose.zoom, e),
+    pitch: lerp(a.pose.pitch, b.pose.pitch, e),
+    bearing: shortestBearingLerp(a.pose.bearing, b.pose.bearing, e),
+  };
 }
 
 export function poseAt(cam: CameraLayer, p: number): CameraPose {

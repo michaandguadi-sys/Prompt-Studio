@@ -10,7 +10,8 @@ import { useEditor } from "../store/editor";
 import { useTier } from "@/hooks/useTier";
 import { PreviewOverlay } from "./PreviewOverlay";
 import { LayerHalo } from "./LayerHalo";
-import { CameraStage } from "./CameraStage";
+import { CameraGizmo } from "./CameraGizmo";
+import { CameraSearchStrip } from "./CameraSearchStrip";
 
 type SafeZoneMode = "off" | "title" | "social";
 const SAFEZONE_KEY = "mapanisy-safezones";
@@ -43,9 +44,10 @@ export const Canvas: React.FC = () => {
   });
   useEffect(() => { localStorage.setItem(SAFEZONE_KEY, safeZones); }, [safeZones]);
 
-  // "Adjust camera" — swaps the non-interactive Player for a live, orbitable map
-  // where the creator frames the shot directly (scroll/drag/tilt), then captures
-  // the view into the camera layer's Start/End poses. See CameraStage.
+  // "Adjust camera" — overlays the LIVE preview with the camera gizmo (compass
+  // ring, tilt/zoom bars, drag-to-pan). Framing the shot and pressing Add
+  // keyframe pins a full camera pose at the playhead; scrub + adjust + add
+  // another and the camera animates between them. See CameraGizmo.
   const [cameraEdit, setCameraEdit] = useState(false);
 
   // Click-to-select on the preview: geometric hit-test against rendered overlay
@@ -132,6 +134,14 @@ export const Canvas: React.FC = () => {
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center" aria-hidden>
           <div className="h-[55%] w-[66%] rounded-full opacity-60 blur-[120px]" style={{ background: "radial-gradient(circle, rgba(110,123,255,0.12), transparent 70%)" }} />
         </div>
+
+        {/* Camera-mode search — ABOVE the preview window, never floating on the map. */}
+        {cameraEdit && !playStory && (
+          <div className="absolute left-1/2 top-2 z-20 -translate-x-1/2">
+            <CameraSearchStrip />
+          </div>
+        )}
+
         <div
           ref={stageRef}
           onPointerDown={pickAt}
@@ -164,8 +174,6 @@ export const Canvas: React.FC = () => {
               spaceKeyToPlayOrPause={false}
               style={{ width: "100%", height: "100%", background: "#000", display: "block" }}
             />
-          ) : cameraEdit ? (
-            <CameraStage onExit={() => setCameraEdit(false)} />
           ) : (
             <>
               <Player
@@ -184,11 +192,19 @@ export const Canvas: React.FC = () => {
                 spaceKeyToPlayOrPause={false}
                 style={{ width: "100%", height: "100%", background: "#000", display: "block" }}
               />
-              {/* Direct-manipulation handles only make sense while editing one scene. */}
-              <PreviewOverlay containerRef={stageRef} />
-              {/* The Halo — contextual quick-actions blooming at the selected element. */}
-              <LayerHalo containerRef={stageRef} />
-              {safeZones !== "off" && <SafeZoneGuides mode={safeZones} vertical={comp.aspect === "9:16"} />}
+              {/* Camera mode overlays the LIVE player with the gizmo; element
+                  handles + guides step aside so only the camera controls show. */}
+              {cameraEdit ? (
+                <CameraGizmo onExit={() => setCameraEdit(false)} />
+              ) : (
+                <>
+                  {/* Direct-manipulation handles only make sense while editing one scene. */}
+                  <PreviewOverlay containerRef={stageRef} />
+                  {/* The Halo — contextual quick-actions blooming at the selected element. */}
+                  <LayerHalo containerRef={stageRef} />
+                  {safeZones !== "off" && <SafeZoneGuides mode={safeZones} vertical={comp.aspect === "9:16"} />}
+                </>
+              )}
             </>
           )}
         </div>

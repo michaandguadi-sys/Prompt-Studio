@@ -137,6 +137,19 @@ export const CameraLayer = z.object({
   moveFraction: z.number().min(0.1).max(1).default(0.85),
   easing: Easing.default("easeInOut"),
   smoothPath: z.boolean().default(true),
+  /**
+   * Explicit TIME-BASED camera keyframes (Google-Earth-Studio model): a full
+   * pose pinned at time `t` (0..1 of the scene). When `keys` has ≥1 entry it
+   * DRIVES the camera — the render samples the pose from these keyframes
+   * (interpolating between consecutive keys with each key's `ease`), overriding
+   * the style/start/end/waypoints scheduler. Empty = classic auto camera.
+   * Set live in the preview via the "Adjust camera" gizmo.
+   */
+  keys: z.array(z.object({
+    t: z.number().min(0).max(1),
+    pose: CameraPose,
+    ease: KfEase.default("smooth"),
+  })).default([]),
 });
 
 // ── Layer: Highlight (country / region / custom polygon) ─────────────────────

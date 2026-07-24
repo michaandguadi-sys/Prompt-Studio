@@ -8,6 +8,7 @@ import Map, { MapRef, Source, Layer as MapLayer } from "react-map-gl/maplibre";
 import { LngLat } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { resolveMapStyle, demSource, ML_TERRAIN_SOURCE_ID, isDarkStyle, applyBasemapIdentity } from "@/lib/maplibre";
+import { previewMapBridge } from "./previewMapBridge";
 import { resolveEarthDate } from "@/lib/presets/earthLayers";
 import { safeInterpolate, easings, catmullRomChain, linearChain } from "@/lib/interp";
 import { centroidOf } from "@/lib/geo";
@@ -32,7 +33,7 @@ function readGoogleKey(): string {
 }
 
 import {
-  DEFAULT_THEME, ThemeCtx, updateLiveState, poseAt, highlightPose,
+  DEFAULT_THEME, ThemeCtx, updateLiveState, updateLivePose, poseAt, keyframedPose, hasCamKeys, highlightPose,
   followRoutePose, trackPose,
   sanitizePose, routeTravel, flagIsoOf, clampN,
   HighlightSource, HighlightLabel, HighlightHitArea,
@@ -121,8 +122,15 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
   // the scene-level easing curve as their tween.
   const multiStop = (camera?.waypoints?.length ?? 0) >= 1;
   const p = multiStop ? rawP : ease(rawP);
+  // ABSOLUTE scene progress (0..1 across the whole timeline) — camera keyframes
+  // are pinned to real timeline positions, not the moveFraction-scaled window.
+  const pAbs = totalFrames > 1 ? clampN(frame / (totalFrames - 1), 0, 1) : 0;
   let pose: CameraPose;
-  if (director?.type === "route") {
+  if (hasCamKeys(camera)) {
+    // Explicit camera keyframes WIN over any director's auto-framing — the
+    // creator has hand-directed the move in the viewfinder.
+    pose = keyframedPose(camera as CameraLayer, pAbs);
+  } else if (director?.type === "route") {
     // Lock the camera to the route's OWN travel progress (not the camera ease),
     // so the framing, the drawn line head, and the vehicle move as one.
     const travel = routeTravel(director, frame, fps, totalFrames);
@@ -140,6 +148,7 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
   // camera envelope so the map can never receive a singular transform.
   pose = sanitizePose(pose);
   updateLiveState(pose.zoom, frame, totalFrames);
+  updateLivePose(pose); // share the exact displayed pose with the camera gizmo
 
   // Force the live Mapbox transform to EXACTLY this frame's pose *before* any
   // overlay projects lon/lat → screen. Without this, react-map-gl applies the
@@ -161,6 +170,13 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
   const [tilesHandle] = useState<number | null>(() =>
     isRendering ? delayRender("v2 map tiles", { timeoutInMilliseconds: 90000 }) : null);
   const released = useRef(false);
+
+  // Release the camera-gizmo bridge when the preview unmounts (aspect switch,
+  // scene change, story mode) so the gizmo never drives a dead map instance.
+  useEffect(() => {
+    if (isRendering) return;
+    return () => previewMapBridge.register(null);
+  }, [isRendering]);
 
   // Photoreal 3D (Google Earth) — preview-only, gated on a BYO Google Maps key.
   // Key from Settings (browser) OR, in the headless render, from a render prop.
@@ -587,6 +603,9 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
           if (m) {
             (m as any).setMaxTileCacheSize?.(8192);
             (m as any).setMaxParallelImageRequests?.(64);
+            // Expose the on-screen preview map to the camera gizmo (never the
+            // headless render worker — it must not be driven by UI).
+            if (!isRendering) previewMapBridge.register(m as any);
           }
           if (m?.areTilesLoaded?.()) release();
         }}

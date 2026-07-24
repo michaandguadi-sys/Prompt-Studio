@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Project, Layer, LayerType, Composition, Timing, Theme, Scene } from "../doc/schema";
+import type { Project, Layer, LayerType, Composition, Timing, Theme, Scene, CameraPose, KfEase } from "../doc/schema";
 import { safeParseProject } from "../doc/schema";
 import { createLayer, createDefaultProject } from "../doc/factory";
 import { recolorLayer } from "../doc/themes";
@@ -66,6 +66,23 @@ type EditorState = {
   /** Move a keyframe (identified by its current time `fromT`) to a new time on
    *  the timeline — powers dragging a diamond in the keyframe lane. */
   moveKeyframe: (id: string, prop: string, fromT: number, toT: number) => void;
+
+  // ── Camera keyframes (the "Adjust camera" viewfinder / Earth-Studio move) ──
+  /** Upsert a full camera pose keyframe at the current playhead time. If a key
+   *  already sits at the playhead it's replaced; otherwise a new one is inserted
+   *  (kept sorted). This is what the gizmo calls on every drag + Add-keyframe. */
+  setCameraKeyAtPlayhead: (pose: CameraPose, ease?: KfEase) => void;
+  /** Remove the camera keyframe at the current playhead (if any). */
+  deleteCameraKeyAtPlayhead: () => void;
+  /** Retime a camera keyframe (drag its diamond) from `fromT` to `toT`. */
+  moveCameraKey: (fromT: number, toT: number) => void;
+  /** Set the easing out of the camera keyframe governing the playhead. */
+  setCameraKeyEaseAtPlayhead: (ease: KfEase) => void;
+  /** Drop ALL camera keyframes (back to the classic auto/style camera). */
+  clearCameraKeys: () => void;
+  /** Jump the playhead to the next/prev camera keyframe (−1 prev, +1 next). */
+  gotoCameraKey: (dir: -1 | 1) => void;
+
   patchComposition: (patch: Partial<Composition>) => void;
   /** Change the scene duration AND proportionally rescale every layer's timing
    *  (in/out points, narration beats, choreography spans) so the whole film
@@ -289,6 +306,72 @@ export const useEditor = create<EditorState>()(
           next.sort((a, b) => a.t - b.t);
           l.tracks = { ...l.tracks, [prop]: next };
         }),
+
+        // ── Camera keyframes (Earth-Studio move: a full pose pinned at time t) ──
+        setCameraKeyAtPlayhead: (pose, ease = "smooth") => commit((p) => {
+          const cam = p.composition.layers.find((x) => x.type === "camera") as any;
+          if (!cam) return;
+          const { t, eps } = playheadT(p, get().playheadFrame);
+          const clean = {
+            lon: pose.lon,
+            lat: Math.min(85, Math.max(-85, pose.lat)),
+            zoom: Math.min(22, Math.max(0, pose.zoom)),
+            pitch: Math.min(85, Math.max(0, pose.pitch)),
+            bearing: ((pose.bearing % 360) + 360) % 360,
+          };
+          const keys = Array.isArray(cam.keys) ? [...cam.keys] : [];
+          const i = keys.findIndex((k: any) => Math.abs(k.t - t) < eps);
+          if (i >= 0) keys[i] = { ...keys[i], pose: clean }; // update in place at this time
+          else keys.push({ t, pose: clean, ease });
+          keys.sort((a: any, b: any) => a.t - b.t);
+          cam.keys = keys;
+        }),
+
+        deleteCameraKeyAtPlayhead: () => commit((p) => {
+          const cam = p.composition.layers.find((x) => x.type === "camera") as any;
+          if (!cam?.keys?.length) return;
+          const { t, eps } = playheadT(p, get().playheadFrame);
+          cam.keys = cam.keys.filter((k: any) => Math.abs(k.t - t) >= eps);
+        }),
+
+        moveCameraKey: (fromT, toT) => commit((p) => {
+          const cam = p.composition.layers.find((x) => x.type === "camera") as any;
+          if (!cam?.keys?.length) return;
+          const keys = cam.keys.map((k: any) => k);
+          let best = 0, bestD = Infinity;
+          keys.forEach((k: any, i: number) => { const d = Math.abs(k.t - fromT); if (d < bestD) { bestD = d; best = i; } });
+          keys[best] = { ...keys[best], t: Math.min(1, Math.max(0, toT)) };
+          keys.sort((a: any, b: any) => a.t - b.t);
+          cam.keys = keys;
+        }),
+
+        setCameraKeyEaseAtPlayhead: (ease) => commit((p) => {
+          const cam = p.composition.layers.find((x) => x.type === "camera") as any;
+          if (!cam?.keys?.length) return;
+          const { t } = playheadT(p, get().playheadFrame);
+          let idx = 0;
+          for (let i = 0; i < cam.keys.length; i++) if (cam.keys[i].t <= t + 1e-6) idx = i;
+          const keys = [...cam.keys];
+          keys[idx] = { ...keys[idx], ease };
+          cam.keys = keys;
+        }),
+
+        clearCameraKeys: () => commit((p) => {
+          const cam = p.composition.layers.find((x) => x.type === "camera") as any;
+          if (cam) cam.keys = [];
+        }),
+
+        gotoCameraKey: (dir) => {
+          const st = get();
+          const cam = st.project.composition.layers.find((x) => x.type === "camera") as any;
+          if (!cam?.keys?.length) return;
+          const c = st.project.composition;
+          const tf = Math.max(1, Math.round(c.durationSec * c.fps));
+          const cur = st.playheadFrame ?? 0;
+          const frames = cam.keys.map((k: any) => Math.round(k.t * (tf - 1))).sort((a: number, b: number) => a - b);
+          const target = dir > 0 ? frames.find((f: number) => f > cur + 0.5) : [...frames].reverse().find((f: number) => f < cur - 0.5);
+          if (target != null) { st.setPlayheadFrame(target); st.requestSeek?.(target); }
+        },
 
         gotoKeyframe: (id, prop, dir) => {
           const st = get();

@@ -148,6 +148,7 @@ const BeatTracks: React.FC<{
   const requestSeek = useEditor((s) => s.requestSeek);
   const setPlayheadFrame = useEditor((s) => s.setPlayheadFrame);
   const moveKeyframe = useEditor((s) => s.moveKeyframe);
+  const moveCameraKey = useEditor((s) => s.moveCameraKey);
   const jumpToT = (t: number) => { const f = Math.round(t * dur * fps); setPlayheadFrame(f); requestSeek?.(f); };
   const pct = dur > 0 && fps > 0 ? clamp((playheadFrame / fps / dur) * 100, 0, 100) : 0;
   const seekAt = (e: React.PointerEvent) => {
@@ -217,6 +218,7 @@ const BeatTracks: React.FC<{
           const c = colorOf(l.type);
           const tracks = (l as any).tracks as Record<string, { t: number }[]> | undefined;
           const trackKeys = active && tracks ? Object.keys(tracks).filter((k) => tracks[k]?.length) : [];
+          const camKeys = isCamera ? ((l as any).keys as { t: number; pose: any; ease: string }[] | undefined) ?? [] : [];
           return (
             <React.Fragment key={l.id}>
             <div
@@ -248,6 +250,10 @@ const BeatTracks: React.FC<{
                 {!active && tracks && Object.values(tracks).flat().slice(0, 40).map((k, i) => (
                   <span key={i} className="pointer-events-none absolute top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[1px] bg-white/80" style={{ left: `${(k.t as number) * 100}%` }} />
                 ))}
+                {/* Camera keyframes always show on the camera bar (cyan diamonds) */}
+                {isCamera && !active && camKeys.map((k, i) => (
+                  <span key={i} className="pointer-events-none absolute top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[1px] bg-[#38E1FF]" style={{ left: `${k.t * 100}%` }} />
+                ))}
               </div>
             </div>
             {/* Earth-Studio-style keyframe lanes — one per animated property */}
@@ -255,6 +261,10 @@ const BeatTracks: React.FC<{
               <KfLane key={prop} prop={prop} kfs={(tracks as any)[prop]} dur={dur} fps={fps}
                 onJump={jumpToT} onMove={(fromT, toT) => moveKeyframe(l.id, prop, fromT, toT)} />
             ))}
+            {/* Camera move lane — one diamond per pinned pose (Earth-Studio style) */}
+            {active && isCamera && camKeys.length > 0 && (
+              <CamKfLane keys={camKeys} dur={dur} onJump={jumpToT} onMove={moveCameraKey} />
+            )}
             </React.Fragment>
           );
         })}
@@ -320,6 +330,54 @@ const KfLane: React.FC<{
             onPointerDown={(e) => drag(e, k.t)}
             title={`${(k.t * dur).toFixed(2)}s · ${humanizeProp(prop)} = ${r1(k.value)} · ${k.ease} — drag to retime, click to jump`}
             className="absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 cursor-grab rounded-[2px] border border-white/70 bg-iris shadow-[0_0_5px_rgba(110,123,255,0.6)] transition-transform hover:scale-125 active:cursor-grabbing"
+            style={{ left: `${k.t * 100}%` }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+};
+
+/* ── Camera move lane — the "Adjust camera" keyframes on the timeline ────────
+   One cyan diamond per pinned pose. Click to jump the playhead there; drag to
+   retime. Editing the pose itself happens in the viewfinder gizmo. */
+const CamKfLane: React.FC<{
+  keys: { t: number; pose: any; ease: string }[]; dur: number;
+  onJump: (t: number) => void; onMove: (fromT: number, toT: number) => void;
+}> = ({ keys, dur, onJump, onMove }) => {
+  const drag = (e: React.PointerEvent, origT: number) => {
+    e.stopPropagation();
+    const lane = (e.currentTarget as HTMLElement).closest("[data-kflane]") as HTMLElement | null;
+    if (!lane) return;
+    const rect = lane.getBoundingClientRect();
+    const startX = e.clientX;
+    let moved = false;
+    const move = (ev: PointerEvent) => {
+      if (Math.abs(ev.clientX - startX) > 2) moved = true;
+      if (moved) onMove(origT, clamp((ev.clientX - rect.left) / rect.width, 0, 1));
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      if (!moved) onJump(origT);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+  return (
+    <div className="relative flex h-5 items-center border-b border-line/40" style={{ background: "rgba(56,225,255,0.05)" }}>
+      <div className="flex w-28 shrink-0 items-center gap-1 truncate pl-6 pr-2 text-[9.5px] text-graphite/45">
+        <span className="h-[6px] w-[6px] rotate-45 rounded-[1px] bg-[#38E1FF]" />
+        <span className="truncate">Camera move</span>
+      </div>
+      <div data-kflane className="relative h-full flex-1">
+        <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2" style={{ background: "rgba(56,225,255,0.2)" }} />
+        {keys.map((k, i) => (
+          <span
+            key={i}
+            onPointerDown={(e) => drag(e, k.t)}
+            title={`${(k.t * dur).toFixed(2)}s · z${r1(k.pose?.zoom ?? 0)} · ${Math.round(k.pose?.bearing ?? 0)}° · tilt ${Math.round(k.pose?.pitch ?? 0)}° · ${k.ease} — drag to retime, click to jump`}
+            className="absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 cursor-grab rounded-[2px] border border-white/70 bg-[#38E1FF] shadow-[0_0_5px_rgba(56,225,255,0.6)] transition-transform hover:scale-125 active:cursor-grabbing"
             style={{ left: `${k.t * 100}%` }}
           />
         ))}
