@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Player, type PlayerRef } from "@remotion/player";
-import { Frame } from "lucide-react";
+import { Frame, Video } from "lucide-react";
 import { MapComposition } from "../render/MapComposition";
 import { StoryComposition, storyFrames } from "../render/StoryComposition";
 import { dimsFor } from "../doc/schema";
@@ -10,6 +10,7 @@ import { useEditor } from "../store/editor";
 import { useTier } from "@/hooks/useTier";
 import { PreviewOverlay } from "./PreviewOverlay";
 import { LayerHalo } from "./LayerHalo";
+import { CameraStage } from "./CameraStage";
 
 type SafeZoneMode = "off" | "title" | "social";
 const SAFEZONE_KEY = "mapanisy-safezones";
@@ -41,6 +42,11 @@ export const Canvas: React.FC = () => {
     return v === "title" || v === "social" ? v : "off";
   });
   useEffect(() => { localStorage.setItem(SAFEZONE_KEY, safeZones); }, [safeZones]);
+
+  // "Adjust camera" — swaps the non-interactive Player for a live, orbitable map
+  // where the creator frames the shot directly (scroll/drag/tilt), then captures
+  // the view into the camera layer's Start/End poses. See CameraStage.
+  const [cameraEdit, setCameraEdit] = useState(false);
 
   // Click-to-select on the preview: geometric hit-test against rendered overlay
   // elements (they're pointer-events:none, so we test bounding rects and pick the
@@ -158,6 +164,8 @@ export const Canvas: React.FC = () => {
               spaceKeyToPlayOrPause={false}
               style={{ width: "100%", height: "100%", background: "#000", display: "block" }}
             />
+          ) : cameraEdit ? (
+            <CameraStage onExit={() => setCameraEdit(false)} />
           ) : (
             <>
               <Player
@@ -185,18 +193,31 @@ export const Canvas: React.FC = () => {
           )}
         </div>
 
+        {/* Adjust-camera toggle — enter the live viewfinder to frame the shot. */}
+        {!playStory && !cameraEdit && (
+          <button
+            onClick={() => { playerRef.current?.pause(); setCameraEdit(true); }}
+            title="Frame the shot on a live map — scroll to zoom, drag to orbit & tilt"
+            className="absolute left-4 top-4 z-10 inline-flex items-center gap-1.5 rounded-lg border border-line/60 bg-paper/70 px-2.5 py-1.5 text-[10.5px] font-medium text-graphite-muted backdrop-blur transition-colors hover:text-graphite"
+          >
+            <Video size={12} /> Adjust camera
+          </button>
+        )}
+
         {/* Safe-zone toggle — floats over the drafting table, never the frame. */}
-        <button
-          onClick={() => setSafeZones((m) => nextZoneMode[m])}
-          title={`${zoneLabel[safeZones]} — click to cycle (off → title-safe → social UI)`}
-          className={`absolute right-4 top-4 z-10 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10.5px] font-medium backdrop-blur transition-colors ${
-            safeZones === "off"
-              ? "border-line/60 bg-paper/70 text-graphite-muted hover:text-graphite"
-              : "border-iris/40 bg-iris/10 text-iris"
-          }`}
-        >
-          <Frame size={12} /> {zoneLabel[safeZones]}
-        </button>
+        {!cameraEdit && (
+          <button
+            onClick={() => setSafeZones((m) => nextZoneMode[m])}
+            title={`${zoneLabel[safeZones]} — click to cycle (off → title-safe → social UI)`}
+            className={`absolute right-4 top-4 z-10 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10.5px] font-medium backdrop-blur transition-colors ${
+              safeZones === "off"
+                ? "border-line/60 bg-paper/70 text-graphite-muted hover:text-graphite"
+                : "border-iris/40 bg-iris/10 text-iris"
+            }`}
+          >
+            <Frame size={12} /> {zoneLabel[safeZones]}
+          </button>
+        )}
       </div>
     </div>
   );
