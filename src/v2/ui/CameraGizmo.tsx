@@ -9,18 +9,17 @@ import { minZoomForAspect, type CameraLayer, type CameraPose, type KfEase } from
 
 type Axis = "pan" | "bearing" | "pitch" | "zoom" | null;
 const ACCENT = "#38E1FF";
+const CARDINALS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
 /**
- * The "Adjust camera" gizmo — a calm, direct overlay on the LIVE preview.
+ * The "Adjust camera" gizmo — a cinematic viewfinder overlay on the LIVE
+ * preview. Drives the Player's real MapLibre map (via previewMapBridge) while
+ * paused, so the frame turns/tilts/zooms under the hand with zero latency, and
+ * commits ONE camera keyframe (a full pose at the playhead) on release.
  *
- * Drives the Player's real MapLibre map (via previewMapBridge) while paused, so
- * the actual frame turns/tilts/zooms under the hand with zero latency; commits
- * ONE camera keyframe (a full pose at the playhead) on release / Add-keyframe.
- * Scrub, re-angle, add another → the camera animates between them (GES model).
- *
- * Design: three quiet direct controls (rotate ring · tilt · zoom), drag-to-pan,
- * wheel-zoom, ONE hero "Add keyframe", and an unmissable Done. No number HUD —
- * you create by feel, not by reading GIS coordinates.
+ * Instrument look: a compass dial reads the bearing as cardinal + degrees; the
+ * tilt & zoom rails glow with their live value. Numbers you can feel, not a GIS
+ * readout. Drag empty = pan · wheel = zoom · ring = rotate · rails = tilt/zoom.
  */
 export const CameraGizmo: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   const comp = useEditor((s) => s.project.composition);
@@ -53,7 +52,6 @@ export const CameraGizmo: React.FC<{ onExit: () => void }> = ({ onExit }) => {
     return getLivePose();
   }, []);
 
-  // Keep the control positions synced to the real map (also while scrubbing).
   useEffect(() => {
     let raf = 0;
     const tick = () => {
@@ -70,7 +68,6 @@ export const CameraGizmo: React.FC<{ onExit: () => void }> = ({ onExit }) => {
     return () => cancelAnimationFrame(raf);
   }, [readMap]);
 
-  // Esc leaves camera mode — so Done is a convenience, never the only way out.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onExit(); };
     window.addEventListener("keydown", onKey);
@@ -125,15 +122,13 @@ export const CameraGizmo: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   const pitchDrag = (e: React.PointerEvent) =>
     startDrag("pitch", e, (ev, { start, base }) => {
       const k = ev.shiftKey ? 0.15 : 0.5;
-      const pitch = Math.min(85, Math.max(0, base.pitch + (start.y - ev.clientY) * k));
-      previewMapBridge.get()?.jumpTo({ pitch });
+      previewMapBridge.get()?.jumpTo({ pitch: Math.min(85, Math.max(0, base.pitch + (start.y - ev.clientY) * k)) });
     });
 
   const zoomDrag = (e: React.PointerEvent) =>
     startDrag("zoom", e, (ev, { start, base }) => {
       const k = ev.shiftKey ? 0.004 : 0.012;
-      const zoom = Math.min(22, Math.max(minZoom, base.zoom + (start.y - ev.clientY) * k));
-      previewMapBridge.get()?.jumpTo({ zoom });
+      previewMapBridge.get()?.jumpTo({ zoom: Math.min(22, Math.max(minZoom, base.zoom + (start.y - ev.clientY) * k)) });
     });
 
   const onWheel = (e: React.WheelEvent) => {
@@ -152,52 +147,64 @@ export const CameraGizmo: React.FC<{ onExit: () => void }> = ({ onExit }) => {
     if (p) previewMapBridge.get()?.jumpTo({ center: [p.lon, p.lat], zoom: p.zoom, pitch: p.pitch, bearing: p.bearing });
   };
 
-  const dim = (axis: Axis) => (drag && drag !== axis ? "opacity-15" : "opacity-100");
+  const dim = (axis: Axis) => (drag && drag !== axis ? "opacity-10" : "opacity-100");
+  const bearing = norm360(hud.bearing);
+  const cardinal = CARDINALS[Math.round(bearing / 45) % 8];
   const ringRotation = -hud.bearing;
   const pitchPct = (hud.pitch / 85) * 100;
   const zoomPct = ((hud.zoom - minZoom) / Math.max(0.5, 22 - minZoom)) * 100;
 
   return (
     <div className="absolute inset-0 z-[6] select-none" style={{ touchAction: "none" }}>
-      {/* Drag = pan · wheel = zoom (the whole frame is grabbable) */}
+      {/* Cinematic vignette — focuses the eye on the frame, premium feel */}
+      <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(120% 90% at 50% 45%, transparent 55%, rgba(0,0,0,0.4))" }} />
+
+      {/* Drag = pan · wheel = zoom */}
       <div className="absolute inset-0 cursor-grab active:cursor-grabbing" onPointerDown={panDrag} onWheel={(e) => { onWheel(e); onWheelCapture(); }} />
 
-      {/* ── Rotate ring (center) — the one iconic handle ─────────────────── */}
+      {/* ── Compass instrument (center): rotate + the cool bearing readout ── */}
       <div className={`pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 transition-opacity duration-200 ${dim("bearing")}`}>
         <div
           ref={ringRef}
           onPointerDown={bearingDrag}
-          className="group pointer-events-auto relative h-[168px] w-[168px] cursor-grab rounded-full active:cursor-grabbing"
+          className="group pointer-events-auto relative h-[190px] w-[190px] cursor-grab active:cursor-grabbing"
           title="Drag to rotate"
-          style={{ transform: `rotate(${ringRotation}deg)` }}
+          style={{ transform: `rotate(${ringRotation}deg)`, filter: drag === "bearing" ? `drop-shadow(0 0 10px ${ACCENT}88)` : "drop-shadow(0 2px 8px rgba(0,0,0,0.45))" }}
         >
-          <svg viewBox="0 0 168 168" className="absolute inset-0 h-full w-full">
-            <circle cx="84" cy="84" r="78" fill="none" stroke="rgba(255,255,255,0.28)" strokeWidth={drag === "bearing" ? 2.5 : 1.5} className="transition-all group-hover:stroke-white/50" />
-            {[0, 90, 180, 270].map((a) => {
-              const rad = (a * Math.PI) / 180;
-              const x1 = 84 + Math.sin(rad) * 71, y1 = 84 - Math.cos(rad) * 71;
-              const x2 = 84 + Math.sin(rad) * 78, y2 = 84 - Math.cos(rad) * 78;
-              return <line key={a} x1={x1} y1={y1} x2={x2} y2={y2} stroke={a === 0 ? ACCENT : "rgba(255,255,255,0.35)"} strokeWidth={a === 0 ? 2.5 : 1.5} />;
+          <svg viewBox="0 0 190 190" className="absolute inset-0 h-full w-full">
+            <circle cx="95" cy="95" r="86" fill="none" stroke="rgba(255,255,255,0.22)" strokeWidth={drag === "bearing" ? 2.25 : 1.5} className="transition-all group-hover:stroke-white/40" />
+            {Array.from({ length: 24 }).map((_, i) => {
+              const a = i * 15, rad = (a * Math.PI) / 180;
+              const card = a % 90 === 0, inter = a % 45 === 0;
+              const r0 = card ? 74 : inter ? 79 : 82, r1 = 86;
+              const x1 = 95 + Math.sin(rad) * r0, y1 = 95 - Math.cos(rad) * r0;
+              const x2 = 95 + Math.sin(rad) * r1, y2 = 95 - Math.cos(rad) * r1;
+              return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={a === 0 ? ACCENT : `rgba(255,255,255,${card ? 0.5 : inter ? 0.32 : 0.16})`} strokeWidth={a === 0 ? 2.5 : card ? 1.75 : 1} />;
             })}
-            <circle cx="84" cy="6" r="5.5" fill={ACCENT} stroke="rgba(0,0,0,0.5)" strokeWidth="1.25" />
+            {/* glowing north pointer */}
+            <path d="M95 3 l6 12 h-12 z" fill={ACCENT} style={{ filter: `drop-shadow(0 0 4px ${ACCENT})` }} />
           </svg>
         </div>
-        {/* faint center dot marks the pan target */}
-        <div className="pointer-events-none absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/60" />
+        {/* Upright center readout — cardinal big, degrees small (the cool bit) */}
+        <div className="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center">
+          <span className="text-[30px] font-bold leading-none tracking-tight text-white" style={{ textShadow: `0 0 14px ${ACCENT}66` }}>{cardinal}</span>
+          <span className="mt-0.5 font-mono text-[12px] font-semibold tabular-nums" style={{ color: ACCENT }}>{Math.round(bearing)}°</span>
+          <span className="mt-2 text-[8.5px] font-semibold uppercase tracking-[0.2em] text-white/40">Rotate</span>
+        </div>
       </div>
 
-      {/* ── Tilt (left) + Zoom (right) — quiet slim sliders ──────────────── */}
-      <SideSlider side="left" label="Tilt" icon={<Mountain size={13} />} pct={pitchPct} active={drag === "pitch"} value={`${Math.round(hud.pitch)}°`} onPointerDown={pitchDrag} className={dim("pitch")} />
-      <SideSlider side="right" label="Zoom" icon={<ZoomIn size={13} />} pct={zoomPct} active={drag === "zoom"} value={hud.zoom.toFixed(1)} onPointerDown={zoomDrag} className={dim("zoom")} />
+      {/* ── Tilt (left) + Zoom (right) rails, glowing with their value ────── */}
+      <SideRail side="left" label="Tilt" icon={<Mountain size={13} />} pct={pitchPct} active={drag === "pitch"} value={`${Math.round(hud.pitch)}°`} onPointerDown={pitchDrag} className={dim("pitch")} />
+      <SideRail side="right" label="Zoom" icon={<ZoomIn size={13} />} pct={zoomPct} active={drag === "zoom"} value={hud.zoom.toFixed(1)} onPointerDown={zoomDrag} className={dim("zoom")} />
 
-      {/* ── One-line coach — only until the first keyframe ───────────────── */}
+      {/* ── One-line coach — until the first keyframe ────────────────────── */}
       {keys.length === 0 && !drag && (
-        <div className="pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/55 px-4 py-1.5 text-[11.5px] text-white/85 backdrop-blur-md">
+        <div className="pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/50 px-4 py-1.5 text-[11.5px] text-white/85 ring-1 ring-white/10 backdrop-blur-md">
           Frame your shot, then tap <span className="font-semibold" style={{ color: ACCENT }}>Add keyframe</span>
         </div>
       )}
 
-      {/* ── Exit: unmissable, top-right, always available (Esc too) ──────── */}
+      {/* ── Exit cluster — unmissable, top-right (Esc also exits) ─────────── */}
       <div className="pointer-events-auto absolute right-3 top-3 flex items-center gap-1.5">
         <IconBtn title="Reset to opening view" onClick={resetView}><RotateCcw size={15} /></IconBtn>
         {keys.length > 0 && (
@@ -205,16 +212,16 @@ export const CameraGizmo: React.FC<{ onExit: () => void }> = ({ onExit }) => {
         )}
         <button
           onClick={onExit}
-          className="ml-1 flex items-center gap-1.5 rounded-full px-4 py-2 text-[12px] font-semibold text-[#062430] shadow-lg transition hover:brightness-110"
-          style={{ background: ACCENT }}
+          className="ml-1 flex items-center gap-1.5 rounded-full px-4 py-2 text-[12px] font-bold text-[#062430] transition hover:brightness-110"
+          style={{ background: ACCENT, boxShadow: `0 4px 16px ${ACCENT}55` }}
         >
-          <Check size={15} strokeWidth={2.5} /> Done
+          <Check size={15} strokeWidth={2.75} /> Done
         </button>
       </div>
 
-      {/* ── One hero dock (bottom-center): keyframe the shot ─────────────── */}
+      {/* ── Hero dock (bottom-center): keyframe the shot ─────────────────── */}
       <div className="pointer-events-auto absolute bottom-4 left-1/2 -translate-x-1/2">
-        <div className="flex items-center gap-1 rounded-full bg-black/60 p-1.5 shadow-xl ring-1 ring-white/10 backdrop-blur-md">
+        <div className="flex items-center gap-1 rounded-full bg-black/60 p-1.5 shadow-2xl ring-1 ring-white/10 backdrop-blur-xl">
           <IconBtn title="Previous keyframe" disabled={!keys.length} onClick={() => gotoCameraKey(-1)}><ChevronLeft size={16} /></IconBtn>
 
           <button
@@ -222,14 +229,13 @@ export const CameraGizmo: React.FC<{ onExit: () => void }> = ({ onExit }) => {
             className={`flex items-center gap-2 rounded-full px-5 py-2.5 text-[13px] font-semibold transition ${
               keyAtPlayhead ? "bg-white/15 text-white hover:bg-white/25" : `text-[#062430] hover:brightness-110 ${keys.length === 0 ? "animate-pulse" : ""}`
             }`}
-            style={keyAtPlayhead ? undefined : { background: ACCENT }}
+            style={keyAtPlayhead ? undefined : { background: ACCENT, boxShadow: `0 3px 18px ${ACCENT}66` }}
             title={keyAtPlayhead ? "Update this keyframe" : "Add a keyframe here"}
           >
             <Diamond size={15} className={keyAtPlayhead ? "" : "fill-current"} />
             {keyAtPlayhead ? "Update" : "Add keyframe"}
           </button>
 
-          {/* Contextual controls appear ONLY when parked on a keyframe */}
           {keyAtPlayhead && (
             <>
               <select
@@ -255,24 +261,26 @@ export const CameraGizmo: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   );
 };
 
-/** A slim, quiet vertical slider docked to a side — the tilt / zoom controls. */
-const SideSlider: React.FC<{
+/** A glowing vertical rail (tilt / zoom) with its live value always shown. */
+const SideRail: React.FC<{
   side: "left" | "right"; label: string; icon: React.ReactNode; pct: number;
   active: boolean; value: string; onPointerDown: (e: React.PointerEvent) => void; className?: string;
 }> = ({ side, label, icon, pct, active, value, onPointerDown, className }) => (
-  <div className={`pointer-events-auto absolute top-1/2 -translate-y-1/2 flex flex-col items-center gap-2 transition-opacity duration-200 ${side === "left" ? "left-4" : "right-4"} ${className}`}>
-    <div className="flex items-center gap-1 text-white/70">{icon}<span className="text-[9px] font-semibold uppercase tracking-wider">{label}</span></div>
-    <div onPointerDown={onPointerDown} title={`Drag to change ${label.toLowerCase()} · Shift = fine`} className="group relative flex h-40 w-8 cursor-ns-resize items-end justify-center">
-      <div className="absolute inset-y-0 left-1/2 w-1 -translate-x-1/2 rounded-full bg-white/15" />
-      <div className="absolute bottom-0 left-1/2 w-1 -translate-x-1/2 rounded-full transition-colors" style={{ height: `${pct}%`, background: active ? ACCENT : "rgba(56,225,255,0.45)" }} />
+  <div className={`pointer-events-auto absolute top-1/2 flex -translate-y-1/2 flex-col items-center gap-2 transition-opacity duration-200 ${side === "left" ? "left-5" : "right-5"} ${className}`}>
+    <div className="flex items-center gap-1" style={{ color: active ? ACCENT : "rgba(255,255,255,0.6)" }}>{icon}<span className="text-[9px] font-semibold uppercase tracking-wider">{label}</span></div>
+    <div onPointerDown={onPointerDown} title={`Drag to change ${label.toLowerCase()} · Shift = fine`} className="group relative flex h-44 w-9 cursor-ns-resize items-end justify-center">
+      <div className="absolute inset-y-0 left-1/2 w-1.5 -translate-x-1/2 rounded-full bg-white/12" />
       <div
-        className="absolute left-1/2 h-4 w-4 -translate-x-1/2 rounded-full bg-white shadow-md ring-2 transition-transform group-hover:scale-110"
-        style={{ bottom: `calc(${pct}% - 8px)`, ["--tw-ring-color" as any]: active ? ACCENT : "transparent" }}
+        className="absolute bottom-0 left-1/2 w-1.5 -translate-x-1/2 rounded-full"
+        style={{ height: `${pct}%`, background: `linear-gradient(to top, ${ACCENT}55, ${ACCENT})`, boxShadow: active ? `0 0 12px ${ACCENT}` : `0 0 6px ${ACCENT}55` }}
       />
-      {active && (
-        <div className={`absolute ${side === "left" ? "left-9" : "right-9"} rounded-md bg-black/70 px-1.5 py-0.5 text-[10px] font-medium text-white`} style={{ bottom: `calc(${pct}% - 9px)` }}>{value}</div>
-      )}
+      <div
+        className="absolute left-1/2 h-5 w-5 -translate-x-1/2 rounded-full bg-white transition-transform group-hover:scale-110"
+        style={{ bottom: `calc(${pct}% - 10px)`, boxShadow: active ? `0 0 0 3px ${ACCENT}, 0 2px 8px rgba(0,0,0,0.5)` : "0 2px 8px rgba(0,0,0,0.5)" }}
+      />
     </div>
+    {/* the number, styled — always visible so you always know the value */}
+    <div className="rounded-md px-2 py-0.5 font-mono text-[12px] font-bold tabular-nums" style={{ color: active ? "#062430" : "#fff", background: active ? ACCENT : "rgba(0,0,0,0.4)", boxShadow: active ? `0 0 12px ${ACCENT}88` : undefined }}>{value}</div>
   </div>
 );
 
