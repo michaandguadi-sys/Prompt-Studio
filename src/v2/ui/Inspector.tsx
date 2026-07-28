@@ -1056,6 +1056,17 @@ const LayerFields: React.FC<{ layer: Layer; set: (p: Record<string, unknown>) =>
       return (
         <Section title="Camera move">
           <PriorityControl layerId={layer.id} type="camera" />
+          {/* When the camera is keyframed, keys DRIVE the move and the fallback
+              start/end/style controls below do nothing — say so plainly, and
+              offer the one-click way back to the automatic camera. */}
+          {(layer.keys?.length ?? 0) > 0 && (
+            <div className="rounded-lg border border-[#38E1FF]/45 bg-[#38E1FF]/10 p-2.5 text-[11px] leading-relaxed text-graphite/75">
+              <div className="mb-1 font-semibold text-graphite/90">🎥 Keyframed camera · {layer.keys!.length} key{layer.keys!.length > 1 ? "s" : ""}</div>
+              The move is controlled by your camera keyframes — edit it with <span className="font-medium text-graphite/90">Adjust camera</span> in the preview, or on the timeline. The controls below are the fallback auto-camera, used only if you clear the keyframes.
+              <button onClick={() => useEditor.getState().clearCameraKeys()} className="mt-1.5 block rounded-md border border-line bg-paper px-2 py-1 text-[10.5px] font-medium text-graphite/70 transition-colors hover:border-red-400 hover:text-red-500">Clear keyframes → use auto camera</button>
+            </div>
+          )}
+          <div className={(layer.keys?.length ?? 0) > 0 ? "opacity-50 transition-opacity" : "transition-opacity"}>
           {/* Quick move — ONE tap sets a sensible Start + End from the End location.
               Every value then stays directly editable in the pose cards below
               (no hidden style-coupling that silently rewrites your zoom). */}
@@ -1103,6 +1114,7 @@ const LayerFields: React.FC<{ layer: Layer; set: (p: Record<string, unknown>) =>
           <div className="grid grid-cols-2 gap-2">
             <Slider label="Move vs hold" hint="how much of the scene is moving" value={layer.moveFraction} min={0.1} max={1} step={0.05} onChange={(v) => set({ moveFraction: v })} format={(v) => `${Math.round(v * 100)}%`} />
             <Field label="Ease"><Select value={layer.easing} onChange={(e) => set({ easing: e.target.value })}><option value="easeInOut">Smooth</option><option value="easeOut">Ease out</option><option value="easeIn">Ease in</option><option value="linear">Linear</option><option value="spring">Spring</option></Select></Field>
+          </div>
           </div>
         </Section>
       );
