@@ -91,12 +91,19 @@ export const CameraGizmo: React.FC<{ onExit: () => void }> = ({ onExit }) => {
     const start = { x: e.clientX, y: e.clientY };
     const last = { x: e.clientX, y: e.clientY };
     const base = readMap();
-    const move = (ev: PointerEvent) => { onMove(ev, { start, last, base }); last.x = ev.clientX; last.y = ev.clientY; };
+    let moved = false;
+    const move = (ev: PointerEvent) => {
+      if (Math.abs(ev.clientX - start.x) + Math.abs(ev.clientY - start.y) > 3) moved = true;
+      onMove(ev, { start, last, base });
+      last.x = ev.clientX;
+      last.y = ev.clientY;
+    };
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       setDrag(null);
-      commitOnRelease();
+      // A click (no real drag) must NOT create a keyframe — only a genuine move.
+      if (moved) commitOnRelease();
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
