@@ -49,6 +49,9 @@ export const Canvas: React.FC = () => {
   // keyframe pins a full camera pose at the playhead; scrub + adjust + add
   // another and the camera animates between them. See CameraGizmo.
   const [cameraEdit, setCameraEdit] = useState(false);
+  // Whole-story playback swaps out the scene Player the gizmo drives — leave
+  // camera mode so it never lingers over a preview it can't control.
+  useEffect(() => { if (playStory) setCameraEdit(false); }, [playStory]);
 
   // Click-to-select on the preview: geometric hit-test against rendered overlay
   // elements (they're pointer-events:none, so we test bounding rects and pick the

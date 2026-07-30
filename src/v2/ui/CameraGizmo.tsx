@@ -162,18 +162,24 @@ export const CameraGizmo: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   const zoomPct = ((hud.zoom - minZoom) / Math.max(0.5, 22 - minZoom)) * 100;
 
   return (
-    <div className="absolute inset-0 z-[6] select-none" style={{ touchAction: "none" }}>
+    <div className="absolute inset-0 z-[6] select-none" style={{ touchAction: "none" }} onWheel={(e) => { onWheel(e); onWheelCapture(); }}>
       {/* Cinematic vignette — focuses the eye on the frame, premium feel */}
       <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(120% 90% at 50% 45%, transparent 55%, rgba(0,0,0,0.4))" }} />
 
-      {/* Drag = pan · wheel = zoom */}
-      <div className="absolute inset-0 cursor-grab active:cursor-grabbing" onPointerDown={panDrag} onWheel={(e) => { onWheel(e); onWheelCapture(); }} />
+      {/* Drag = pan (wheel-zoom is on the root, so scrolling anywhere — incl. over the ring — zooms) */}
+      <div className="absolute inset-0 cursor-grab active:cursor-grabbing" onPointerDown={panDrag} />
 
       {/* ── Compass instrument (center): rotate + the cool bearing readout ── */}
       <div className={`pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 transition-opacity duration-200 ${dim("bearing")}`}>
         <div
           ref={ringRef}
           onPointerDown={bearingDrag}
+          role="slider"
+          aria-label="Rotate camera (bearing)"
+          aria-valuenow={Math.round(bearing)}
+          aria-valuemin={0}
+          aria-valuemax={359}
+          tabIndex={0}
           className="group pointer-events-auto relative h-[190px] w-[190px] cursor-grab active:cursor-grabbing"
           title="Drag to rotate"
           style={{ transform: `rotate(${ringRotation}deg)`, filter: drag === "bearing" ? `drop-shadow(0 0 10px ${ACCENT}88)` : "drop-shadow(0 2px 8px rgba(0,0,0,0.45))" }}
@@ -275,7 +281,7 @@ const SideRail: React.FC<{
 }> = ({ side, label, icon, pct, active, value, onPointerDown, className }) => (
   <div className={`pointer-events-auto absolute top-1/2 flex -translate-y-1/2 flex-col items-center gap-2 transition-opacity duration-200 ${side === "left" ? "left-5" : "right-5"} ${className}`}>
     <div className="flex items-center gap-1" style={{ color: active ? ACCENT : "rgba(255,255,255,0.6)" }}>{icon}<span className="text-[9px] font-semibold uppercase tracking-wider">{label}</span></div>
-    <div onPointerDown={onPointerDown} title={`Drag to change ${label.toLowerCase()} · Shift = fine`} className="group relative flex h-44 w-9 cursor-ns-resize items-end justify-center">
+    <div onPointerDown={onPointerDown} role="slider" aria-label={label} aria-valuetext={value} tabIndex={0} title={`Drag to change ${label.toLowerCase()} · Shift = fine`} className="group relative flex h-44 w-9 cursor-ns-resize items-end justify-center">
       <div className="absolute inset-y-0 left-1/2 w-1.5 -translate-x-1/2 rounded-full bg-white/12" />
       <div
         className="absolute bottom-0 left-1/2 w-1.5 -translate-x-1/2 rounded-full"

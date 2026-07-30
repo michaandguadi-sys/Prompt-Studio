@@ -95,7 +95,7 @@ export function sampleTrack(kfs: PropKeyframe[] | undefined, t: number): number 
   if (t >= s[s.length - 1].t) return s[s.length - 1].value;
   for (let i = 0; i < s.length - 1; i++) {
     const a = s[i], b = s[i + 1];
-    if (t >= a.t && t <= b.t) {
+    if (t >= a.t && t < b.t) {
       const span = Math.max(1e-6, b.t - a.t);
       const localT = (t - a.t) / span;
       return a.value + (b.value - a.value) * applyKfEase(a.ease, localT);

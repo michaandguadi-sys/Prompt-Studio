@@ -44,11 +44,6 @@ const CAMERA_MOVES: { v: string; label: string; pitch: number }[] = [
   { v: "hold", label: "Hold", pitch: 0 },
 ];
 
-// The Camera layer is now the SOLE camera driver — routes/highlights never
-// hijack the framing — so the old per-layer "drive the camera" picker is gone.
-// Kept as a no-op component so existing call sites stay valid (and easy to drop).
-const PriorityControl: React.FC<{ layerId: string; type: "camera" | "route" | "highlight" }> = () => null;
-
 const IDENTITY_TF = { offsetXPct: 0, offsetYPct: 0, scale: 1, rotation: 0 };
 
 /** Numeric position / scale / rotation — mirrors the preview drag handles. */
@@ -426,7 +421,7 @@ const LookPanel: React.FC = () => {
   const look = (useEditor((s) => s.project.composition.look) ?? DEFAULT_LOOK) as Look;
   const patchComposition = useEditor((s) => s.patchComposition);
   const set = (patch: Partial<Look>) => patchComposition({ look: { ...look, ...patch } });
-  const [advanced, setAdvanced] = useState(true);
+  const [advanced, setAdvanced] = useState(false);
   return (
     <Section title="Look & grade">
       {/* Distinct one-tap looks */}
@@ -733,16 +728,16 @@ const MapStylePanel: React.FC = () => {
                   {hasYr && <button onClick={() => patchComposition({ basemap: { ...basemap, mapYear: "", mapYearEnd: "" } })} className="text-[10px] text-graphite/40 hover:text-iris">clear</button>}
                 </div>
               </div>
-              <input type="range" min={-2000} max={2026} step={1} value={cur} onChange={(e) => setYear(parseInt(e.target.value, 10))} className="w-full accent-iris" />
+              <input type="range" min={-4000} max={2026} step={1} value={cur} onChange={(e) => setYear(parseInt(e.target.value, 10))} className="w-full accent-iris" />
               <div className="flex items-center justify-between text-[9px] text-graphite/35">
-                <span>2000 BC</span>
+                <span>4000 BC</span>
                 <span className="font-mono text-[10px] text-graphite/70">{animate ? `${labelYr(cur)} → ${labelYr(yrEnd)}` : labelYr(cur)}</span>
                 <span>2026</span>
               </div>
               <Toggle label="Animate over time (watch history unfold)" checked={animate} onChange={(on) => setEnd(on ? 2000 : null)} />
               {animate && (
                 <div className="space-y-1 pl-0.5">
-                  <input type="range" min={-2000} max={2026} step={1} value={yrEnd} onChange={(e) => setEnd(parseInt(e.target.value, 10))} className="w-full accent-iris" />
+                  <input type="range" min={-4000} max={2026} step={1} value={yrEnd} onChange={(e) => setEnd(parseInt(e.target.value, 10))} className="w-full accent-iris" />
                   <p className="text-[10px] leading-relaxed text-graphite/40">Borders &amp; places morph from <span className="font-mono text-graphite/60">{labelYr(cur)}</span> to <span className="font-mono text-graphite/60">{labelYr(yrEnd)}</span> across the scene.</p>
                 </div>
               )}
@@ -852,7 +847,12 @@ const AddonsPanel: React.FC = () => {
     } catch { setErr("Network error."); }
     finally { setBusy(null); }
   };
-  const del = (id: string) => { setAddons(removeAddonStore(id)); if (open === id) setOpen(null); };
+  const del = async (id: string) => {
+    const name = addons.find((a) => a.id === id)?.name ?? "add-on";
+    if (!(await confirmDialog({ title: `Delete add-on "${name}"?`, confirmLabel: "Delete", danger: true }))) return;
+    setAddons(removeAddonStore(id));
+    if (open === id) setOpen(null);
+  };
 
   return (
     <Section title="AI add-ons">
@@ -880,7 +880,7 @@ const AddonsPanel: React.FC = () => {
                   </div>
                 ))}
                 {err && <div className="text-[10px] text-red-400">{err}</div>}
-                <button onClick={() => apply(a)} disabled={busy === a.id} className="w-full rounded-md bg-brand py-1.5 text-[11px] font-semibold text-white disabled:opacity-50">{busy === a.id ? "Applying…" : "Add to scene"}</button>
+                <button onClick={() => apply(a)} disabled={busy === a.id} className="w-full rounded-md bg-iris py-1.5 text-[11px] font-semibold text-white transition-colors hover:bg-iris/90 disabled:opacity-50">{busy === a.id ? "Applying…" : "Add to scene"}</button>
               </div>
             )}
           </div>
@@ -1055,7 +1055,6 @@ const LayerFields: React.FC<{ layer: Layer; set: (p: Record<string, unknown>) =>
     case "camera":
       return (
         <Section title="Camera move">
-          <PriorityControl layerId={layer.id} type="camera" />
           {/* When the camera is keyframed, keys DRIVE the move and the fallback
               start/end/style controls below do nothing — say so plainly, and
               offer the one-click way back to the automatic camera. */}
@@ -1465,7 +1464,7 @@ const DataFields: React.FC<{ layer: any; set: (p: Record<string, unknown>) => vo
         }
         const ok = out.filter((r) => r.geojson).length;
         set({ data: out, metric: j.metric || layer.metric, unit: j.unit || layer.unit, colorLow: lo, colorHigh: hi });
-        setStatus(`${ok}/${out.length} regions mapped${ok < out.length ? " (some shapes not found)" : ""}`);
+        setStatus(`${ok}/${out.length} regions mapped${ok < out.length ? " (some shapes not found)" : ""}${data.length > capped.length ? ` — first ${capped.length} of ${data.length} shown (capped)` : ""}`);
       }
     } catch { setErr("Something went wrong — try again."); }
     setBusy(false);
@@ -2093,7 +2092,6 @@ const RouteFields: React.FC<{ layer: Extract<Layer, { type: "route" }>; set: (p:
   const resolved = layer.coordinates.length > 1;
   return (
     <Section title="Route">
-      <PriorityControl layerId={layer.id} type="route" />
       <Field label="From" hint={layer.from?.name}>
         <div className="space-y-1.5">
           <PlaceSearch size="sm" placeholder="Start place…" onPick={pickFrom} />
@@ -2247,7 +2245,6 @@ const HighlightFields: React.FC<{ layer: Extract<Layer, { type: "highlight" }>; 
 
   return (
     <Section title="Highlight">
-      <PriorityControl layerId={layer.id} type="highlight" />
       <Field label="Region / country" hint="Search a place, or draw a region on the map">
         <div className="space-y-1.5">
           <div className="relative">

@@ -4,7 +4,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Project, Layer, LayerType, Composition, Timing, Theme, Scene, CameraPose, KfEase } from "../doc/schema";
 import { safeParseProject } from "../doc/schema";
-import { createLayer, createDefaultProject } from "../doc/factory";
+import { createLayer, createDefaultProject, defaultCamera } from "../doc/factory";
 import { recolorLayer } from "../doc/themes";
 
 /**
@@ -310,15 +310,20 @@ export const useEditor = create<EditorState>()(
           const next = track.map((k) => k);
           let best = 0, bestD = Infinity;
           next.forEach((k, i) => { const d = Math.abs(k.t - fromT); if (d < bestD) { bestD = d; best = i; } });
-          next[best] = { ...next[best], t: Math.min(1, Math.max(0, toT)) };
-          next.sort((a, b) => a.t - b.t);
-          l.tracks = { ...l.tracks, [prop]: next };
+          const tf = Math.max(1, Math.round((p.composition.durationSec || 1) * (p.composition.fps || 30)));
+          const eps = 0.75 / Math.max(1, tf - 1);
+          const newT = Math.min(1, Math.max(0, toT));
+          next[best] = { ...next[best], t: newT };
+          // Dropping a keyframe onto another (same time) merges into one, never two-at-a-time.
+          const merged = next.filter((k, i) => i === best || Math.abs(k.t - newT) >= eps);
+          merged.sort((a, b) => a.t - b.t);
+          l.tracks = { ...l.tracks, [prop]: merged };
         }),
 
         // ── Camera keyframes (Earth-Studio move: a full pose pinned at time t) ──
         setCameraKeyAtPlayhead: (pose, ease = "smooth") => commit((p) => {
-          const cam = p.composition.layers.find((x) => x.type === "camera") as any;
-          if (!cam) return;
+          let cam = p.composition.layers.find((x) => x.type === "camera") as any;
+          if (!cam) { cam = defaultCamera() as any; p.composition.layers.unshift(cam); } // never a dead "Add keyframe"
           const { t, eps } = playheadT(p, get().playheadFrame);
           const clean = {
             lon: pose.lon,
@@ -348,9 +353,11 @@ export const useEditor = create<EditorState>()(
           const keys = cam.keys.map((k: any) => k);
           let best = 0, bestD = Infinity;
           keys.forEach((k: any, i: number) => { const d = Math.abs(k.t - fromT); if (d < bestD) { bestD = d; best = i; } });
-          keys[best] = { ...keys[best], t: Math.min(1, Math.max(0, toT)) };
-          keys.sort((a: any, b: any) => a.t - b.t);
-          cam.keys = keys;
+          const tf = Math.max(1, Math.round((p.composition.durationSec || 1) * (p.composition.fps || 30)));
+          const eps = 0.75 / Math.max(1, tf - 1);
+          const newT = Math.min(1, Math.max(0, toT));
+          keys[best] = { ...keys[best], t: newT };
+          cam.keys = keys.filter((k: any, i: number) => i === best || Math.abs(k.t - newT) >= eps).sort((a: any, b: any) => a.t - b.t);
         }),
 
         setCameraKeyEaseAtPlayhead: (ease) => commit((p) => {
@@ -382,8 +389,8 @@ export const useEditor = create<EditorState>()(
         },
 
         setCameraKeyAt: (t, pose, ease = "smooth") => commit((p) => {
-          const cam = p.composition.layers.find((x) => x.type === "camera") as any;
-          if (!cam) return;
+          let cam = p.composition.layers.find((x) => x.type === "camera") as any;
+          if (!cam) { cam = defaultCamera() as any; p.composition.layers.unshift(cam); }
           const tf = Math.max(1, Math.round((p.composition.durationSec || 1) * (p.composition.fps || 30)));
           const eps = 0.75 / Math.max(1, tf - 1);
           const clean = {
@@ -464,6 +471,9 @@ export const useEditor = create<EditorState>()(
                 ...l.timing,
                 inSec: clampR(l.timing.inSec * f, 0, dur),
                 outSec: l.timing.outSec == null ? null : clampR(l.timing.outSec * f, 0, dur),
+                // Fade DURATIONS scale too, so a retimed film keeps its ramps proportional.
+                fadeInSec: typeof l.timing.fadeInSec === "number" ? clampR(l.timing.fadeInSec * f, 0, 6) : l.timing.fadeInSec,
+                fadeOutSec: typeof l.timing.fadeOutSec === "number" ? clampR(l.timing.fadeOutSec * f, 0, 6) : l.timing.fadeOutSec,
               };
             }
             // Layer-specific choreography spans scale too (clamped to schema

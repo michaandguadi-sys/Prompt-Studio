@@ -87,6 +87,7 @@ export const NumberInput: React.FC<{
       <div className="flex items-center rounded-lg border border-line bg-paper-50 transition-all duration-150 hover:border-graphite/25 focus-within:border-iris/70 focus-within:ring-[3px] focus-within:ring-iris/15">
         <span
           onPointerDown={scrub}
+          aria-hidden="true"
           title="Drag to scrub · hold Shift for fine control"
           className="flex shrink-0 cursor-ew-resize touch-none select-none items-center self-stretch pl-1.5 pr-0.5 text-graphite-muted/35 transition-colors hover:text-iris"
         >
@@ -113,6 +114,7 @@ export const NumberInput: React.FC<{
           <div className="pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 rounded-full border-2 border-iris bg-white shadow transition-transform group-hover:scale-110" style={{ left: `${pct}%` }} />
           <input
             type="range" min={min} max={max} step={step} value={clamp(value)}
+            aria-label={unit ? `Value (${unit})` : "Value"}
             onChange={(e) => { setText(null); onChange(Number(e.target.value)); }}
             className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
           />
