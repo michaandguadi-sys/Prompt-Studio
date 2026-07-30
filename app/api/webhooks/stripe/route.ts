@@ -19,7 +19,7 @@
  */
 import { headers } from "next/headers";
 import { db, schema } from "@/lib/db";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { stripe } from "@/lib/stripe";
 import { tierFromStripePrice, TIERS, type Tier } from "@/lib/tiers";
 import type Stripe from "stripe";
@@ -92,7 +92,10 @@ export async function POST(req: Request) {
       const userId = stripeSub.metadata?.userId;
       if (!userId) break;
 
-      // Downgrade to free on cancellation
+      // Downgrade to free — but ONLY the row still tied to THIS subscription.
+      // A user who later bought lifetime Pro (stripeSubscriptionId → null) or
+      // moved to a different sub must not have that grant wiped when an old,
+      // unrelated subscription is cancelled.
       await db.update(schema.subscriptions)
         .set({
           tier: "free",
@@ -103,7 +106,10 @@ export async function POST(req: Request) {
           currentPeriodEnd: null,
           updatedAt: new Date(),
         })
-        .where(eq(schema.subscriptions.userId, userId));
+        .where(and(
+          eq(schema.subscriptions.userId, userId),
+          eq(schema.subscriptions.stripeSubscriptionId, stripeSub.id),
+        ));
       break;
     }
 
@@ -124,6 +130,14 @@ export async function POST(req: Request) {
 }
 
 async function syncSubscription(userId: string, stripeSub: Stripe.Subscription) {
+  // Never let a stale/unrelated subscription event overwrite a lifetime (one-time
+  // Pro) grant — that's a paid, never-expiring entitlement.
+  if (db) {
+    const [current] = await db.select({ status: schema.subscriptions.status })
+      .from(schema.subscriptions).where(eq(schema.subscriptions.userId, userId)).limit(1);
+    if (current?.status === "lifetime") return;
+  }
+
   const priceId = stripeSub.items.data[0]?.price.id;
   const tier    = (priceId ? tierFromStripePrice(priceId) : null) ?? "free";
   const tierCfg = TIERS[tier];
