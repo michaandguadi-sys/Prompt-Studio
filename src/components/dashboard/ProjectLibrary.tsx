@@ -173,11 +173,22 @@ export const ProjectLibrary: React.FC = () => {
             <button onClick={loadProjects} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-iris px-3.5 py-2 text-xs font-semibold text-white transition-transform hover:-translate-y-0.5">Try again</button>
           </div>
         ) : visible.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-line py-10 text-center">
-            <Film size={22} className="mx-auto mb-2 text-graphite/25" />
-            <p className="text-sm text-graphite/45">{projects.length === 0 ? "No saved animations yet." : "Nothing in this folder."}</p>
-            <button onClick={() => router.push("/studio2")} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-xs font-semibold text-white shadow-glow-iris hover:-translate-y-0.5 transition-transform"><Plus size={13} /> Create one</button>
-          </div>
+          projects.length === 0 ? (
+            // First run — no animations at all. A warm, guided start in the
+            // product's own voice, routed to the prompt experience (/home).
+            <div className="rounded-2xl border border-dashed border-line py-12 text-center">
+              <Film size={26} className="mx-auto mb-3 text-iris/50" />
+              <h3 className="text-base font-semibold text-graphite">Create your first map story</h3>
+              <p className="mx-auto mt-1.5 max-w-sm text-sm text-graphite/50">Describe a journey and Mapanisy directs it — like <span className="italic text-graphite/70">“I traveled across Patagonia.”</span></p>
+              <button onClick={() => router.push("/home")} className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-iris px-4 py-2.5 text-sm font-semibold text-white shadow-glow-iris transition-transform hover:-translate-y-0.5"><Plus size={15} /> Start a map story</button>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-line py-10 text-center">
+              <Film size={22} className="mx-auto mb-2 text-graphite/25" />
+              <p className="text-sm text-graphite/45">Nothing in this folder.</p>
+              <button onClick={() => router.push("/home")} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-iris px-3.5 py-2 text-xs font-semibold text-white shadow-glow-iris hover:-translate-y-0.5 transition-transform"><Plus size={13} /> New map story</button>
+            </div>
+          )
         ) : (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
             {visible.map((p) => (
