@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Download, Trash2, Search, Film, Clock, FolderOpen, Loader2, ArrowUpRight, Plus, Share2, Check } from "lucide-react";
 import { useEditor } from "@/v2/store/editor";
+import { useToast } from "@/components/Toast/Toast";
 import { confirmDialog, promptDialog } from "@/v2/ui/dialogs";
 
 type Proj = { id: string; name: string; updatedAt: number; shared?: boolean };
@@ -36,7 +37,9 @@ const ago = (t: number) => {
 export const ProjectLibrary: React.FC = () => {
   const router = useRouter();
   const load = useEditor((s) => s.load);
+  const toast = useToast();
   const [projects, setProjects] = useState<Proj[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [folders, setFolders] = useState<Record<string, string>>({});
   const [active, setActive] = useState<string>("All");
   const [q, setQ] = useState("");
@@ -47,10 +50,21 @@ export const ProjectLibrary: React.FC = () => {
   const patchProject = (id: string, patch: Partial<Proj>) =>
     setProjects((ps) => (ps ?? []).map((p) => (p.id === id ? { ...p, ...patch } : p)));
 
+  // Load the library. On failure DON'T fall back to an empty list — that reads
+  // as "all your work vanished". Surface a retryable error state instead.
+  const loadProjects = React.useCallback(() => {
+    setLoadError(false);
+    setProjects(null);
+    fetch("/api/v2/projects")
+      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then((d) => setProjects(d.projects ?? []))
+      .catch(() => { setProjects([]); setLoadError(true); });
+  }, []);
+
   useEffect(() => {
     setFolders(loadFolders());
-    fetch("/api/v2/projects").then((r) => r.json()).then((d) => setProjects(d.projects ?? [])).catch(() => setProjects([]));
-  }, []);
+    loadProjects();
+  }, [loadProjects]);
 
   const setFolder = (id: string, folder: string) => {
     setFolders((f) => { const next = { ...f }; if (!folder) delete next[id]; else next[id] = folder; localStorage.setItem(FOLDERS_KEY, JSON.stringify(next)); return next; });
@@ -69,9 +83,13 @@ export const ProjectLibrary: React.FC = () => {
     setBusy(id);
     try {
       const r = await fetch(`/api/v2/projects?id=${encodeURIComponent(id)}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
       if (d?.project) { load(d.project); router.push("/studio2"); return; }
-    } catch {}
+      throw new Error("Project missing from response");
+    } catch {
+      toast.error("Couldn't open that animation", "Please try again in a moment.");
+    }
     setBusy(null);
   };
   const download = async (id: string, name: string) => {
@@ -148,6 +166,12 @@ export const ProjectLibrary: React.FC = () => {
       <div className="p-6 pt-4">
         {projects === null ? (
           <div className="flex items-center gap-2 py-8 text-graphite/30"><Loader2 size={16} className="animate-spin" /><span className="text-sm">Loading your animations…</span></div>
+        ) : loadError ? (
+          <div className="rounded-lg border border-dashed border-line py-10 text-center">
+            <p className="text-sm text-graphite/60">Couldn't load your animations.</p>
+            <p className="mt-1 text-xs text-graphite/40">Check your connection — your work is safe.</p>
+            <button onClick={loadProjects} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-iris px-3.5 py-2 text-xs font-semibold text-white transition-transform hover:-translate-y-0.5">Try again</button>
+          </div>
         ) : visible.length === 0 ? (
           <div className="rounded-lg border border-dashed border-line py-10 text-center">
             <Film size={22} className="mx-auto mb-2 text-graphite/25" />
