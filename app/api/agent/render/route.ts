@@ -6,8 +6,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { db, schema } from "@/lib/db";
-import { eq } from "drizzle-orm";
+import { db } from "@/lib/db";
 import { generateMapSceneTsx } from "@/lib/codegen/mapScene";
 import { generateDataVizSceneTsx } from "@/lib/codegen/dataVizScene";
 import { generateTitleSceneTsx } from "@/lib/codegen/titleScene";
@@ -18,7 +17,7 @@ import { enqueueAgentJob, sessionForUser, type AgentJobSettings } from "@/lib/ag
 import { checkQuota } from "@/lib/quota";
 import { TIERS } from "@/lib/tiers";
 import { ExportSpecPayload, parseOrError } from "@/lib/schemas";
-import { devGetOrCreateUserByClerk } from "@/lib/devAgentStore";
+import { resolveOrCreateUserId } from "@/lib/users";
 import type { SceneSpec } from "@/lib/types";
 
 function generateTsx(spec: SceneSpec): string {
@@ -66,19 +65,11 @@ export async function POST(req: NextRequest) {
   const spec = parsed.data.spec as SceneSpec;
   const settings = ((rawBody as any).settings ?? {}) as AgentJobSettings;
 
-  // Look up internal user id — via DB, or the dev store when no DB.
+  // Resolve internal user id, provisioning on demand if the sign-up webhook
+  // hasn't landed yet (never dead-end a new user at "User not found").
   let userId: string;
-  if (db) {
-    const [user] = await db
-      .select({ id: schema.users.id })
-      .from(schema.users)
-      .where(eq(schema.users.clerkId, clerkId))
-      .limit(1);
-    if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
-    userId = user.id;
-  } else {
-    userId = devGetOrCreateUserByClerk(clerkId).id;
-  }
+  try { userId = await resolveOrCreateUserId(clerkId); }
+  catch { return NextResponse.json({ error: "User not found" }, { status: 404 }); }
 
   // Verify agent is online
   const session = sessionForUser(userId);

@@ -11,22 +11,19 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { db, schema } from "@/lib/db";
-import { eq } from "drizzle-orm";
+import { db } from "@/lib/db";
 import { enqueueAgentJob, sessionForUser, listJobsForUser, type AgentJobSettings } from "@/lib/agentBridge";
 import { enqueueServerRender, listServerJobsForUser } from "@/lib/serverRender";
 import { checkQuota } from "@/lib/quota";
 import { TIERS } from "@/lib/tiers";
-import { devGetOrCreateUserByClerk } from "@/lib/devAgentStore";
+import { resolveOrCreateUserId } from "@/lib/users";
 import { Project as ProjectSchema } from "@/v2/doc/schema";
 import { validateProject } from "@/v2/doc/validate";
 
+// Provision the user row on demand so a brand-new sign-up (webhook not yet
+// landed) is never 404'd out of rendering. Returns null only on a real failure.
 async function resolveUserId(clerkId: string): Promise<string | null> {
-  if (db) {
-    const [user] = await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.clerkId, clerkId)).limit(1);
-    return user?.id ?? null;
-  }
-  return devGetOrCreateUserByClerk(clerkId).id;
+  try { return await resolveOrCreateUserId(clerkId); } catch { return null; }
 }
 
 /** GET /api/v2/render — the user's render queue (cloud + agent), newest first. */
@@ -121,6 +118,18 @@ export async function POST(req: NextRequest) {
       ? enqueueAgentJob(userId, name, "", "", settings, undefined, undefined, watermark, undefined, project.scenes)
       : enqueueAgentJob(userId, name, "", "", settings, undefined, undefined, watermark, project.composition);
     return NextResponse.json({ ok: true, jobId: job.id, mode: "agent", compositionId, watermark, scale: settings.scale, scenes: story ? project.scenes.length : 1, fixes, warnings });
+  }
+
+  // Abuse/DoS guard for the shared server-render path (MAX_CONCURRENT=1 globally,
+  // and each queued job holds a full project in memory): cap the in-flight cloud
+  // renders a single user can stack up. The agent path above is exempt — it runs
+  // on the user's own machine.
+  const activeCloud = listServerJobsForUser(userId).filter((j) => j.status === "queued" || j.status === "running").length;
+  if (activeCloud >= 3) {
+    return NextResponse.json({
+      error: "too_many_jobs",
+      message: "You already have renders in progress — let them finish before starting more.",
+    }, { status: 429 });
   }
 
   const inputProps = story

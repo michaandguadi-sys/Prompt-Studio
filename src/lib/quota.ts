@@ -109,10 +109,28 @@ export async function checkQuota(userId: string): Promise<QuotaResult> {
     .limit(1);
 
   if (!sub) {
+    // No subscription row yet — a brand-new user before the Clerk webhook has
+    // provisioned one, or a webhook that never fired. DON'T lock them out of the
+    // product they just signed into: grant the FREE entitlement and count real
+    // usage from renderLogs so the 3-render cap still holds. (Upgrades create a
+    // row, so this only ever grants free — never paid.)
+    const periodStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+    const [row] = await db
+      .select({ renders: count(schema.renderLogs.id) })
+      .from(schema.renderLogs)
+      .where(and(
+        eq(schema.renderLogs.userId, userId),
+        gte(schema.renderLogs.createdAt, periodStart),
+        eq(schema.renderLogs.status, "completed"),
+      ));
+    const usedRenders = Math.max(0, Number(row?.renders ?? 0) || 0);
+    const maxRenders = TIERS.free.maxRenders; // 3
     return {
-      allowed: false, usedMinutes: 0, limitMinutes: 0,
-      usedRenders: 0, maxRenders: 0, unit: "animation",
-      tier: "free", periodStart: new Date(), fraction: 1,
+      allowed: maxRenders != null ? usedRenders < maxRenders : true,
+      usedMinutes: 0, limitMinutes: TIERS.free.minutesPerMonth,
+      usedRenders, maxRenders, unit: "animation",
+      tier: "free", periodStart,
+      fraction: maxRenders ? Math.min(usedRenders / maxRenders, 1) : 0,
     };
   }
 
