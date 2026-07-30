@@ -319,11 +319,13 @@ export async function generateImage(prompt: string): Promise<string | null> {
   const key = process.env.AI_IMAGE_KEY || process.env.OPENAI_API_KEY;
   if (!url || !key || !prompt) return null;
   try {
-    const res = await fetch(url, {
+    // Timeout like every other provider call — a hung image endpoint must not
+    // stall the request (the only AI fetch that previously had no deadline).
+    const res = await fetchWithTimeout(url, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
       body: JSON.stringify({ model: process.env.AI_IMAGE_MODEL || "gpt-image-1", prompt, n: 1, size: "1024x1024" }),
-    });
+    }, 60_000);
     if (!res.ok) return null;
     const d = await res.json();
     return d?.data?.[0]?.url ?? (d?.data?.[0]?.b64_json ? `data:image/png;base64,${d.data[0].b64_json}` : null);
