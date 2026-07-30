@@ -7,6 +7,8 @@ import {
   PanelLeftClose, PanelRightClose,
 } from "lucide-react";
 import { useEditor } from "../store/editor";
+import { useToast } from "@/components/Toast/Toast";
+import { LAYER_REGISTRY } from "../layers/registry";
 import { confirmDialog } from "./dialogs";
 import { LayersPanel } from "./LayersPanel";
 import { Canvas } from "./Canvas";
@@ -58,6 +60,7 @@ export const Editor: React.FC = () => {
   const removeLayer = useEditor((s) => s.removeLayer);
   const duplicateLayer = useEditor((s) => s.duplicateLayer);
   const select = useEditor((s) => s.select);
+  const toast = useToast();
   const [restyleOpen, setRestyleOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [stillOpen, setStillOpen] = useState(false);
@@ -112,12 +115,17 @@ export const Editor: React.FC = () => {
       if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
       else if (mod && (e.key.toLowerCase() === "y" || (e.key.toLowerCase() === "z" && e.shiftKey))) { e.preventDefault(); redo(); }
       else if (mod && e.key.toLowerCase() === "d" && sel && sel.type !== "camera") { e.preventDefault(); duplicateLayer(sel.id); }
-      else if ((e.key === "Delete" || e.key === "Backspace") && sel && sel.type !== "camera") { e.preventDefault(); removeLayer(sel.id); }
+      else if ((e.key === "Delete" || e.key === "Backspace") && sel && sel.type !== "camera") {
+        e.preventDefault();
+        const name = sel.name || LAYER_REGISTRY[sel.type]?.label || "layer";
+        removeLayer(sel.id);
+        toast.info(`Removed ${name}`, undefined, { label: "Undo", onClick: undo });
+      }
       else if (e.key === "Escape") { select(null); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo, layers, selectedId, removeLayer, duplicateLayer, select]);
+  }, [undo, redo, layers, selectedId, removeLayer, duplicateLayer, select, toast]);
 
   const iconBtn = "rounded-lg p-1.5 text-graphite-muted transition-all duration-200 hover:bg-graphite/[0.06] hover:text-graphite active:scale-90 disabled:opacity-25 disabled:hover:bg-transparent";
   const toggle = (on: boolean) =>

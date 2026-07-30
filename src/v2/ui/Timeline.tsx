@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { Film, Focus } from "lucide-react";
 import { useEditor } from "../store/editor";
+import { useToast } from "@/components/Toast/Toast";
 import { LAYER_REGISTRY } from "../layers/registry";
 import type { CameraLayer, Layer } from "../doc/schema";
 import { poseAt, keyframedPose, hasCamKeys } from "../render/layers/renderHelpers";
@@ -167,6 +168,8 @@ const BeatTracks: React.FC<{
   // click an empty spot on a lane adds a keyframe there. Makes the timeline a
   // first-class keyframe editor, not just a viewer.
   const [selKf, setSelKf] = useState<KfSel>(null);
+  const undo = useEditor((s) => s.undo);
+  const toast = useToast();
   const camLayer = layers.find((l): l is CameraLayer => l.type === "camera");
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -176,13 +179,17 @@ const BeatTracks: React.FC<{
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el?.isContentEditable) return;
       if (!selKf) return;
       e.preventDefault();
+      // Runs in the CAPTURE phase (below), so stop the Editor's layer-Delete
+      // handler from ALSO firing — deleting a keyframe must never delete the layer.
+      e.stopImmediatePropagation();
       if (selKf.kind === "cam") deleteCameraKeyAt(selKf.t);
       else deleteKeyframeAt(selKf.id, selKf.prop, selKf.t);
       setSelKf(null);
+      toast.info("Keyframe removed", undefined, { label: "Undo", onClick: undo });
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [selKf, deleteCameraKeyAt, deleteKeyframeAt]);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [selKf, deleteCameraKeyAt, deleteKeyframeAt, toast, undo]);
 
   // Option-click add: capture the camera's pose (or a property's value) at the
   // clicked time — a new, editable keyframe pinned right there.
