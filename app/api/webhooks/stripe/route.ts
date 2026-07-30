@@ -57,18 +57,18 @@ export async function POST(req: Request) {
         const metaTier = session.metadata?.tier;
         const tier: Tier = metaTier && metaTier in TIERS ? (metaTier as Tier) : "pro";
         const tierCfg = TIERS[tier];
-        await db.update(schema.subscriptions)
-          .set({
-            tier,
-            status:               "lifetime",
-            minutesLimit:         tierCfg.minutesPerMonth,
-            stripeSubscriptionId: null,
-            stripePriceId:        tierCfg.stripePriceId,
-            currentPeriodStart:   new Date(),
-            currentPeriodEnd:     null, // lifetime — never expires
-            updatedAt:            new Date(),
-          })
-          .where(eq(schema.subscriptions.userId, userId));
+        // UPSERT — a paying customer with no subscription row (webhook-race new
+        // user, or one operating on the free fallback) must NEVER pay and get
+        // nothing. Grant lands whether or not a row exists.
+        await grantSubscription(userId, {
+          tier,
+          status:               "lifetime",
+          minutesLimit:         tierCfg.minutesPerMonth,
+          stripeSubscriptionId: null,
+          stripePriceId:        tierCfg.stripePriceId,
+          currentPeriodStart:   new Date(),
+          currentPeriodEnd:     null, // lifetime — never expires
+        });
         break;
       }
 
@@ -134,16 +134,31 @@ async function syncSubscription(userId: string, stripeSub: Stripe.Subscription) 
     current_period_end?: number;
   };
 
-  await db.update(schema.subscriptions)
-    .set({
-      tier,
-      status:               stripeSub.status,
-      minutesLimit:         tierCfg.minutesPerMonth,
-      stripeSubscriptionId: stripeSub.id,
-      stripePriceId:        priceId ?? null,
-      currentPeriodStart:   item.current_period_start ? new Date(item.current_period_start * 1000) : null,
-      currentPeriodEnd:     item.current_period_end   ? new Date(item.current_period_end   * 1000) : null,
-      updatedAt:            new Date(),
-    })
-    .where(eq(schema.subscriptions.userId, userId));
+  await grantSubscription(userId, {
+    tier,
+    status:               stripeSub.status,
+    minutesLimit:         tierCfg.minutesPerMonth,
+    stripeSubscriptionId: stripeSub.id,
+    stripePriceId:        priceId ?? null,
+    currentPeriodStart:   item.current_period_start ? new Date(item.current_period_start * 1000) : null,
+    currentPeriodEnd:     item.current_period_end   ? new Date(item.current_period_end   * 1000) : null,
+  });
+}
+
+/**
+ * Update the user's subscription row — or INSERT one if it doesn't exist yet.
+ * A missing row must never cause a paid grant to silently vanish (see the render
+ * lockout fix: users can operate on the free fallback with no row). subscriptions
+ * has no unique constraint on userId, so we update-then-insert rather than
+ * onConflict. `updatedAt` is stamped on both paths.
+ */
+async function grantSubscription(userId: string, fields: Record<string, unknown>) {
+  if (!db) return;
+  const updated = await db.update(schema.subscriptions)
+    .set({ ...fields, updatedAt: new Date() })
+    .where(eq(schema.subscriptions.userId, userId))
+    .returning({ id: schema.subscriptions.id });
+  if (updated.length === 0) {
+    await db.insert(schema.subscriptions).values({ userId, ...(fields as any) });
+  }
 }

@@ -59,11 +59,22 @@ export async function POST(req: Request) {
       metadata: { clerkId, userId: user.id },
     });
     customerId = customer.id;
-    // Persist immediately so we don't create duplicates on retries
+    // Persist immediately so we don't create duplicates on retries — and if the
+    // user has no subscription row yet (webhook-race, or operating on the free
+    // fallback), CREATE one now so the customer id sticks and the post-payment
+    // webhook grant has a row to land on.
     if (sub) {
       await db.update(schema.subscriptions)
         .set({ stripeCustomerId: customerId, updatedAt: new Date() })
         .where(eq(schema.subscriptions.id, sub.id));
+    } else {
+      await db.insert(schema.subscriptions).values({
+        userId: user.id,
+        tier: "free",
+        status: "active",
+        minutesLimit: TIERS.free.minutesPerMonth,
+        stripeCustomerId: customerId,
+      });
     }
   }
 
