@@ -59,7 +59,9 @@ export const CommandPalette: React.FC = () => {
     list.push({ label: "Undo", group: "Edit", act: run(undo) });
     list.push({ label: "Redo", group: "Edit", act: run(redo) });
     list.push({ label: "Deselect", group: "Edit", act: run(() => select(null)) });
-    list.push({ label: "Save project", group: "Project", act: run(() => { fetch("/api/v2/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: project.name, project }) }).catch(() => {}); }) });
+    // Route through the one robust save path (checks res.ok, toasts on failure)
+    // instead of a silent fire-and-forget fetch that could drop the save unseen.
+    list.push({ label: "Save project", group: "Project", act: run(() => { window.dispatchEvent(new CustomEvent("mapanisy:save")); }) });
     list.push({ label: "New project", group: "Project", act: run(async () => { if (await confirmDialog({ title: "Start a fresh project?", message: "Unsaved changes will be lost.", confirmLabel: "New project", danger: true })) reset(); }) });
     return list;
   }, [cam, bm, comp, project, addLayer, patchComposition, patchLayer, undo, redo, reset, select]);

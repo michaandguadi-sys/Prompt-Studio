@@ -112,7 +112,8 @@ export const Editor: React.FC = () => {
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el?.isContentEditable) return;
       const mod = e.metaKey || e.ctrlKey;
       const sel = layers.find((l) => l.id === selectedId);
-      if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
+      if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); window.dispatchEvent(new CustomEvent("mapanisy:save")); }
+      else if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
       else if (mod && (e.key.toLowerCase() === "y" || (e.key.toLowerCase() === "z" && e.shiftKey))) { e.preventDefault(); redo(); }
       else if (mod && e.key.toLowerCase() === "d" && sel && sel.type !== "camera") { e.preventDefault(); duplicateLayer(sel.id); }
       else if ((e.key === "Delete" || e.key === "Backspace") && sel && sel.type !== "camera") {

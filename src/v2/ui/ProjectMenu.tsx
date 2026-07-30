@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Save, FolderOpen, Loader2, Trash2, Check, Share2, Film } from "lucide-react";
 import { useEditor } from "../store/editor";
+import { useToast } from "@/components/Toast/Toast";
 import { promptDialog } from "./dialogs";
 import { dimsFor } from "../doc/schema";
 import { buildFcpxml, safeFileName } from "@/lib/nle/fcpxml";
@@ -13,6 +14,7 @@ type Saved = { id: string; name: string; updatedAt: number };
 export const ProjectMenu: React.FC = () => {
   const project = useEditor((s) => s.project);
   const load = useEditor((s) => s.load);
+  const toast = useToast();
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [open, setOpen] = useState(false);
@@ -53,16 +55,29 @@ export const ProjectMenu: React.FC = () => {
   const save = async () => {
     setSaving(true);
     try {
-      await fetch("/api/v2/projects", {
+      const r = await fetch("/api/v2/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: project.name, project }),
       });
+      // fetch does NOT throw on 4xx/5xx — check res.ok, or a failed save would
+      // still flash "Saved" and the user would close the tab thinking it stuck.
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
       setSaved(true);
       setTimeout(() => setSaved(false), 1600);
-    } catch { /* ignore */ }
+    } catch {
+      toast.error("Couldn't save to your library", "Your changes are safe on this device — try Save again.");
+    }
     setSaving(false);
   };
+
+  // ⌘S / Ctrl-S saves (dispatched from the editor's global hotkey handler).
+  useEffect(() => {
+    const onSave = () => { void save(); };
+    window.addEventListener("mapanisy:save", onSave);
+    return () => window.removeEventListener("mapanisy:save", onSave);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project]);
 
   const refresh = async () => {
     setList(null);
