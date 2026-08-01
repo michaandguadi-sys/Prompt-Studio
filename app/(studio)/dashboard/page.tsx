@@ -519,7 +519,7 @@ function SetupStep({ n, label, children }: { n: number; label: string; children:
     <div className="rounded-lg border border-line/50 bg-black/60 px-4 py-3 space-y-2">
       <div className="flex items-center gap-2">
         <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber/15 text-[10px] font-bold text-amber">{n}</span>
-        <span className="text-xs text-graphite/50" dangerouslySetInnerHTML={{ __html: label }} />
+        <span className="text-xs text-graphite/50">{label}</span>
       </div>
       {children}
     </div>
