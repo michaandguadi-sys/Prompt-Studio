@@ -52,8 +52,8 @@ export const ProjectMenu: React.FC = () => {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
-  const save = async () => {
-    setSaving(true);
+  const save = async (quiet = false) => {
+    if (!quiet) setSaving(true);
     try {
       const r = await fetch("/api/v2/projects", {
         method: "POST",
@@ -63,17 +63,18 @@ export const ProjectMenu: React.FC = () => {
       // fetch does NOT throw on 4xx/5xx — check res.ok, or a failed save would
       // still flash "Saved" and the user would close the tab thinking it stuck.
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 1600);
+      if (!quiet) { setSaved(true); setTimeout(() => setSaved(false), 1600); }
     } catch {
+      // Errors are ALWAYS surfaced, even for autosave — a silently failing
+      // autosave is the most dangerous kind (user assumes it's handled).
       toast.error("Couldn't save to your library", "Your changes are safe on this device — try Save again.");
     }
-    setSaving(false);
+    if (!quiet) setSaving(false);
   };
 
-  // ⌘S / Ctrl-S saves (dispatched from the editor's global hotkey handler).
+  // ⌘S / Ctrl-S (loud) and debounced autosave (quiet) both dispatch mapanisy:save.
   useEffect(() => {
-    const onSave = () => { void save(); };
+    const onSave = (e: Event) => { void save(!!(e as CustomEvent).detail?.quiet); };
     window.addEventListener("mapanisy:save", onSave);
     return () => window.removeEventListener("mapanisy:save", onSave);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -107,7 +108,7 @@ export const ProjectMenu: React.FC = () => {
 
   return (
     <div className="flex items-center gap-1.5">
-      <button onClick={save} disabled={saving} title="Save project" className="inline-flex items-center gap-1.5 rounded-lg border border-black/10 bg-paper-100/70 px-2.5 py-1.5 text-xs text-graphite/70 hover:text-graphite hover:border-black/20 transition-colors">
+      <button onClick={() => save()} disabled={saving} title="Save project (⌘S)" className="inline-flex items-center gap-1.5 rounded-lg border border-black/10 bg-paper-100/70 px-2.5 py-1.5 text-xs text-graphite/70 hover:text-graphite hover:border-black/20 transition-colors">
         {saving ? <Loader2 size={12} className="animate-spin" /> : saved ? <Check size={12} className="text-emerald-400" /> : <Save size={12} />}
         {saved ? "Saved" : "Save"}
       </button>

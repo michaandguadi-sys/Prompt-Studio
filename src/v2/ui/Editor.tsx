@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Undo2, Redo2, RotateCcw, Wand2, KeyRound, Camera, Keyboard,
   Layers as LayersIcon, SlidersHorizontal, PanelBottomClose, PanelBottom,
@@ -127,6 +127,19 @@ export const Editor: React.FC = () => {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [undo, redo, layers, selectedId, removeLayer, duplicateLayer, select, toast]);
+
+  // Autosave — debounce a QUIET save ~4s after the last edit, so a creator's
+  // work reaches their library without having to remember ⌘S (localStorage
+  // already covers reload; this covers switching projects / cross-device).
+  // `updatedAt` is bumped by every commit(); we skip the initial mount/load so
+  // opening a project doesn't immediately re-save it. Routes through the robust
+  // save path (checks res.ok, toasts on failure — never a silent autosave loss).
+  const firstAutosave = useRef(true);
+  useEffect(() => {
+    if (firstAutosave.current) { firstAutosave.current = false; return; }
+    const t = setTimeout(() => window.dispatchEvent(new CustomEvent("mapanisy:save", { detail: { quiet: true } })), 4000);
+    return () => clearTimeout(t);
+  }, [updatedAt]);
 
   const iconBtn = "rounded-lg p-1.5 text-graphite-muted transition-all duration-200 hover:bg-graphite/[0.06] hover:text-graphite active:scale-90 disabled:opacity-25 disabled:hover:bg-transparent";
   const toggle = (on: boolean) =>
