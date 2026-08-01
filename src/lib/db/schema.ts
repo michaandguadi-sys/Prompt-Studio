@@ -50,6 +50,18 @@ export const renderLogs = pgTable("render_logs", {
   index("render_logs_user_period_idx").on(t.userId, t.createdAt),
 ]);
 
+// ── Restyle jobs (video-to-video) — {providerJobId → owner} so polling a job
+//    status/output is scoped to the user who submitted it (no cross-user leak). ─
+
+export const restyleJobs = pgTable("restyle_jobs", {
+  jobId:     text("job_id").primaryKey(),   // = the provider prediction id
+  userId:    uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  provider:  text("provider"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("restyle_jobs_user_idx").on(t.userId),
+]);
+
 // ── Saved scenes (replaces localStorage) ─────────────────────────────────
 
 export const scenes = pgTable("scenes", {
