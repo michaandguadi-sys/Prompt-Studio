@@ -495,10 +495,18 @@ export async function POST(req: NextRequest) {
 
   let body: { command?: string; context?: Ctx; ai?: any; useAI?: boolean };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Bad JSON" }, { status: 400 }); }
-  const command = (body.command ?? "").trim();
+  const command = (body.command ?? "").toString().slice(0, 600).trim();
   const ctx: Ctx = body.context ?? { layers: [] };
   if (!command) return NextResponse.json({ error: "Type what to change." }, { status: 400 });
+  // Cap the context so a client can't balloon the AI prompt (token-cost DoS):
+  // bound the layer count and clamp the free-text fields that flow into it.
   if (!Array.isArray(ctx.layers)) ctx.layers = [];
+  ctx.layers = ctx.layers.slice(0, 40).map((l: any) => ({
+    ...l,
+    place: typeof l?.place === "string" ? l.place.slice(0, 200) : l?.place,
+    text: typeof l?.text === "string" ? l.text.slice(0, 400) : l?.text,
+    name: typeof l?.name === "string" ? l.name.slice(0, 120) : l?.name,
+  }));
 
   // ENGINE CHOICE — honor it strictly (matches the generate route):
   //  · AI-directed (default)  → the MODEL interprets the edit; never the keyword

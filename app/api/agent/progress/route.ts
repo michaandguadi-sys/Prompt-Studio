@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
 import { eq } from "drizzle-orm";
-import { updateProgress } from "@/lib/agentBridge";
+import { updateProgress, getJob } from "@/lib/agentBridge";
 import { devUserIdForKey } from "@/lib/devAgentStore";
 
 export async function POST(req: NextRequest) {
@@ -16,18 +16,23 @@ export async function POST(req: NextRequest) {
   const { agentKey, jobId, progress, message } = body;
   if (!agentKey || !jobId) return NextResponse.json({ error: "Missing fields" }, { status: 400 });
 
-  let authorized: boolean;
+  let userId: string | null = null;
   if (db) {
     const [user] = await db
       .select({ id: schema.users.id })
       .from(schema.users)
       .where(eq(schema.users.agentKey, agentKey))
       .limit(1);
-    authorized = !!user;
+    userId = user?.id ?? null;
   } else {
-    authorized = !!devUserIdForKey(agentKey);
+    userId = devUserIdForKey(agentKey) ?? null;
   }
-  if (!authorized) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  // Ownership guard: only report progress on YOUR OWN jobs — a valid key must
+  // not be able to write progress into another user's job by guessing its id.
+  const job = getJob(jobId);
+  if (!job || job.userId !== userId) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   updateProgress(jobId, progress ?? 0, message ?? "");
   return NextResponse.json({ ok: true });

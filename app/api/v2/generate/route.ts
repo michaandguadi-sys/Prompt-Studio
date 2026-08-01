@@ -2249,7 +2249,7 @@ export async function POST(req: NextRequest) {
 
   let body: { idea?: string; plan?: Plan; ai?: any; mode?: string; style?: string; interview?: any; interviewText?: string; arc?: ArcContext; taste?: string };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Bad JSON" }, { status: 400 }); }
-  const idea = (body.idea ?? "").trim();
+  const idea = (body.idea ?? "").toString().slice(0, 4000).trim(); // cap: bound the AI prompt size
   const iv = body.interview && typeof body.interview === "object" ? body.interview : null;
   const ivText = (body.interviewText ?? "").toString().slice(0, 400);
   // TASTE PROFILE — the client's learned preference summary. Biases the AI's

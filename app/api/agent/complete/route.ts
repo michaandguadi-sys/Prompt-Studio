@@ -44,6 +44,9 @@ export async function POST(req: NextRequest) {
   // Capture the job before completeJob() (which may prune finished jobs) so we
   // can log a render row. Only successful renders count toward quota.
   const job = getJob(jobId);
+  // Ownership guard: a valid agent key must only complete ITS OWN jobs — never
+  // another user's by guessing the jobId (IDOR: griefing a stranger's render).
+  if (!job || job.userId !== userId) return NextResponse.json({ error: "Not found" }, { status: 404 });
   completeJob(jobId, error);
 
   // Log a completed render so the Free tier's 1-animation cap is metered on the

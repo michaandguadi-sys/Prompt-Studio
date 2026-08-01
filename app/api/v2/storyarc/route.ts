@@ -50,7 +50,8 @@ export async function POST(req: NextRequest) {
   let body: { ideas?: string[]; style?: string; ai?: any; useAI?: boolean };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Bad JSON" }, { status: 400 }); }
 
-  const ideas = Array.isArray(body.ideas) ? body.ideas.map((s) => String(s ?? "").trim()).filter(Boolean) : [];
+  // Cap count + per-idea length so the arc prompt to the AI can't be inflated.
+  const ideas = (Array.isArray(body.ideas) ? body.ideas : []).map((s) => String(s ?? "").trim().slice(0, 600)).filter(Boolean).slice(0, 12);
   if (ideas.length < 2) return NextResponse.json({ error: "Provide at least two sequences." }, { status: 400 });
 
   // Deterministic backbone — always valid, used as-is on the no-AI path and as
