@@ -75,7 +75,7 @@ const easeIn = (t: number) => t * t;
 const easeOut = (t: number) => t * (2 - t);
 const smooth = (t: number) => t * t * (3 - 2 * t); // smoothstep = "smooth" (ease-in-out)
 
-function applyKfEase(ease: KfEase, t: number): number {
+export function applyKfEase(ease: KfEase, t: number): number {
   switch (ease) {
     case "linear": return t;
     case "easeIn": return easeIn(t);

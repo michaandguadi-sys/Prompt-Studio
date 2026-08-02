@@ -24,11 +24,42 @@ const COALESCE_MS = 900;
 
 /** Current playhead as scene-time t (0..1) plus a "same keyframe" epsilon
  *  (~0.75 frames), so the keyframe button toggles the one under the playhead. */
+/** Scene frame count (never < 1). */
+function framesOf(p: Project): number {
+  return Math.max(1, Math.round((p.composition.durationSec || 1) * (p.composition.fps || 30)));
+}
+/** The "same keyframe" epsilon (~0.75 frames as a 0..1 t) — one source of truth. */
+function epsFor(p: Project): number {
+  return 0.75 / Math.max(1, framesOf(p) - 1);
+}
 function playheadT(p: Project, playheadFrame: number): { t: number; eps: number } {
-  const tf = Math.max(1, Math.round((p.composition.durationSec || 1) * (p.composition.fps || 30)));
+  const tf = framesOf(p);
   const t = tf > 1 ? Math.min(1, Math.max(0, (playheadFrame || 0) / (tf - 1))) : 0;
-  const eps = 0.75 / Math.max(1, tf - 1);
-  return { t, eps };
+  return { t, eps: epsFor(p) };
+}
+/** Index of the keyframe whose time is nearest `t` (0 on empty — callers guard). */
+function nearestKeyIndex(arr: { t: number }[], t: number): number {
+  let best = 0, bestD = Infinity;
+  for (let i = 0; i < arr.length; i++) { const d = Math.abs(arr[i].t - t); if (d < bestD) { bestD = d; best = i; } }
+  return best;
+}
+/** Clamp a camera pose to the valid editing envelope. */
+function cleanPose(pose: CameraPose): CameraPose {
+  return {
+    lon: pose.lon,
+    lat: Math.min(85, Math.max(-85, pose.lat)),
+    zoom: Math.min(22, Math.max(0, pose.zoom)),
+    pitch: Math.min(85, Math.max(0, pose.pitch)),
+    bearing: ((pose.bearing % 360) + 360) % 360,
+  };
+}
+/** Retime the keyframe nearest `fromT` to `toT`, merging any it now collides with. */
+function retimeKeyframe<T extends { t: number }>(arr: T[], fromT: number, toT: number, eps: number): T[] {
+  const next = arr.slice();
+  const best = nearestKeyIndex(next, fromT);
+  const newT = Math.min(1, Math.max(0, toT));
+  next[best] = { ...next[best], t: newT };
+  return next.filter((k, i) => i === best || Math.abs(k.t - newT) >= eps).sort((a, b) => a.t - b.t);
 }
 
 type EditorState = {
@@ -319,38 +350,16 @@ export const useEditor = create<EditorState>()(
           const l = p.composition.layers.find((x) => x.id === id) as any;
           const track = l?.tracks?.[prop] as { t: number; value: number; ease: string }[] | undefined;
           if (!track?.length) return;
-          const next = track.map((k) => k);
-          let best = 0, bestD = Infinity;
-          next.forEach((k, i) => { const d = Math.abs(k.t - fromT); if (d < bestD) { bestD = d; best = i; } });
-          const tf = Math.max(1, Math.round((p.composition.durationSec || 1) * (p.composition.fps || 30)));
-          const eps = 0.75 / Math.max(1, tf - 1);
-          const newT = Math.min(1, Math.max(0, toT));
-          next[best] = { ...next[best], t: newT };
-          // Dropping a keyframe onto another (same time) merges into one, never two-at-a-time.
-          const merged = next.filter((k, i) => i === best || Math.abs(k.t - newT) >= eps);
-          merged.sort((a, b) => a.t - b.t);
-          l.tracks = { ...l.tracks, [prop]: merged };
+          // Retime (merging a dropped-onto neighbour) via the shared primitive.
+          l.tracks = { ...l.tracks, [prop]: retimeKeyframe(track, fromT, toT, epsFor(p)) };
         }, `movekf:${id}:${prop}`),
 
         // ── Camera keyframes (Earth-Studio move: a full pose pinned at time t) ──
-        setCameraKeyAtPlayhead: (pose, ease = "smooth") => commit((p) => {
-          let cam = p.composition.layers.find((x) => x.type === "camera") as any;
-          if (!cam) { cam = defaultCamera() as any; p.composition.layers.unshift(cam); } // never a dead "Add keyframe"
-          const { t, eps } = playheadT(p, get().playheadFrame);
-          const clean = {
-            lon: pose.lon,
-            lat: Math.min(85, Math.max(-85, pose.lat)),
-            zoom: Math.min(22, Math.max(0, pose.zoom)),
-            pitch: Math.min(85, Math.max(0, pose.pitch)),
-            bearing: ((pose.bearing % 360) + 360) % 360,
-          };
-          const keys = Array.isArray(cam.keys) ? [...cam.keys] : [];
-          const i = keys.findIndex((k: any) => Math.abs(k.t - t) < eps);
-          if (i >= 0) keys[i] = { ...keys[i], pose: clean }; // update in place at this time
-          else keys.push({ t, pose: clean, ease });
-          keys.sort((a: any, b: any) => a.t - b.t);
-          cam.keys = keys;
-        }),
+        // The playhead variant just resolves t and delegates to setCameraKeyAt.
+        setCameraKeyAtPlayhead: (pose, ease = "smooth") => {
+          const { t } = playheadT(get().project, get().playheadFrame);
+          get().setCameraKeyAt(t, pose, ease);
+        },
 
         deleteCameraKeyAtPlayhead: () => commit((p) => {
           const cam = p.composition.layers.find((x) => x.type === "camera") as any;
@@ -362,15 +371,8 @@ export const useEditor = create<EditorState>()(
         moveCameraKey: (fromT, toT) => commit((p) => {
           const cam = p.composition.layers.find((x) => x.type === "camera") as any;
           if (!cam?.keys?.length) return;
-          const keys = cam.keys.map((k: any) => k);
-          let best = 0, bestD = Infinity;
-          keys.forEach((k: any, i: number) => { const d = Math.abs(k.t - fromT); if (d < bestD) { bestD = d; best = i; } });
-          const tf = Math.max(1, Math.round((p.composition.durationSec || 1) * (p.composition.fps || 30)));
-          const eps = 0.75 / Math.max(1, tf - 1);
-          const newT = Math.min(1, Math.max(0, toT));
-          keys[best] = { ...keys[best], t: newT };
-          cam.keys = keys.filter((k: any, i: number) => i === best || Math.abs(k.t - newT) >= eps).sort((a: any, b: any) => a.t - b.t);
-        }, "movecam"),
+          cam.keys = retimeKeyframe(cam.keys, fromT, toT, epsFor(p));
+        }, `movecam:${fromT}`),
 
         setCameraKeyEaseAtPlayhead: (ease) => commit((p) => {
           const cam = p.composition.layers.find((x) => x.type === "camera") as any;
@@ -403,19 +405,12 @@ export const useEditor = create<EditorState>()(
         setCameraKeyAt: (t, pose, ease = "smooth") => commit((p) => {
           let cam = p.composition.layers.find((x) => x.type === "camera") as any;
           if (!cam) { cam = defaultCamera() as any; p.composition.layers.unshift(cam); }
-          const tf = Math.max(1, Math.round((p.composition.durationSec || 1) * (p.composition.fps || 30)));
-          const eps = 0.75 / Math.max(1, tf - 1);
-          const clean = {
-            lon: pose.lon,
-            lat: Math.min(85, Math.max(-85, pose.lat)),
-            zoom: Math.min(22, Math.max(0, pose.zoom)),
-            pitch: Math.min(85, Math.max(0, pose.pitch)),
-            bearing: ((pose.bearing % 360) + 360) % 360,
-          };
+          const eps = epsFor(p);
+          const clean = cleanPose(pose);
           const tc = Math.min(1, Math.max(0, t));
           const keys = Array.isArray(cam.keys) ? [...cam.keys] : [];
           const i = keys.findIndex((k: any) => Math.abs(k.t - tc) < eps);
-          if (i >= 0) keys[i] = { ...keys[i], pose: clean };
+          if (i >= 0) keys[i] = { ...keys[i], pose: clean }; // update in place at this time
           else keys.push({ t: tc, pose: clean, ease });
           keys.sort((a: any, b: any) => a.t - b.t);
           cam.keys = keys;
@@ -424,8 +419,7 @@ export const useEditor = create<EditorState>()(
         deleteCameraKeyAt: (t) => commit((p) => {
           const cam = p.composition.layers.find((x) => x.type === "camera") as any;
           if (!cam?.keys?.length) return;
-          let best = 0, bestD = Infinity;
-          cam.keys.forEach((k: any, i: number) => { const d = Math.abs(k.t - t); if (d < bestD) { bestD = d; best = i; } });
+          const best = nearestKeyIndex(cam.keys, t);
           cam.keys = cam.keys.filter((_: any, i: number) => i !== best);
         }),
 
@@ -433,8 +427,7 @@ export const useEditor = create<EditorState>()(
           const l = p.composition.layers.find((x) => x.id === id) as any;
           if (!l) return;
           if (!l.tracks) l.tracks = {};
-          const tf = Math.max(1, Math.round((p.composition.durationSec || 1) * (p.composition.fps || 30)));
-          const eps = 0.75 / Math.max(1, tf - 1);
+          const eps = epsFor(p);
           const tc = Math.min(1, Math.max(0, t));
           const track = l.tracks[prop] ? [...l.tracks[prop]] : [];
           const i = track.findIndex((k: any) => Math.abs(k.t - tc) < eps);
@@ -448,9 +441,7 @@ export const useEditor = create<EditorState>()(
           const l = p.composition.layers.find((x) => x.id === id) as any;
           const track = l?.tracks?.[prop] as { t: number }[] | undefined;
           if (!track?.length) return;
-          let best = 0, bestD = Infinity;
-          track.forEach((k, i) => { const d = Math.abs(k.t - t); if (d < bestD) { bestD = d; best = i; } });
-          const next = track.filter((_, i) => i !== best);
+          const next = track.filter((_, i) => i !== nearestKeyIndex(track, t));
           if (next.length) l.tracks = { ...l.tracks, [prop]: next };
           else { const { [prop]: _drop, ...rest } = l.tracks; l.tracks = rest; }
         }),

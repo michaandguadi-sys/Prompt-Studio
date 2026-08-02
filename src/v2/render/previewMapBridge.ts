@@ -26,21 +26,14 @@ type LiveMap = {
 } | null;
 
 let live: LiveMap = null;
-const subs = new Set<() => void>();
 
 export const previewMapBridge = {
   /** MapComposition calls this with its map instance (or null on unmount). */
   register(m: LiveMap) {
     live = m;
-    subs.forEach((f) => f());
   },
   /** The gizmo reads the live map here (null until the preview map is ready). */
   get(): LiveMap {
     return live;
-  },
-  /** Notify when the live map appears/disappears (so the gizmo can enable). */
-  subscribe(f: () => void): () => void {
-    subs.add(f);
-    return () => subs.delete(f);
   },
 };

@@ -9,6 +9,19 @@ import { minZoomForAspect, type CameraLayer, type CameraPose, type KfEase } from
 
 type Axis = "pan" | "bearing" | "pitch" | "zoom" | null;
 const ACCENT = "#38E1FF";
+// Compass tick geometry is fully static — compute the 24 marks once at module
+// load instead of re-running 24 trig calcs on every gizmo render (hot in a drag).
+const COMPASS_TICKS = Array.from({ length: 24 }, (_, i) => {
+  const a = i * 15, rad = (a * Math.PI) / 180;
+  const card = a % 90 === 0, inter = a % 45 === 0;
+  const r0 = card ? 74 : inter ? 79 : 82, r1 = 86;
+  return {
+    x1: 95 + Math.sin(rad) * r0, y1: 95 - Math.cos(rad) * r0,
+    x2: 95 + Math.sin(rad) * r1, y2: 95 - Math.cos(rad) * r1,
+    stroke: a === 0 ? ACCENT : `rgba(255,255,255,${card ? 0.5 : inter ? 0.32 : 0.16})`,
+    width: a === 0 ? 2.5 : card ? 1.75 : 1,
+  };
+});
 const CARDINALS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
 /**
@@ -77,7 +90,7 @@ export const CameraGizmo: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   const norm360 = (d: number) => ((d % 360) + 360) % 360;
 
   const commitOnRelease = useCallback(() => {
-    if (keyAtPlayhead || keys.length > 0) setCameraKeyAtPlayhead(readMap());
+    if (keys.length > 0) setCameraKeyAtPlayhead(readMap()); // keyAtPlayhead ⊆ keys.length>0
   }, [keyAtPlayhead, keys.length, readMap, setCameraKeyAtPlayhead]);
 
   const startDrag = (
@@ -186,14 +199,9 @@ export const CameraGizmo: React.FC<{ onExit: () => void }> = ({ onExit }) => {
         >
           <svg viewBox="0 0 190 190" className="absolute inset-0 h-full w-full">
             <circle cx="95" cy="95" r="86" fill="none" stroke="rgba(255,255,255,0.22)" strokeWidth={drag === "bearing" ? 2.25 : 1.5} className="transition-all group-hover:stroke-white/40" />
-            {Array.from({ length: 24 }).map((_, i) => {
-              const a = i * 15, rad = (a * Math.PI) / 180;
-              const card = a % 90 === 0, inter = a % 45 === 0;
-              const r0 = card ? 74 : inter ? 79 : 82, r1 = 86;
-              const x1 = 95 + Math.sin(rad) * r0, y1 = 95 - Math.cos(rad) * r0;
-              const x2 = 95 + Math.sin(rad) * r1, y2 = 95 - Math.cos(rad) * r1;
-              return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={a === 0 ? ACCENT : `rgba(255,255,255,${card ? 0.5 : inter ? 0.32 : 0.16})`} strokeWidth={a === 0 ? 2.5 : card ? 1.75 : 1} />;
-            })}
+            {COMPASS_TICKS.map((t, i) => (
+              <line key={i} x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2} stroke={t.stroke} strokeWidth={t.width} />
+            ))}
             {/* glowing north pointer */}
             <path d="M95 3 l6 12 h-12 z" fill={ACCENT} style={{ filter: `drop-shadow(0 0 4px ${ACCENT})` }} />
           </svg>

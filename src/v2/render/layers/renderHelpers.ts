@@ -1,9 +1,10 @@
 import React from "react";
-import { Theme, HighlightLayer, CameraLayer, CameraPose, RouteLayer, TrackLayer, Look } from "../../doc/schema";
+import { Theme, HighlightLayer, CameraLayer, CameraPose, RouteLayer, TrackLayer, Look, KfEase } from "../../doc/schema";
 import { fontStack } from "../../doc/themes";
 import { centroidOf } from "../../../lib/geo";
 import { patternImageId } from "../../../lib/mapPatterns";
 import { linearChain } from "../../../lib/interp";
+import { applyKfEase } from "../timing";
 
 /* ── Render State (Module Singletons) ─────────────────────────────────────── */
 export let LIVE_ZOOM = 8;
@@ -192,16 +193,6 @@ export function hasCamKeys(cam?: CameraLayer | null): boolean {
   return !!cam && Array.isArray((cam as any).keys) && (cam as any).keys.length > 0;
 }
 
-const kfEase = (ease: string, t: number): number => {
-  switch (ease) {
-    case "linear": return t;
-    case "easeIn": return t * t;
-    case "easeOut": return t * (2 - t);
-    case "hold": return 0; // step: hold this key's pose until the next
-    default: return t * t * (3 - 2 * t); // "smooth" (ease-in-out)
-  }
-};
-
 /**
  * Sample the camera pose from explicit time-based keyframes at scene-time `t`
  * (0..1) — the Earth-Studio model. Interpolates between the two surrounding
@@ -217,7 +208,7 @@ export function keyframedPose(cam: CameraLayer, t: number): CameraPose {
   while (i < keys.length - 1 && t > keys[i + 1].t) i++;
   const a = keys[i], b = keys[i + 1];
   const span = Math.max(1e-6, b.t - a.t);
-  const e = kfEase(a.ease, clampN((t - a.t) / span, 0, 1));
+  const e = applyKfEase(a.ease as KfEase, clampN((t - a.t) / span, 0, 1));
   return {
     lon: lerp(a.pose.lon, b.pose.lon, e),
     lat: lerp(a.pose.lat, b.pose.lat, e),

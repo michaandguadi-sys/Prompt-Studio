@@ -310,16 +310,18 @@ const BeatTracks: React.FC<{
             </div>
             {/* Earth-Studio-style keyframe lanes — one per animated property */}
             {trackKeys.map((prop) => (
-              <KfLane key={prop} prop={prop} kfs={(tracks as any)[prop]} dur={dur} fps={fps}
+              <KfLane key={prop} items={(tracks as any)[prop]} dur={dur} label={humanizeProp(prop)} hex="#6E7BFF" rgb="110,123,255"
+                tooltip={(k) => `${(k.t * dur).toFixed(2)}s · ${humanizeProp(prop)} = ${r1(k.value)} · ${k.ease} — click to select · drag to retime · Delete to remove`}
                 onJump={jumpToT} onMove={(fromT, toT) => moveKeyframe(l.id, prop, fromT, toT)}
                 onAdd={(tt) => addPropKeyAt(l, prop, tt)}
                 selectedT={selKf?.kind === "prop" && selKf.id === l.id && selKf.prop === prop ? selKf.t : null}
                 onSelect={(tt) => setSelKf({ kind: "prop", id: l.id, prop, t: tt })} />
             ))}
-            {/* Camera move lane — one diamond per pinned pose (Earth-Studio style) */}
+            {/* Camera move lane — one cyan diamond per pinned pose (Earth-Studio style) */}
             {active && isCamera && camKeys.length > 0 && (
-              <CamKfLane keys={camKeys} dur={dur} onJump={jumpToT} onMove={moveCameraKey}
-                onAdd={addCamKeyAt}
+              <KfLane items={camKeys} dur={dur} label="Camera move" hex="#38E1FF" rgb="56,225,255"
+                tooltip={(k) => `${(k.t * dur).toFixed(2)}s · z${r1(k.pose?.zoom ?? 0)} · ${Math.round(k.pose?.bearing ?? 0)}° · tilt ${Math.round(k.pose?.pitch ?? 0)}° · ${k.ease} — click to select · drag to retime · Delete to remove`}
+                onJump={jumpToT} onMove={moveCameraKey} onAdd={addCamKeyAt}
                 selectedT={selKf?.kind === "cam" ? selKf.t : null}
                 onSelect={(tt) => setSelKf({ kind: "cam", t: tt })} />
             )}
@@ -393,58 +395,32 @@ const laneAltAdd = (e: React.PointerEvent, onAdd: (t: number) => void) => {
   onAdd(clamp((e.clientX - rect.left) / rect.width, 0, 1));
 };
 
+/* ── Keyframe lane — one row of diamonds for a property track OR the camera
+   move. Click a diamond to select+jump; drag to retime; ⌥-click empty to add.
+   `hex`/`rgb` are the accent (iris for props, cyan for the camera lane);
+   `tooltip(k)` renders each diamond's title (value vs pose summary). */
 const KfLane: React.FC<{
-  prop: string; kfs: { t: number; value: number; ease: string }[]; dur: number; fps: number;
+  items: { t: number; ease: string }[]; dur: number; label: string;
+  hex: string; rgb: string; tooltip: (k: any) => string;
   onJump: (t: number) => void; onMove: (fromT: number, toT: number) => void;
   onAdd: (t: number) => void; selectedT: number | null; onSelect: (t: number) => void;
-}> = ({ prop, kfs, dur, onJump, onMove, onAdd, selectedT, onSelect }) => (
-  <div className="relative flex h-5 items-center border-b border-line/40 bg-iris/[0.03]">
+}> = ({ items, label, hex, rgb, tooltip, onJump, onMove, onAdd, selectedT, onSelect }) => (
+  <div className="relative flex h-5 items-center border-b border-line/40" style={{ background: `rgba(${rgb},0.045)` }}>
     <div className="flex w-28 shrink-0 items-center gap-1 truncate pl-6 pr-2 text-[9.5px] text-graphite/45">
-      <span className="h-[6px] w-[6px] rotate-45 rounded-[1px] bg-iris/70" />
-      <span className="truncate">{humanizeProp(prop)}</span>
+      <span className="h-[6px] w-[6px] rotate-45 rounded-[1px]" style={{ background: hex }} />
+      <span className="truncate">{label}</span>
     </div>
     <div data-kflane onPointerDown={(e) => laneAltAdd(e, onAdd)} className="relative h-full flex-1" title="⌥-click to add a keyframe here" style={{ cursor: "copy" }}>
-      <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-iris/15" />
-      {kfs.map((k, i) => {
+      <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2" style={{ background: `rgba(${rgb},0.2)` }} />
+      {items.map((k, i) => {
         const sel = selectedT != null && Math.abs(k.t - selectedT) < 1e-4;
         return (
           <span
             key={i}
             onPointerDown={(e) => kfDrag(e, k.t, onMove, (tt) => { onJump(tt); onSelect(tt); })}
-            title={`${(k.t * dur).toFixed(2)}s · ${humanizeProp(prop)} = ${r1(k.value)} · ${k.ease} — click to select · drag to retime · Delete to remove`}
-            className={`absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 cursor-grab rounded-[2px] border bg-iris transition-transform hover:scale-125 active:cursor-grabbing ${sel ? "scale-[1.35] border-white ring-2 ring-white/90" : "border-white/70"}`}
-            style={{ left: `${k.t * 100}%`, boxShadow: sel ? "0 0 9px rgba(110,123,255,0.95)" : "0 0 5px rgba(110,123,255,0.6)" }}
-          />
-        );
-      })}
-    </div>
-  </div>
-);
-
-/* ── Camera move lane — the "Adjust camera" keyframes on the timeline ────────
-   One cyan diamond per pinned pose. Click to jump the playhead there; drag to
-   retime. Editing the pose itself happens in the viewfinder gizmo. */
-const CamKfLane: React.FC<{
-  keys: { t: number; pose: any; ease: string }[]; dur: number;
-  onJump: (t: number) => void; onMove: (fromT: number, toT: number) => void;
-  onAdd: (t: number) => void; selectedT: number | null; onSelect: (t: number) => void;
-}> = ({ keys, dur, onJump, onMove, onAdd, selectedT, onSelect }) => (
-  <div className="relative flex h-5 items-center border-b border-line/40" style={{ background: "rgba(56,225,255,0.05)" }}>
-    <div className="flex w-28 shrink-0 items-center gap-1 truncate pl-6 pr-2 text-[9.5px] text-graphite/45">
-      <span className="h-[6px] w-[6px] rotate-45 rounded-[1px] bg-[#38E1FF]" />
-      <span className="truncate">Camera move</span>
-    </div>
-    <div data-kflane onPointerDown={(e) => laneAltAdd(e, onAdd)} className="relative h-full flex-1" title="⌥-click to add a camera keyframe here" style={{ cursor: "copy" }}>
-      <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2" style={{ background: "rgba(56,225,255,0.2)" }} />
-      {keys.map((k, i) => {
-        const sel = selectedT != null && Math.abs(k.t - selectedT) < 1e-4;
-        return (
-          <span
-            key={i}
-            onPointerDown={(e) => kfDrag(e, k.t, onMove, (tt) => { onJump(tt); onSelect(tt); })}
-            title={`${(k.t * dur).toFixed(2)}s · z${r1(k.pose?.zoom ?? 0)} · ${Math.round(k.pose?.bearing ?? 0)}° · tilt ${Math.round(k.pose?.pitch ?? 0)}° · ${k.ease} — click to select · drag to retime · Delete to remove`}
-            className={`absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 cursor-grab rounded-[2px] border bg-[#38E1FF] transition-transform hover:scale-125 active:cursor-grabbing ${sel ? "scale-[1.35] border-white ring-2 ring-white/90" : "border-white/70"}`}
-            style={{ left: `${k.t * 100}%`, boxShadow: sel ? "0 0 9px rgba(56,225,255,0.95)" : "0 0 5px rgba(56,225,255,0.6)" }}
+            title={tooltip(k)}
+            className={`absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 cursor-grab rounded-[2px] border transition-transform hover:scale-125 active:cursor-grabbing ${sel ? "scale-[1.35] border-white ring-2 ring-white/90" : "border-white/70"}`}
+            style={{ left: `${k.t * 100}%`, background: hex, boxShadow: sel ? `0 0 9px rgba(${rgb},0.95)` : `0 0 5px rgba(${rgb},0.6)` }}
           />
         );
       })}
