@@ -152,7 +152,6 @@ const BeatTracks: React.FC<{
   patchLayer: (id: string, p: any) => void;
 }> = ({ layers, dur, selectedId, select, patchTiming, patchLayer }) => {
   const ticks = Array.from({ length: Math.floor(dur) + 1 }, (_, i) => i);
-  const playheadFrame = useEditor((s) => s.playheadFrame);
   const fps = useEditor((s) => s.project.composition.fps);
   const requestSeek = useEditor((s) => s.requestSeek);
   const setPlayheadFrame = useEditor((s) => s.setPlayheadFrame);
@@ -204,7 +203,6 @@ const BeatTracks: React.FC<{
     const value = v == null ? ((l as any)[prop] ?? 0) : v;
     addKeyframeAt(l.id, prop, tt, value);
   };
-  const pct = dur > 0 && fps > 0 ? clamp((playheadFrame / fps / dur) * 100, 0, 100) : 0;
   const seekAt = (e: React.PointerEvent) => {
     const r = e.currentTarget.getBoundingClientRect();
     requestSeek?.(Math.round(clamp((e.clientX - r.left) / r.width, 0, 1) * dur * fps));
@@ -330,16 +328,25 @@ const BeatTracks: React.FC<{
         })}
       </div>
 
-      {/* Playhead — a creative scrubber synced to the live preview. Offset past
-          the 7rem (w-28) track-label gutter so it lands over the timeline area. */}
-      {dur > 0 && fps > 0 && (
-        <div className="pointer-events-none absolute inset-y-0 z-10" style={{ left: "7rem", right: 0 }}>
-          <div className="absolute inset-y-0" style={{ left: `${pct}%` }}>
-            <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2" style={{ background: "#6E7BFF", boxShadow: "0 0 6px 0 rgba(110,123,255,0.85)" }} />
-            <div className="absolute left-1/2 top-0 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/3 rotate-45 rounded-[2px]" style={{ background: "#6E7BFF", boxShadow: "0 0 8px 1px rgba(110,123,255,0.9)" }} />
-          </div>
-        </div>
-      )}
+      {/* Playhead — isolated into its own subscriber so only IT re-renders on
+          each playback tick (~60/s), not every layer row + keyframe diamond. */}
+      <Playhead dur={dur} fps={fps} />
+    </div>
+  );
+};
+
+/** The moving playhead line. Subscribes to `playheadFrame` ALONE so a playing
+ *  scene doesn't re-render the whole BeatTracks (rows/diamonds) 60× a second. */
+const Playhead: React.FC<{ dur: number; fps: number }> = ({ dur, fps }) => {
+  const playheadFrame = useEditor((s) => s.playheadFrame);
+  if (!(dur > 0 && fps > 0)) return null;
+  const pct = clamp((playheadFrame / fps / dur) * 100, 0, 100);
+  return (
+    <div className="pointer-events-none absolute inset-y-0 z-10" style={{ left: "7rem", right: 0 }}>
+      <div className="absolute inset-y-0" style={{ left: `${pct}%` }}>
+        <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2" style={{ background: "#6E7BFF", boxShadow: "0 0 6px 0 rgba(110,123,255,0.85)" }} />
+        <div className="absolute left-1/2 top-0 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/3 rotate-45 rounded-[2px]" style={{ background: "#6E7BFF", boxShadow: "0 0 8px 1px rgba(110,123,255,0.9)" }} />
+      </div>
     </div>
   );
 };
