@@ -17,6 +17,10 @@ import { recolorLayer } from "../doc/themes";
  */
 
 const MAX_HISTORY = 80;
+// Drag ticks (scrubby inputs, keyframe/transform drags) fire many commits in
+// quick succession. Same-key commits within this window collapse into ONE undo
+// entry, so a whole drag = a single ⌘Z (and one history snapshot, not dozens).
+const COALESCE_MS = 900;
 
 /** Current playhead as scene-time t (0..1) plus a "same keyframe" epsilon
  *  (~0.75 frames), so the keyframe button toggles the one under the playhead. */
@@ -32,6 +36,8 @@ type EditorState = {
   selectedId: string | null;
   past: Project[];
   future: Project[];
+  /** Transient: the last commit's coalesce key + time, for drag-merging. */
+  _coalesce: { key: string; at: number } | null;
 
   // selectors are derived in components; actions here:
   load: (p: Project) => void;
@@ -161,18 +167,23 @@ function ensureScenes(p: Project): Project {
 export const useEditor = create<EditorState>()(
   persist(
     (set, get) => {
-      /** Apply a mutation to the project with undo bookkeeping. */
-      const commit = (mutate: (p: Project) => void) =>
+      /** Apply a mutation to the project with undo bookkeeping. Pass a
+       *  `coalesceKey` for drag-style edits: consecutive commits sharing the key
+       *  within COALESCE_MS merge into the SAME undo entry (the pre-drag state
+       *  stays as the single undo target) instead of one snapshot per tick. */
+      const commit = (mutate: (p: Project) => void, coalesceKey?: string) =>
         set((s) => {
-          const past = [...s.past, clone(s.project)].slice(-MAX_HISTORY);
+          const now = Date.now();
+          const merge = !!coalesceKey && s._coalesce?.key === coalesceKey && now - (s._coalesce?.at ?? 0) < COALESCE_MS;
+          const past = merge ? s.past : [...s.past, clone(s.project)].slice(-MAX_HISTORY);
           const next = clone(s.project);
           mutate(next);
           // Mirror the live composition back into the active scene so scenes[]
           // is always current (for persist, scene-switching, and rendering).
           const sc = next.scenes?.find((x) => x.id === next.activeSceneId);
           if (sc) sc.composition = next.composition;
-          next.updatedAt = Date.now();
-          return { project: next, past, future: [] };
+          next.updatedAt = now;
+          return { project: next, past, future: [], _coalesce: coalesceKey ? { key: coalesceKey, at: now } : null };
         });
 
       const layerIndex = (p: Project, id: string) => p.composition.layers.findIndex((l) => l.id === id);
@@ -182,9 +193,10 @@ export const useEditor = create<EditorState>()(
         selectedId: null,
         past: [],
         future: [],
+        _coalesce: null,
 
-        load: (p) => set({ project: ensureScenes(clone(p)), selectedId: null, past: [], future: [] }),
-        reset: () => set({ project: ensureScenes(createDefaultProject()), selectedId: null, past: [], future: [] }),
+        load: (p) => set({ project: ensureScenes(clone(p)), selectedId: null, past: [], future: [], _coalesce: null }),
+        reset: () => set({ project: ensureScenes(createDefaultProject()), selectedId: null, past: [], future: [], _coalesce: null }),
         select: (id) => set({ selectedId: id }),
 
         addLayer: (type, overrides) => {
@@ -239,7 +251,7 @@ export const useEditor = create<EditorState>()(
         patchLayer: (id, patch) => commit((p) => {
           const l = p.composition.layers.find((x) => x.id === id);
           if (l) Object.assign(l, patch);
-        }),
+        }, `patch:${id}`),
 
         patchTiming: (id, patch) => commit((p) => {
           const l = p.composition.layers.find((x) => x.id === id) as any;
@@ -263,7 +275,7 @@ export const useEditor = create<EditorState>()(
           // Always mirror to the static field too (used when the track is empty
           // and as the value shown when the playhead sits off any keyframe).
           l[prop] = value;
-        }),
+        }, `set:${id}:${prop}`),
 
         toggleKeyframe: (id, prop, value) => commit((p) => {
           const l = p.composition.layers.find((x) => x.id === id) as any;
@@ -318,7 +330,7 @@ export const useEditor = create<EditorState>()(
           const merged = next.filter((k, i) => i === best || Math.abs(k.t - newT) >= eps);
           merged.sort((a, b) => a.t - b.t);
           l.tracks = { ...l.tracks, [prop]: merged };
-        }),
+        }, `movekf:${id}:${prop}`),
 
         // ── Camera keyframes (Earth-Studio move: a full pose pinned at time t) ──
         setCameraKeyAtPlayhead: (pose, ease = "smooth") => commit((p) => {
@@ -358,7 +370,7 @@ export const useEditor = create<EditorState>()(
           const newT = Math.min(1, Math.max(0, toT));
           keys[best] = { ...keys[best], t: newT };
           cam.keys = keys.filter((k: any, i: number) => i === best || Math.abs(k.t - newT) >= eps).sort((a: any, b: any) => a.t - b.t);
-        }),
+        }, "movecam"),
 
         setCameraKeyEaseAtPlayhead: (ease) => commit((p) => {
           const cam = p.composition.layers.find((x) => x.type === "camera") as any;
@@ -612,12 +624,12 @@ export const useEditor = create<EditorState>()(
         undo: () => set((s) => {
           if (s.past.length === 0) return s;
           const prev = s.past[s.past.length - 1];
-          return { project: prev, past: s.past.slice(0, -1), future: [clone(s.project), ...s.future].slice(0, MAX_HISTORY) };
+          return { project: prev, past: s.past.slice(0, -1), future: [clone(s.project), ...s.future].slice(0, MAX_HISTORY), _coalesce: null };
         }),
         redo: () => set((s) => {
           if (s.future.length === 0) return s;
           const next = s.future[0];
-          return { project: next, future: s.future.slice(1), past: [...s.past, clone(s.project)].slice(-MAX_HISTORY) };
+          return { project: next, future: s.future.slice(1), past: [...s.past, clone(s.project)].slice(-MAX_HISTORY), _coalesce: null };
         }),
         canUndo: () => get().past.length > 0,
         canRedo: () => get().future.length > 0,
