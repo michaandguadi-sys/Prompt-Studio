@@ -144,6 +144,23 @@ const AMBIENT: [number, number, number, number][] = [
   [13, 2, 7, 4], [0, 12, 10, 9],
 ];
 
+/** IDLE WORLD TOUR — a curated showreel of the most cinematic terrain on Earth.
+ *  The background glides between these framings with the editor's eased camera
+ *  language; zooms stay modest so the hero never becomes a tile-heavy drag. */
+type Hero = { c: [number, number]; z: number; p: number; b: number };
+const WORLD_TOUR: Hero[] = [
+  { c: [86.9, 27.9],   z: 4.0, p: 30, b: 12 },   // Himalaya — the Everest massif
+  { c: [7.3, 61.2],    z: 4.6, p: 26, b: -14 },  // Norwegian fjords
+  { c: [-72.6, -50.9], z: 4.2, p: 24, b: 8 },    // Patagonia — Torres del Paine
+  { c: [-112.2, 36.2], z: 4.8, p: 28, b: -18 },  // Grand Canyon
+  { c: [9.6, 46.5],    z: 4.9, p: 30, b: -22 },  // The Alps
+  { c: [170.3, -43.6], z: 4.7, p: 26, b: 16 },   // New Zealand — Southern Alps
+  { c: [-19.0, 64.6],  z: 4.4, p: 20, b: 0 },    // Iceland
+  { c: [137.9, 36.1],  z: 3.9, p: 24, b: 10 },   // Japan — the roof of Honshu
+];
+const TOUR_FLY_MS = 5200;    // the cinematic glide between landscapes
+const TOUR_DWELL_MS = 6500;  // how long we hold on each, breathing gently
+
 const IRIS = "#6E7BFF", CYAN = "#2FE0FF", VIOLET = "#B57BFF", AMBER = "#FFB86E";
 
 /**
@@ -405,7 +422,15 @@ export const LiveStoryMap: React.FC<Props> = ({ stops, hoverStops, generating, g
   /* ── The one rAF loop: idle drift + canvas overlay + parallax ─────────────── */
   useEffect(() => {
     let raf = 0;
-    let driftLon = 12;
+    // Idle world-tour state (local to this rAF loop; see WORLD_TOUR).
+    let tourIdx = -1;        // which hero we're on (−1 = tour not started)
+    let tourFlying = false;  // true while a flyTo glide owns the camera
+    let phaseUntil = 0;      // ts (ms) at which the current phase ends
+    let dwellBearing = 0;    // bearing carried through the gentle dwell orbit
+    let wasIdle = false;     // detect the moment we return to the idle state
+    let driftLon = 12;       // reduced-motion fallback drift longitude
+    const reduce = typeof window !== "undefined"
+      && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
     const tick = (ts: number) => {
       raf = requestAnimationFrame(tick);
@@ -415,28 +440,56 @@ export const LiveStoryMap: React.FC<Props> = ({ stops, hoverStops, generating, g
       const cv = canvasRef.current;
       if (!m || !cv || !loadedRef.current) return;
 
-      // Idle motion — a slow orbit around the peak in 3D mode, otherwise the
-      // gentle world drift. Only when nothing is recognised and not generating.
-      if (!stopsRef.current.length && !hoverRef.current?.length && !genRef.current && !m.isMoving() && !introActiveRef.current) {
+      // Idle motion — only when nothing is recognised and not generating.
+      const idle = !stopsRef.current.length && !hoverRef.current?.length
+        && !genRef.current && !introActiveRef.current;
+      if (idle) {
         if (want3dRef.current) {
-          try { m.setBearing((m.getBearing() + 0.045) % 360); } catch {}
+          // 3D terrain tap: a slow orbit around the peak.
+          if (!m.isMoving()) { try { m.setBearing((m.getBearing() + 0.045) % 360); } catch {} }
+        } else if (reduce) {
+          // Reduced motion: a barely-there world drift, no flying tour.
+          if (!m.isMoving()) {
+            try {
+              const curLng = m.getCenter().lng;
+              if (Math.abs(curLng - driftLon) > 1.5) driftLon = curLng;
+              driftLon = ((driftLon + 0.004 + 180) % 360) - 180;
+              m.jumpTo({ center: [driftLon, 24], zoom: 1.72, pitch: 0, bearing: 0 });
+            } catch {}
+          }
         } else {
+          // CINEMATIC WORLD TOUR — glide between the most beautiful terrain on
+          // Earth with the editor's own eased camera language (flyTo's parabolic
+          // swoop), holding each landscape with a gentle orbiting "breath".
           try {
-            // Cinematic idle: a calm eased drift with a gentle zoom "breath" and
-            // a slow N/S sway — an establishing shot that feels ALIVE (like the
-            // editor's eased camera), not a flat conveyor-belt scroll.
-            // Resume the drift FROM WHERE THE CAMERA IS — after a story flight
-            // returns home, the old driftLon could be half a world away and the
-            // next frame teleported the globe (the "stuck/jumpy" idle bug).
-            const curLng = m.getCenter().lng;
-            if (Math.abs(curLng - driftLon) > 1.5) driftLon = curLng;
-            driftLon = ((driftLon + 0.006 + 180) % 360) - 180;   // calmer than 0.008
-            const lat = 26 + Math.sin(t * 0.05) * 4.5;            // slow N/S sway (~125s)
-            const zoom = 1.66 + (Math.sin(t * 0.045) + 1) * 0.045; // 1.66 → 1.75 breath (~140s)
-            m.jumpTo({ center: [driftLon, lat], zoom });
+            // Returning to idle (after a story / hover cleared): restart cleanly
+            // from wherever the camera is, so we glide — never snap — onward.
+            if (!wasIdle) { tourFlying = false; phaseUntil = 0; }
+            if (ts >= phaseUntil && !m.isMoving()) {
+              if (tourFlying) {
+                // just landed → begin the dwell
+                tourFlying = false;
+                dwellBearing = WORLD_TOUR[tourIdx].b;
+                phaseUntil = ts + TOUR_DWELL_MS;
+              } else {
+                // start, or dwell finished → glide to the next landscape
+                tourIdx = (tourIdx + 1) % WORLD_TOUR.length;
+                const h = WORLD_TOUR[tourIdx];
+                m.flyTo({ center: h.c, zoom: h.z, pitch: h.p, bearing: h.b, duration: TOUR_FLY_MS, curve: 1.5, essential: true });
+                tourFlying = true;
+                phaseUntil = ts + TOUR_FLY_MS;
+              }
+            } else if (!tourFlying && tourIdx >= 0 && !m.isMoving()) {
+              // Dwell "breath": a slow orbit + micro zoom pulse so the held shot
+              // stays alive (never frozen), mirroring the editor's easing.
+              const h = WORLD_TOUR[tourIdx];
+              dwellBearing += 0.02;
+              m.jumpTo({ center: h.c, zoom: h.z + Math.sin(t * 0.5) * 0.015, pitch: h.p, bearing: dwellBearing });
+            }
           } catch {}
         }
       }
+      wasIdle = idle;
 
       // Parallax — the whole stage leans gently toward the cursor. The canvas
       // overlay lives ABOVE the readability washes (so pins/fills/lanes stay
