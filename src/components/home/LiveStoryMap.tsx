@@ -422,13 +422,18 @@ export const LiveStoryMap: React.FC<Props> = ({ stops, hoverStops, generating, g
           try { m.setBearing((m.getBearing() + 0.045) % 360); } catch {}
         } else {
           try {
+            // Cinematic idle: a calm eased drift with a gentle zoom "breath" and
+            // a slow N/S sway — an establishing shot that feels ALIVE (like the
+            // editor's eased camera), not a flat conveyor-belt scroll.
             // Resume the drift FROM WHERE THE CAMERA IS — after a story flight
             // returns home, the old driftLon could be half a world away and the
             // next frame teleported the globe (the "stuck/jumpy" idle bug).
             const curLng = m.getCenter().lng;
             if (Math.abs(curLng - driftLon) > 1.5) driftLon = curLng;
-            driftLon = ((driftLon + 0.008 + 180) % 360) - 180;
-            m.setCenter([driftLon, 26]);
+            driftLon = ((driftLon + 0.006 + 180) % 360) - 180;   // calmer than 0.008
+            const lat = 26 + Math.sin(t * 0.05) * 4.5;            // slow N/S sway (~125s)
+            const zoom = 1.66 + (Math.sin(t * 0.045) + 1) * 0.045; // 1.66 → 1.75 breath (~140s)
+            m.jumpTo({ center: [driftLon, lat], zoom });
           } catch {}
         }
       }

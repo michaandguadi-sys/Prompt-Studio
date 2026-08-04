@@ -331,9 +331,15 @@ export const AiIdeaBox: React.FC<{
           0%, 100% { box-shadow: 0 0 20px rgba(110,123,255,0.35); }
           50%       { box-shadow: 0 0 32px rgba(110,123,255,0.60); }
         }
+        @keyframes focusBreathe {
+          0%, 100% { box-shadow: 0 16px 48px rgba(0,0,0,0.55), 0 0 40px rgba(110,123,255,0.15); }
+          50%       { box-shadow: 0 16px 48px rgba(0,0,0,0.55), 0 0 66px rgba(110,123,255,0.32); }
+        }
+        .promptFocusGlow { animation: focusBreathe 3.6s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) { .promptFocusGlow { animation: none; } }
       `}</style>
       <div
-        className={`${containerCls} transition-all duration-300${isFocused && dm ? " ring-2 ring-iris/22 shadow-[0_0_48px_rgba(110,123,255,0.18)]" : ""}`}
+        className={`${containerCls} transition-all duration-300${isFocused && dm ? " ring-2 ring-iris/30 promptFocusGlow" : ""}`}
       >
         {/* ── TEXTAREA ROWS ─────────────────────────────────────────────────── */}
         <div className={dm ? "space-y-1 px-4 pt-4" : "space-y-1.5"}>

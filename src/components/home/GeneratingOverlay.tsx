@@ -22,6 +22,7 @@ const portal = (node: React.ReactNode) =>
   typeof document === "undefined" ? null : createPortal(node, document.body);
 
 const DIRECTOR_STATUS = [
+  "Understanding your vision…",
   "Director researching the story…",
   "Mapping the narrative arc…",
   "Identifying key locations…",
