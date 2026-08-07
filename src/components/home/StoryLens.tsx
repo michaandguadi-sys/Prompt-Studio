@@ -1,8 +1,15 @@
 "use client";
 
 import React from "react";
-import { MapPin, ArrowRight, Film, Globe2, Sparkles, Clapperboard } from "lucide-react";
+import { MapPin, ArrowRight, Film, Globe2, Sparkles, Clapperboard, Check } from "lucide-react";
 import type { Interpretation } from "@/lib/parse/intent";
+
+/** The verb the director will apply — shown only when it adds meaning the
+ *  journey chain doesn't already imply (route arrows already read as a journey). */
+const ACTION_VERB: Partial<Record<Interpretation["action"], string>> = {
+  highlight: "Reveal",
+  camera: "Fly to",
+};
 
 /**
  * StoryLens — the dark-glass strip under the prompt that turns the intent
@@ -65,6 +72,13 @@ export const StoryLens: React.FC<{
     ? [it.route.from, ...it.route.via, it.route.to]
     : (it?.locations ?? []))).slice(0, 5);
 
+  // Signals the intent engine already resolved — surfaced so the panel reflects
+  // what the director UNDERSTOOD and will DO, not just the words typed.
+  const verb = it ? (ACTION_VERB[it.action] ?? "") : "";
+  const corrections = (it?.corrections ?? []).slice(0, 2);
+  const showExpansion = !!it?.expandedFrom && it.expandedFrom !== it.context;
+  const durationSec = it && it.durationSec > 0 ? Math.round(it.durationSec) : 0;
+
   return (
     <div
       className="mx-auto mt-3 max-w-2xl rounded-2xl border border-white/[0.09] bg-white/[0.05] px-4 py-3 backdrop-blur-2xl"
@@ -76,14 +90,34 @@ export const StoryLens: React.FC<{
         @keyframes lensDot  { from { transform: scale(0.4); opacity: 0; } to { transform: none; opacity: 1; } }
       `}</style>
 
+      {/* ── Quiet spell-fix moment: "frnace → France, handled" ── */}
+      {corrections.length > 0 && (
+        <div className="mb-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] font-medium text-white/30">Fixed</span>
+          {corrections.map((c, i) => (
+            <span key={`${c.from}-${i}`} className="inline-flex items-center gap-1 rounded-full border border-[#36d39a]/25 bg-[#36d39a]/10 px-2 py-0.5 text-[10.5px] font-medium text-[#7ee8c2]" style={{ animation: "lensChip 0.35s ease both" }}>
+              <Check size={9} /> {c.from} → {c.to}
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         {/* ── The journey chain ── */}
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           {journey.length > 0 ? (
             <>
+              {verb && (
+                <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-iris/70" style={{ animation: "lensChip 0.35s ease both" }}>{verb}</span>
+              )}
               {it?.context && (
                 <span className="inline-flex items-center gap-1 rounded-full border border-[#2FE0FF]/30 bg-[#2FE0FF]/10 px-2 py-0.5 text-[11px] font-medium text-[#7fe9ff]" style={{ animation: "lensChip 0.35s ease both" }}>
                   <Globe2 size={10} /> {it.context}
+                </span>
+              )}
+              {showExpansion && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-[#2FE0FF]/30 bg-[#2FE0FF]/10 px-2 py-0.5 text-[11px] font-medium text-[#7fe9ff]" style={{ animation: "lensChip 0.35s ease both" }}>
+                  <Globe2 size={10} /> {it!.expandedFrom} → {it!.locations.length} countries
                 </span>
               )}
               {journey.map((p, i) => (
@@ -113,6 +147,9 @@ export const StoryLens: React.FC<{
 
         {/* ── Story richness meter ── */}
         <div className="flex shrink-0 items-center gap-2" title="Story richness — more craft in the prompt, more cinema in the film">
+          {durationSec > 0 && (
+            <span className="rounded-full bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-white/40" title="Estimated runtime">~{durationSec}s</span>
+          )}
           <Clapperboard size={11} className={rich.level >= 4 ? "text-[#36d39a]" : "text-white/30"} />
           <span className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${rich.level >= 4 ? "text-[#7ee8c2]" : rich.level >= 2 ? "text-white/55" : "text-white/35"}`}>
             {rich.label}

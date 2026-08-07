@@ -232,7 +232,7 @@ export const GeneratingOverlay: React.FC<{
     setStatusI(0);
     setFactI(Math.floor(Math.random() * FACTS.length));
     const t0 = performance.now();
-    const s = setInterval(() => setStatusI((i) => (i + 1) % statusArr.length), 1600);
+    const s = setInterval(() => setStatusI((i) => (i + 1) % statusArr.length), 2600);
     const f = setInterval(() => setFactI((i) => (i + 1) % FACTS.length), 5600);
     const e = setInterval(() => setElapsedMs(performance.now() - t0), 120);
     return () => { clearInterval(s); clearInterval(f); clearInterval(e); };
@@ -253,9 +253,9 @@ export const GeneratingOverlay: React.FC<{
         className="fixed bottom-5 right-5 z-[300] flex items-center gap-3 rounded-2xl border border-[#6E7BFF]/30 bg-[#06070d]/95 px-4 py-3 shadow-[0_8px_32px_rgba(0,0,0,0.7)] backdrop-blur-xl"
         style={{ animation: "goPillRise .3s cubic-bezier(.34,1.56,.64,1)" }}
       >
-        <style>{`@keyframes goPillRise{from{opacity:0;transform:translateY(16px) scale(.92)}to{opacity:1;transform:none}}@keyframes goRingSpin{to{transform:rotate(360deg)}}`}</style>
+        <style>{`@keyframes goPillRise{from{opacity:0;transform:translateY(16px) scale(.92)}to{opacity:1;transform:none}}@keyframes goRingSpin{to{transform:rotate(360deg)}}.goRing{animation:goRingSpin 1.6s linear infinite}@media (prefers-reduced-motion: reduce){.goRing{animation:none}}`}</style>
         <div className="relative flex h-8 w-8 shrink-0 items-center justify-center">
-          <svg className="absolute inset-0" viewBox="0 0 32 32" style={{ animation: "goRingSpin 1.6s linear infinite" }}>
+          <svg className="goRing absolute inset-0" viewBox="0 0 32 32">
             <circle cx="16" cy="16" r="13" fill="none" stroke="rgba(110,123,255,0.15)" strokeWidth="2" />
             <circle cx="16" cy="16" r="13" fill="none" stroke="#6E7BFF" strokeWidth="2" strokeLinecap="round"
               strokeDasharray={`${2 * Math.PI * 13 * progress} ${2 * Math.PI * 13 * (1 - progress)}`} />

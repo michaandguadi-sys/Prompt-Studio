@@ -38,19 +38,25 @@ export const InspirationRail: React.FC<{
     c.places.map((p) => coordsFor(p)).filter(Boolean) as GeoStop[];
 
   return (
-    <div className="group/rail relative w-full overflow-hidden" aria-label="Story inspiration">
+    <div className="group/rail relative w-full overflow-hidden [@media(hover:none)]:overflow-x-auto" aria-label="Story inspiration">
       <style>{`
         @keyframes railScroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
         .rail-track { animation: railScroll 64s linear infinite; }
         .group\\/rail:hover .rail-track { animation-play-state: paused; }
+        .group\\/rail:focus-within .rail-track { animation-play-state: paused; }
         @media (prefers-reduced-motion: reduce) { .rail-track { animation: none; } }
+        @media (hover: none) { .rail-track { animation: none; } }
       `}</style>
       {/* edge fades */}
       <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-20" style={{ background: "linear-gradient(to right, rgba(4,6,16,0.9), transparent)" }} />
       <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-20" style={{ background: "linear-gradient(to left, rgba(4,6,16,0.9), transparent)" }} />
 
       <div className="rail-track flex w-max gap-2.5 py-1">
-        {[...CARDS, ...CARDS].map((c, i) => (
+        {[...CARDS, ...CARDS].map((c, i) => {
+          // The second copy exists only to make the marquee seamless — hide it
+          // from Tab order and screen readers so ideas aren't traversed twice.
+          const isClone = i >= CARDS.length;
+          return (
           <button
             key={`${c.title}-${i}`}
             onMouseEnter={() => onHover(stopsOf(c))}
@@ -58,6 +64,8 @@ export const InspirationRail: React.FC<{
             onFocus={() => onHover(stopsOf(c))}
             onBlur={() => onHover(null)}
             onClick={() => { onPick(c.prompt); onHover(null); }}
+            aria-hidden={isClone || undefined}
+            tabIndex={isClone ? -1 : undefined}
             className="flex shrink-0 items-center gap-2.5 rounded-xl border border-white/[0.09] bg-white/[0.05] px-3.5 py-2.5 text-left backdrop-blur-xl transition-all hover:-translate-y-0.5 hover:border-[#FFB86E]/45 hover:bg-white/[0.09]"
             title={c.prompt}
           >
@@ -67,7 +75,8 @@ export const InspirationRail: React.FC<{
               <span className="block truncate text-[10px] text-white/32">{c.places.join(" → ")}</span>
             </span>
           </button>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

@@ -75,7 +75,10 @@ export const AiIdeaBox: React.FC<{
   /** Fired the moment real generation begins — lets the page start its own
    *  transition (e.g. the living map dives toward the first destination). */
   onGenerateStart?: () => void;
-}> = ({ onPromptChange, darkMode = false, onGenerateStart }) => {
+  /** Fired on every terminal path (success-before-nav, error, back-out) so the
+   *  page can resume its idle life — otherwise the living map freezes forever. */
+  onGenerateEnd?: () => void;
+}> = ({ onPromptChange, darkMode = false, onGenerateStart, onGenerateEnd }) => {
   const router = useRouter();
   const load = useEditor((s) => s.load);
   const addSceneFromComposition = useEditor((s) => s.addSceneFromComposition);
@@ -98,6 +101,26 @@ export const AiIdeaBox: React.FC<{
   const [ivLoading, setIvLoading] = useState(false);
   const [placeholderIdx, setPlaceholderIdx] = useState(0);
   const [isFocused, setIsFocused] = useState(false);
+  // Honour the OS "reduce motion" setting for the JS-driven placeholder carousel
+  // and the inline-styled animations CSS media queries can't reach.
+  const [reduceMotion, setReduceMotion] = useState(false);
+  // Platform-aware shortcut glyph (⌘ on Apple, Ctrl elsewhere). Computed in an
+  // effect — `navigator` is undefined during SSR and would crash hydration.
+  const [modKey, setModKey] = useState("⌘");
+  useEffect(() => {
+    try {
+      const m = window.matchMedia("(prefers-reduced-motion: reduce)");
+      const on = () => setReduceMotion(m.matches);
+      on();
+      m.addEventListener("change", on);
+      setModKey(/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl");
+      return () => m.removeEventListener("change", on);
+    } catch { /* older browser / SSR */ }
+  }, []);
+
+  // Resume the page's idle life on every terminal path (loading cleared, no
+  // review pending). Idempotent — the parent no-ops if already idle.
+  useEffect(() => { if (!loading && !review) onGenerateEnd?.(); }, [loading, review, onGenerateEnd]);
 
   useEffect(() => {
     const apply = (idea?: string) => { if (idea && idea.trim()) { setPrompts([idea]); setIv(null); } };
@@ -129,15 +152,18 @@ export const AiIdeaBox: React.FC<{
 
   const multi = prompts.length > 1;
   const filled = prompts.map((p) => p.trim()).filter(Boolean);
+  // A single AI prompt opens the vision interview before generating — the button
+  // should say so, not promise a film it isn't about to build yet.
+  const willInterview = filled.length === 1 && useAI && !iv;
   // Cycling placeholder shows whenever the box is empty — even while focused,
   // so the page can autofocus (cursor ready) and still inspire with examples.
   const showPlaceholder = (prompts[0]?.trim() ?? "") === "" && !multi && !iv;
 
   useEffect(() => {
-    if (!showPlaceholder) return;
+    if (!showPlaceholder || reduceMotion) return;
     const t = setInterval(() => setPlaceholderIdx((n) => (n + 1) % PLACEHOLDER_EXAMPLES.length), 3600);
     return () => clearInterval(t);
-  }, [showPlaceholder]);
+  }, [showPlaceholder, reduceMotion]);
 
   useEffect(() => { onPromptChange?.(prompts[0] ?? ""); }, [prompts, onPromptChange]);
 
@@ -327,10 +353,7 @@ export const AiIdeaBox: React.FC<{
           78%  { opacity: 1; }
           100% { opacity: 0; transform: translateY(-4px); }
         }
-        @keyframes btnPulse {
-          0%, 100% { box-shadow: 0 0 20px rgba(110,123,255,0.35); }
-          50%       { box-shadow: 0 0 32px rgba(110,123,255,0.60); }
-        }
+        @keyframes dvRise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
         @keyframes focusBreathe {
           0%, 100% { box-shadow: 0 16px 48px rgba(0,0,0,0.55), 0 0 40px rgba(110,123,255,0.15); }
           50%       { box-shadow: 0 16px 48px rgba(0,0,0,0.55), 0 0 66px rgba(110,123,255,0.32); }
@@ -357,9 +380,18 @@ export const AiIdeaBox: React.FC<{
                 <textarea
                   value={p}
                   onChange={(e) => setPrompt(i, e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) generate(); }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { generate(); return; }
+                    // Tab on an empty field accepts the example you can see —
+                    // one keystroke from blank page to a running film.
+                    if (e.key === "Tab" && !e.shiftKey && showPlaceholder && i === 0 && p.trim() === "") {
+                      e.preventDefault();
+                      setPrompt(0, PLACEHOLDER_EXAMPLES[placeholderIdx].replace(/^[^\p{L}\p{N}"']+\s*/u, ""));
+                    }
+                  }}
                   onFocus={() => setIsFocused(true)}
                   onBlur={() => setIsFocused(false)}
+                  aria-label={multi ? `Scene ${i + 1} description` : "Describe the map story you want to create"}
                   autoFocus={i === 0 && !multi}
                   rows={dm ? (multi ? 2 : 5) : (multi ? 2 : 3)}
                   placeholder={
@@ -374,10 +406,15 @@ export const AiIdeaBox: React.FC<{
                   <div
                     key={`ph-${placeholderIdx}`}
                     className={`pointer-events-none absolute inset-x-0 top-2.5 text-[15px] italic leading-relaxed ${dm ? "text-white/20" : "text-graphite/40"} ${dm ? "" : "px-1"}`}
-                    style={{ animation: "phFade 3.6s ease both forwards" }}
+                    style={{ animation: reduceMotion ? undefined : "phFade 3.6s ease both forwards" }}
                     aria-hidden
                   >
                     &ldquo;{PLACEHOLDER_EXAMPLES[placeholderIdx]}&rdquo;
+                    {isFocused && (
+                      <span className={`ml-2 rounded border px-1 py-0.5 align-middle text-[9px] not-italic ${dm ? "border-white/15 text-white/35" : "border-graphite/20 text-graphite/45"}`}>
+                        ⇥ Tab to use this
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
@@ -526,29 +563,38 @@ export const AiIdeaBox: React.FC<{
                 }`}
                 style={dm ? {
                   background: "linear-gradient(135deg, #6E7BFF 0%, #B57BFF 100%)",
-                  animation: filled.length > 0 && !loading ? "btnPulse 2.2s ease-in-out infinite" : undefined,
+                  boxShadow: filled.length > 0 && !loading ? "0 10px 30px rgba(110,123,255,0.38)" : undefined,
                 } : undefined}
               >
                 {loading || ivLoading
                   ? <Loader2 size={14} className="animate-spin" />
                   : iv ? <ArrowRight size={14} />
                   : multi ? <Film size={14} />
+                  : willInterview ? <Wand2 size={14} />
                   : <Sparkles size={14} />}
                 {loading
                   ? (progress ?? "Creating…")
                   : ivLoading ? "Reading…"
                   : iv ? "Build animation"
                   : multi ? `Build ${filled.length} scenes`
+                  : willInterview ? "Set the vision"
                   : "Generate"}
+                {!multi && !iv && !loading && !ivLoading && filled.length > 0 && (
+                  <kbd className="pointer-events-none ml-0.5 inline-flex items-center gap-0.5 rounded bg-white/15 px-1 text-[9px] font-semibold leading-none text-white/75" aria-hidden>
+                    {modKey} ↵
+                  </kbd>
+                )}
               </button>
-              {useAI && estimatedTokens > 0 && !loading && !iv && (
-                <span className={`text-[9.5px] tabular-nums ${dm ? "text-white/20" : "text-graphite/28"}`} title="Estimated AI token usage">
-                  ~{estimatedTokens >= 1000 ? `${Math.round(estimatedTokens / 1000)}k` : estimatedTokens} tokens
-                </span>
-              )}
             </div>
           </div>
         </div>
+
+        {/* Engine consequence — the decisive choice, legible without hovering */}
+        {dm && (
+          <div className="-mt-1 px-4 pb-3.5 text-[10px] text-white/30">
+            {useAI ? "Researches, fact-checks & art-directs your story" : "Instant preview — built-in director logic"}
+          </div>
+        )}
 
         {/* Style selection removed — the AI director picks the look from the
             prompt itself ("vintage atlas", "documentary style" read as words).
@@ -556,23 +602,28 @@ export const AiIdeaBox: React.FC<{
 
         {/* ── ENGINE TOGGLE (light mode only — dark mode has it in the bar) ─── */}
         {!dm && (
-          <div className="mt-1 flex items-center justify-between gap-2 border-t border-black/5 px-2 pb-0.5 pt-2">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-graphite/35">Engine</span>
-            <div className="flex items-center rounded-lg border border-line bg-paper-100/60 p-0.5">
-              <button
-                onClick={() => setUseAI(true)}
-                title="Your AI model researches, fact-checks and art-directs the whole animation"
-                className={`inline-flex items-center gap-1 rounded-[7px] px-2.5 py-1 text-[11px] font-semibold transition-colors ${useAI ? "bg-brand text-white shadow-glow-iris" : "text-graphite/45 hover:text-graphite"}`}
-              >
-                <Wand2 size={11} /> AI-directed
-              </button>
-              <button
-                onClick={() => setUseAI(false)}
-                title="Built-in director logic — instant, no API key, fully private"
-                className={`inline-flex items-center gap-1 rounded-[7px] px-2.5 py-1 text-[11px] font-semibold transition-colors ${!useAI ? "bg-emerald-500 text-white shadow-sm" : "text-graphite/45 hover:text-graphite"}`}
-              >
-                ⚡ Smart (no AI)
-              </button>
+          <div className="mt-1 border-t border-black/5 px-2 pb-0.5 pt-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-graphite/35">Engine</span>
+              <div className="flex items-center rounded-lg border border-line bg-paper-100/60 p-0.5">
+                <button
+                  onClick={() => setUseAI(true)}
+                  title="Your AI model researches, fact-checks and art-directs the whole animation"
+                  className={`inline-flex items-center gap-1 rounded-[6px] px-2.5 py-1 text-[11px] font-semibold transition-colors ${useAI ? "bg-brand text-white shadow-glow-iris" : "text-graphite/45 hover:text-graphite"}`}
+                >
+                  <Wand2 size={11} /> AI-directed
+                </button>
+                <button
+                  onClick={() => setUseAI(false)}
+                  title="Built-in director logic — instant, no API key, fully private"
+                  className={`inline-flex items-center gap-1 rounded-[6px] px-2.5 py-1 text-[11px] font-semibold transition-colors ${!useAI ? "bg-emerald-500 text-white shadow-sm" : "text-graphite/45 hover:text-graphite"}`}
+                >
+                  ⚡ Smart (no AI)
+                </button>
+              </div>
+            </div>
+            <div className="mt-1.5 text-right text-[10px] text-graphite/40">
+              {useAI ? "Researches, fact-checks & art-directs your story" : "Instant preview — built-in director logic"}
             </div>
           </div>
         )}
