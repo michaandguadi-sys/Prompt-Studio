@@ -101,6 +101,14 @@ export const GenerateExperience: React.FC = () => {
       .filter(Boolean) as GeoStop[];
   }, [placeNames, geoTick]);
 
+  /* Names still resolving — not in the instant table and not yet geocoded.
+     StoryLens shows these as "locating…" until the debounced geocode lands and
+     they snap to a pin (in sync with the map bloom). */
+  const pending = useMemo(() => {
+    void geoTick;
+    return new Set(placeNames.filter((n) => !coordsFor(n) && cachedStop(n) === undefined).map((n) => n.toLowerCase()));
+  }, [placeNames, geoTick]);
+
   /* Preview flavor — same engine as the landing hero, so "highlight France"
      fills the real country and "sailing to Athens" hugs the water here too. */
   const flavor = useMemo(() => flavorForPrompt(prompt, it?.action), [prompt, it]);
@@ -260,7 +268,7 @@ export const GenerateExperience: React.FC = () => {
         </div>
 
         {/* Live understanding: journey + richness (the map reacts behind) */}
-        <StoryLens text={prompt} it={it} journey={placeNames} />
+        <StoryLens text={prompt} it={it} journey={placeNames} pending={pending} />
 
         {/* Suggestion chips — style, no settings menus */}
         <div className="rm-anim mx-auto mt-3 flex max-w-2xl flex-wrap items-center justify-center gap-1.5" style={{ animation: "genRise 0.8s ease both", animationDelay: "280ms" }}>

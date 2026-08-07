@@ -57,13 +57,29 @@ export function scoreRichness(text: string, it: Interpretation | null): Richness
   return { level, label, hint };
 }
 
+/** One warm sentence reflecting the whole understood vision back — the "it gets
+ *  my story" beat. Null until confidence is high and a real place is known. */
+export function directorRead(it: Interpretation | null, journey: string[]): string | null {
+  if (!it || journey.length === 0 || it.confidence < 0.6) return null;
+  const look = (it.style?.style ?? "cinematic").toLowerCase();
+  const secs = it.durationSec > 0 ? Math.round(it.durationSec) : 0;
+  const dur = secs ? `about ${secs}s` : "";
+  if (it.route) return `A ${look} journey from ${it.route.from} to ${it.route.to}${dur ? `, ${dur}` : ""}.`;
+  if (it.expandedFrom) return `Every country in ${it.expandedFrom} — ${it.locations.length}${dur ? ` in ${dur}` : ""}.`;
+  if (journey.length === 1) return `A ${look} reveal of ${journey[0]}${dur ? `, ${dur}` : ""}.`;
+  return `A ${look} tour of ${journey.slice(0, 3).join(", ")}${journey.length > 3 ? "…" : ""}${dur ? `, ${dur}` : ""}.`;
+}
+
 export const StoryLens: React.FC<{
   text: string;
   it: Interpretation | null;
   /** VERIFIED place names (parent gates them against the gazetteer/geocoder) —
    *  so a style word like "playful" never shows up as a journey stop. */
   journey?: string[];
-}> = ({ text, it, journey: journeyProp }) => {
+  /** Lowercased place names still resolving to coords (in-flight geocode) — shown
+   *  as a "locating…" chip that snaps to a pin when the map bloom lands. */
+  pending?: Set<string>;
+}> = ({ text, it, journey: journeyProp, pending }) => {
   const trimmed = text.trim();
   if (trimmed.length < 2) return null;
 
@@ -78,6 +94,7 @@ export const StoryLens: React.FC<{
   const corrections = (it?.corrections ?? []).slice(0, 2);
   const showExpansion = !!it?.expandedFrom && it.expandedFrom !== it.context;
   const durationSec = it && it.durationSec > 0 ? Math.round(it.durationSec) : 0;
+  const dRead = directorRead(it, journey);
 
   return (
     <div
@@ -123,9 +140,15 @@ export const StoryLens: React.FC<{
               {journey.map((p, i) => (
                 <span key={`${p}-${i}`} className="inline-flex items-center gap-1.5" style={{ animation: `lensChip 0.35s ease ${i * 0.06}s both` }}>
                   {i > 0 && <ArrowRight size={11} className="text-iris/60" />}
-                  <span className="inline-flex items-center gap-1 rounded-full border border-iris/35 bg-iris/12 px-2 py-0.5 text-[11px] font-medium text-[#aab4ff]">
-                    <MapPin size={10} /> {p}
-                  </span>
+                  {pending?.has(p.toLowerCase()) ? (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-white/25 bg-white/[0.03] px-2 py-0.5 text-[11px] font-medium text-white/45" title="Locating…">
+                      <span className="h-1.5 w-1.5 rounded-full bg-white/40 animate-pulse motion-reduce:animate-none" /> {p}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-iris/35 bg-iris/12 px-2 py-0.5 text-[11px] font-medium text-[#aab4ff]">
+                      <MapPin size={10} /> {p}
+                    </span>
+                  )}
                 </span>
               ))}
               {(journeyProp ?? it?.locations ?? []).length > 5 && !it?.route && (
@@ -174,12 +197,16 @@ export const StoryLens: React.FC<{
         </div>
       </div>
 
-      {/* ── One gentle hint — never a complaint ── */}
-      {rich.hint && (
+      {/* ── The director's read (confident) OR one gentle next hint ── */}
+      {dRead ? (
+        <div className="mt-2 border-t border-white/[0.06] pt-2 text-[11.5px] italic text-white/55" style={{ animation: "lensRise 0.4s ease 0.15s both" }}>
+          <span className="not-italic text-iris/80">✦ </span>{dRead}
+        </div>
+      ) : rich.hint ? (
         <div className="mt-2 border-t border-white/[0.06] pt-2 text-[11px] text-white/32" style={{ animation: "lensRise 0.4s ease 0.15s both" }}>
           <span className="text-iris/70">✦</span> {rich.hint}
         </div>
-      )}
+      ) : null}
     </div>
   );
 };
