@@ -146,6 +146,18 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
   const [buildFlow, setBuildFlow] = useState(false);
 
   const [touched, setTouched] = useState(false);
+  // Honour the OS "reduce motion" preference for the JS placeholder carousel and
+  // the inline-styled infinite animations CSS media queries can't reach.
+  const [reduceMotion, setReduceMotion] = useState(false);
+  useEffect(() => {
+    try {
+      const m = window.matchMedia("(prefers-reduced-motion: reduce)");
+      const on = () => setReduceMotion(m.matches);
+      on();
+      m.addEventListener("change", on);
+      return () => m.removeEventListener("change", on);
+    } catch { /* older browser / SSR */ }
+  }, []);
   useEffect(() => {
     if (touched) return;
     const tour = IDEA_CHIPS.filter((c) => !c.styleId); // flavor demos only — style swaps stay user-driven
@@ -180,10 +192,10 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
 
   /* Cycling placeholder */
   useEffect(() => {
-    if (demo) return;
+    if (demo || reduceMotion) return;
     const t = setInterval(() => setPhIdx((n) => (n + 1) % DEMO_IDEAS.length), 3400);
     return () => clearInterval(t);
-  }, [demo]);
+  }, [demo, reduceMotion]);
 
   /* Cursor-following glow in the hero (DOM-direct, no re-renders) */
   useEffect(() => {
@@ -214,7 +226,6 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
       <style>{`
         @keyframes landRise { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: none; } }
         @keyframes phFadeL { 0% { opacity: 0; transform: translateY(6px); } 12% { opacity: 1; transform: none; } 82% { opacity: 1; } 100% { opacity: 0; transform: translateY(-5px); } }
-        @keyframes ctaBreath { 0%,100% { box-shadow: 0 10px 44px -8px rgba(110,123,255,0.55); } 50% { box-shadow: 0 10px 66px -6px rgba(110,123,255,0.85); } }
         @keyframes marqueeL { from { transform: translateX(0); } to { transform: translateX(-50%); } }
         @keyframes chevFade { 0%,100% { opacity: 0.2; transform: translateY(0); } 50% { opacity: 0.75; transform: translateY(6px); } }
         .mq-l { animation: marqueeL 46s linear infinite; }
@@ -260,7 +271,7 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
         <div className="relative z-10 mx-auto flex max-w-3xl flex-col items-center justify-center px-6 text-center" style={{ minHeight: "100svh", paddingTop: 86, paddingBottom: 120 }}>
           <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-iris/30 bg-white/[0.05] px-4 py-1.5 backdrop-blur-md" style={{ animation: "landRise 0.7s ease both" }}>
             <span className="relative flex h-1.5 w-1.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-iris opacity-70" />
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-iris opacity-70 motion-reduce:animate-none" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-iris" />
             </span>
             <span className="text-[10px] font-bold uppercase tracking-[0.28em] text-[#aab4ff]">This map is live — try it</span>
@@ -291,15 +302,27 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
                   onChange={(e) => { setTouched(true); setActiveChip(null); setDemo(e.target.value); }}
                   onFocus={() => { setFocused(true); setTouched(true); }}
                   onBlur={() => setFocused(false)}
-                  onKeyDown={(e) => { if (e.key === "Enter") setBuildFlow(true); }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") { setBuildFlow(true); return; }
+                    // Tab on an empty field accepts the example you can see.
+                    if (e.key === "Tab" && !e.shiftKey && !demo) {
+                      e.preventDefault();
+                      setTouched(true); setActiveChip(null); setDemo(DEMO_IDEAS[phIdx]);
+                    }
+                  }}
                   aria-label="Describe your story"
-                  className="w-full bg-transparent px-4 py-3.5 text-[15px] text-white/90 outline-none placeholder:text-transparent"
+                  className="w-full bg-transparent px-4 py-3.5 pr-16 text-[15px] text-white/90 outline-none placeholder:text-transparent"
                   placeholder="Describe your story…"
                 />
                 {!demo && (
-                  <div key={phIdx} className="pointer-events-none absolute inset-x-4 top-3.5 truncate text-left text-[15px] italic text-white/30" style={{ animation: "phFadeL 3.4s ease both" }} aria-hidden>
+                  <div key={phIdx} className="pointer-events-none absolute inset-x-4 top-3.5 truncate text-left text-[15px] italic text-white/30" style={{ animation: reduceMotion ? undefined : "phFadeL 3.4s ease both" }} aria-hidden>
                     “{DEMO_IDEAS[phIdx]}”
                   </div>
+                )}
+                {focused && !demo && (
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded border border-white/15 px-1.5 py-0.5 text-[9px] font-medium text-white/40" aria-hidden>
+                    ⇥ Tab
+                  </span>
                 )}
               </div>
               <div className="flex items-center justify-between gap-2 px-2 pb-1 pt-1">
@@ -311,7 +334,7 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
                 <button
                   onClick={() => setBuildFlow(true)}
                   className="inline-flex shrink-0 items-center gap-1.5 rounded-xl px-5 py-2.5 text-[13px] font-bold text-white transition-transform hover:-translate-y-0.5 active:scale-95"
-                  style={{ background: "linear-gradient(135deg,#6E7BFF 0%,#B57BFF 100%)", animation: "ctaBreath 2.6s ease-in-out infinite" }}
+                  style={{ background: "linear-gradient(135deg,#6E7BFF 0%,#B57BFF 100%)", boxShadow: "0 10px 44px -8px rgba(110,123,255,0.6)" }}
                 >
                   <Sparkles size={13} /> {demo.trim() ? "Make this film — free" : "Start creating — free"}
                 </button>
@@ -392,7 +415,7 @@ export function LandingExperience({ signedIn = false }: { signedIn?: boolean }) 
         </div>
 
         <div className="pointer-events-none absolute bottom-6 left-1/2 z-10 -translate-x-1/2" aria-hidden>
-          <ChevronDown size={20} className="text-white/40" style={{ animation: "chevFade 2.2s ease-in-out infinite" }} />
+          <ChevronDown size={20} className="text-white/40" style={{ animation: reduceMotion ? undefined : "chevFade 2.2s ease-in-out infinite" }} />
         </div>
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[6] h-24" style={{ background: "linear-gradient(to bottom, transparent, #04060f)" }} />
       </section>

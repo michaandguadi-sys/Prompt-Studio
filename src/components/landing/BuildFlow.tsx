@@ -204,7 +204,7 @@ export const BuildFlow: React.FC<{
       {phase === "ignite" && (
         <div className="relative z-[2] flex flex-col items-center text-center" data-bf style={{ animation: "bfRise .5s ease both" }}>
           <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-iris/40 bg-white/[0.05] px-4 py-1.5 backdrop-blur">
-            <span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-iris opacity-70" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-iris" /></span>
+            <span className="relative flex h-1.5 w-1.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-iris opacity-70 motion-reduce:animate-none" /><span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-iris" /></span>
             <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-[#aab4ff]">Building your animation</span>
           </div>
           <div className="max-w-md px-6 text-[15px] italic text-white/45" style={{ fontFamily: SERIF }}>“{idea.trim() || "A cinematic map story"}”</div>
@@ -243,7 +243,7 @@ export const BuildFlow: React.FC<{
       {/* ── ACT 3 · READY (the gate) ── */}
       {phase === "ready" && (
         <div className="relative z-[2] w-[min(94vw,540px)] px-6 text-center" data-bf style={{ animation: "bfRise .5s cubic-bezier(.3,1.1,.4,1) both" }}>
-          <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl" style={{ background: "linear-gradient(135deg,#6E7BFF,#B57BFF)", animation: "bfGlowPulse 3s ease-in-out infinite" }}>
+          <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl" data-bf style={{ background: "linear-gradient(135deg,#6E7BFF,#B57BFF)", animation: "bfGlowPulse 3s ease-in-out infinite" }}>
             <Wand2 size={24} className="text-white" />
           </div>
           <div className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.16em] text-emerald-300">
