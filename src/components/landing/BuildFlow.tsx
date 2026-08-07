@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Sparkles, Check, X, Wand2 } from "lucide-react";
+import { ArrowRight, Sparkles, Check, X, Wand2, MapPin, Film, Globe2 } from "lucide-react";
+import { interpret } from "@/lib/parse";
 
 /**
  * BuildFlow — the immersive "click → start building" experience that replaces a
@@ -126,6 +127,19 @@ export const BuildFlow: React.FC<{
   const startedRef = useRef(false);
   const dialogRef = useRef<HTMLDivElement>(null);
 
+  // What we understood from their sentence — shown during ignite so the reveal
+  // reads as the director reacting to THEIR story, not a generic loading screen.
+  const understood = useMemo(() => {
+    const t = (idea ?? "").trim();
+    if (t.length < 2) return null;
+    try {
+      const it = interpret(t);
+      const journey = (it.route ? [it.route.from, ...it.route.via, it.route.to] : it.locations).slice(0, 4);
+      return { journey, style: it.style?.style ?? null, context: it.context };
+    } catch { return null; }
+  }, [idea]);
+  const hasUnderstanding = !!understood && (understood.journey.length > 0 || !!understood.style);
+
   // IGNITE choreography → hand off to the questions.
   useEffect(() => {
     if (startedRef.current) return;
@@ -208,6 +222,28 @@ export const BuildFlow: React.FC<{
             <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-[#aab4ff]">Building your animation</span>
           </div>
           <div className="max-w-md px-6 text-[15px] italic text-white/45" style={{ fontFamily: SERIF }}>“{idea.trim() || "A cinematic map story"}”</div>
+          {hasUnderstanding && (
+            <div className="mt-4 flex max-w-lg flex-wrap items-center justify-center gap-1.5" data-bf style={{ animation: "bfRise .5s ease .12s both" }}>
+              {understood!.context && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-[#2FE0FF]/30 bg-[#2FE0FF]/10 px-2 py-0.5 text-[11px] font-medium text-[#7fe9ff]">
+                  <Globe2 size={10} /> {understood!.context}
+                </span>
+              )}
+              {understood!.journey.map((p, i) => (
+                <span key={`${p}-${i}`} className="inline-flex items-center gap-1.5">
+                  {i > 0 && <ArrowRight size={11} className="text-iris/70" />}
+                  <span className="inline-flex items-center gap-1 rounded-full border border-iris/35 bg-iris/12 px-2 py-0.5 text-[11px] font-medium text-[#aab4ff]">
+                    <MapPin size={10} /> {p}
+                  </span>
+                </span>
+              ))}
+              {understood!.style && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-[#B57BFF]/30 bg-[#B57BFF]/10 px-2 py-0.5 text-[11px] font-medium text-[#d3b3ff]">
+                  <Film size={10} /> {understood!.style}
+                </span>
+              )}
+            </div>
+          )}
           <div key={statusI} className="mt-6 text-[13px] font-semibold text-white/75" data-bf style={{ animation: "bfRise .4s ease both" }}>{STATUS[statusI]}</div>
         </div>
       )}

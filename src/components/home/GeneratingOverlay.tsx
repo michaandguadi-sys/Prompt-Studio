@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { X, Minimize2, Maximize2, AlertTriangle, Clock, Coins } from "lucide-react";
+import { X, Minimize2, Maximize2, AlertTriangle, Clock, Coins, MapPin, ArrowRight, Film, Globe2 } from "lucide-react";
+import { interpret } from "@/lib/parse";
 
 /**
  * THE BUILD — a full-screen, cinematic loading experience for map generation.
@@ -209,6 +210,20 @@ export const GeneratingOverlay: React.FC<{
   const [warningDismissed, setWarningDismissed] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
 
+  // What the director understood about THIS story — the same instant intent
+  // engine that drove the map. Shown while it builds, so the wait reads as the
+  // AI working on YOUR film (places, journey, look, runtime), not a generic load.
+  const understood = useMemo(() => {
+    const t = (idea ?? "").trim();
+    if (t.length < 2) return null;
+    try {
+      const it = interpret(t);
+      const journey = (it.route ? [it.route.from, ...it.route.via, it.route.to] : it.locations).slice(0, 4);
+      return { journey, style: it.style?.style ?? null, dur: it.durationSec > 0 ? Math.round(it.durationSec) : 0, context: it.context };
+    } catch { return null; }
+  }, [idea]);
+  const hasUnderstanding = !!understood && (understood.journey.length > 0 || !!understood.style);
+
   const multi = (total ?? 0) > 1;
   const pct = multi ? Math.round(((current ?? 1) / total!) * 100) : undefined;
   const statusArr = phase === "director" ? DIRECTOR_STATUS : phase === "composer" ? COMPOSER_STATUS : STATUS;
@@ -331,6 +346,34 @@ export const GeneratingOverlay: React.FC<{
           {statusArr[statusI % statusArr.length]}
         </h2>
         {idea && <div className="mt-3 max-w-lg truncate text-[13px] italic text-white/45">“{idea}”</div>}
+
+        {/* What the director understood about THIS story — the wait feels like
+            the AI is working on YOUR film, not spinning a generic loader. */}
+        {hasUnderstanding && (
+          <div className="go-anim mt-4 flex max-w-xl flex-wrap items-center justify-center gap-1.5" style={{ animation: "goRise .5s ease .1s both" }}>
+            {understood!.context && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-[#2FE0FF]/30 bg-[#2FE0FF]/10 px-2 py-0.5 text-[11px] font-medium text-[#7fe9ff]">
+                <Globe2 size={10} /> {understood!.context}
+              </span>
+            )}
+            {understood!.journey.map((p, i) => (
+              <span key={`${p}-${i}`} className="inline-flex items-center gap-1.5">
+                {i > 0 && <ArrowRight size={11} className="text-[#6E7BFF]/70" />}
+                <span className="inline-flex items-center gap-1 rounded-full border border-[#6E7BFF]/35 bg-[#6E7BFF]/12 px-2 py-0.5 text-[11px] font-medium text-[#aab4ff]">
+                  <MapPin size={10} /> {p}
+                </span>
+              </span>
+            ))}
+            {understood!.style && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-[#B57BFF]/30 bg-[#B57BFF]/10 px-2 py-0.5 text-[11px] font-medium text-[#d3b3ff]">
+                <Film size={10} /> {understood!.style}
+              </span>
+            )}
+            {understood!.dur > 0 && (
+              <span className="rounded-full bg-white/[0.06] px-2 py-0.5 text-[11px] font-medium tabular-nums text-white/45">~{understood!.dur}s</span>
+            )}
+          </div>
+        )}
 
         {/* progress bar */}
         <div className="mt-8 w-full max-w-md">
