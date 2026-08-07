@@ -1,14 +1,17 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEditor } from "@/v2/store/editor";
 import { Sparkles, Loader2, ArrowRight, KeyRound, Plus, X, Wand2, Film, Check } from "lucide-react";
 import { SettingsModal, loadAISettings } from "@/v2/ui/SettingsModal";
 import { SIGNATURE_STYLES } from "@/lib/presets/signatureStyles";
 import { STYLE_KEY } from "@/components/home/OnboardingModal";
-import { StoryboardReview, type ReviewData } from "./StoryboardReview";
-import { GeneratingOverlay } from "./GeneratingOverlay";
+import { type ReviewData } from "./StoryboardReview";
+// Only needed AFTER Generate is clicked — kept out of first-load JS.
+const StoryboardReview = dynamic(() => import("./StoryboardReview").then((m) => m.StoryboardReview), { ssr: false });
+const GeneratingOverlay = dynamic(() => import("./GeneratingOverlay").then((m) => m.GeneratingOverlay), { ssr: false });
 import { buildArc, summarizeSequence, type StoryArc, type ArcContext } from "@/lib/parse";
 import { addAddon, type Addon } from "@/lib/addons";
 import { useAiEngine } from "@/lib/aiEngine";
@@ -92,6 +95,8 @@ export const AiIdeaBox: React.FC<{
   const [step, setStep] = useState<{ current: number; total: number }>({ current: 1, total: 1 });
   const [phase, setPhase] = useState<"director" | "composer" | null>(null);
   const phaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const firstFieldRef = useRef<HTMLTextAreaElement>(null);
+  const prefetchedRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [generationWarning, setGenerationWarning] = useState<string | null>(null);
   const [aiNudge, setAiNudge] = useState(false);
@@ -121,6 +126,15 @@ export const AiIdeaBox: React.FC<{
   // Resume the page's idle life on every terminal path (loading cleared, no
   // review pending). Idempotent — the parent no-ops if already idle.
   useEffect(() => { if (!loading && !review) onGenerateEnd?.(); }, [loading, review, onGenerateEnd]);
+
+  // Desktop: place the cursor ready, WITHOUT the on-load scroll jump autoFocus
+  // causes. On touch we deliberately don't focus — it would pop the soft
+  // keyboard and hide the hero the instant the page opens.
+  useEffect(() => {
+    try {
+      if (window.matchMedia("(hover:hover)").matches) firstFieldRef.current?.focus({ preventScroll: true });
+    } catch { /* SSR / older browser */ }
+  }, []);
 
   useEffect(() => {
     const apply = (idea?: string) => { if (idea && idea.trim()) { setPrompts([idea]); setIv(null); } };
@@ -378,6 +392,7 @@ export const AiIdeaBox: React.FC<{
               )}
               <div className="relative flex-1">
                 <textarea
+                  ref={i === 0 && !multi ? firstFieldRef : undefined}
                   value={p}
                   onChange={(e) => setPrompt(i, e.target.value)}
                   onKeyDown={(e) => {
@@ -389,10 +404,14 @@ export const AiIdeaBox: React.FC<{
                       setPrompt(0, PLACEHOLDER_EXAMPLES[placeholderIdx].replace(/^[^\p{L}\p{N}"']+\s*/u, ""));
                     }
                   }}
-                  onFocus={() => setIsFocused(true)}
+                  onFocus={() => {
+                    setIsFocused(true);
+                    // Warm the editor route the moment they engage, so Generate →
+                    // editor feels instant.
+                    if (!prefetchedRef.current) { prefetchedRef.current = true; try { router.prefetch("/studio2"); } catch {} }
+                  }}
                   onBlur={() => setIsFocused(false)}
                   aria-label={multi ? `Scene ${i + 1} description` : "Describe the map story you want to create"}
-                  autoFocus={i === 0 && !multi}
                   rows={dm ? (multi ? 2 : 5) : (multi ? 2 : 3)}
                   placeholder={
                     multi
@@ -714,16 +733,18 @@ export const AiIdeaBox: React.FC<{
           onOpen={(project, narration) => { setReview(null); openInEditor(project, narration); }}
         />
       )}
-      <GeneratingOverlay
-        open={loading}
-        idea={filled[Math.min(step.current - 1, Math.max(0, filled.length - 1))] ?? filled[0]}
-        styleName={styleId === "auto" ? "Director's choice" : SIGNATURE_STYLES.find((s) => s.id === styleId)?.name}
-        current={step.current}
-        total={step.total}
-        phase={phase ?? undefined}
-        warning={generationWarning}
-        estimatedTokens={estimatedTokens}
-      />
+      {loading && (
+        <GeneratingOverlay
+          open
+          idea={filled[Math.min(step.current - 1, Math.max(0, filled.length - 1))] ?? filled[0]}
+          styleName={styleId === "auto" ? "Director's choice" : SIGNATURE_STYLES.find((s) => s.id === styleId)?.name}
+          current={step.current}
+          total={step.total}
+          phase={phase ?? undefined}
+          warning={generationWarning}
+          estimatedTokens={estimatedTokens}
+        />
+      )}
     </div>
   );
 };

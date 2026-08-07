@@ -16,12 +16,13 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
   MapPin, Sparkles, ArrowRight, Wand2, Globe2, Route as RouteIcon,
   BarChart3, Mic2, Film, Check, ChevronDown, Mountain,
 } from "lucide-react";
-import { LiveStoryMap, flavorForPrompt, type PreviewFlavor } from "@/components/home/LiveStoryMap";
+import { flavorForPrompt, type PreviewFlavor } from "@/components/home/mapPreview";
 import { interpret } from "@/lib/parse";
 import { coordsFor, isLikelyPlaceName, type GeoStop } from "@/components/home/worldCoords";
 import { PRO_MAP_STYLES, proMapStyleById } from "@/lib/presets/proMapStyles";
@@ -31,6 +32,14 @@ import { Pricing } from "./Pricing";
 import { FinalCTA } from "./FinalCTA";
 import { Reveal } from "./Reveal";
 import { BuildFlow } from "./BuildFlow";
+
+// The hero map carries the heavy MapLibre bundle — load it AFTER first paint so
+// the headline + prompt are interactive immediately; a matched dark panel stands
+// in for the ~1s it streams (the map then fades up over it).
+const LiveStoryMap = dynamic(() => import("@/components/home/LiveStoryMap").then((m) => m.LiveStoryMap), {
+  ssr: false,
+  loading: () => <div className="absolute inset-0 bg-[#04060f]" aria-hidden />,
+});
 
 const SERIF = "Newsreader, 'Playfair Display', Georgia, serif";
 

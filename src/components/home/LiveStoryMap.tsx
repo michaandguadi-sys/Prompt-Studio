@@ -7,6 +7,12 @@ import type { GeoStop } from "./worldCoords";
 import { ML_STYLES, applyBasemapIdentity, type PaintStash } from "@/lib/maplibre";
 import type { Map3DStyle } from "@/lib/presets/map3dStyles";
 import { outlineFor, seaLaneFor, DIVE_3D } from "./demoGeo";
+import { flavorForPrompt, type PreviewFlavor } from "./mapPreview";
+
+// Re-exported so existing `import { ... } from "./LiveStoryMap"` sites keep
+// working; the definitions now live in the maplibre-free ./mapPreview.
+export { flavorForPrompt };
+export type { PreviewFlavor };
 
 /**
  * GRADED SATELLITE base — real Earth texture (ESRI World Imagery through our
@@ -70,17 +76,6 @@ export type MapGrade = {
   tintStrength?: number;
 };
 
-/** How the typed story previews on the map: flowing route arcs, plain pins,
- *  glowing territory highlights, a heat scatter, or a water-hugging sea lane. */
-export type PreviewFlavor = "route" | "pins" | "highlight" | "heat" | "sea";
-
-/** Pick the preview flavor from the prompt text + the intent engine's action. */
-export function flavorForPrompt(text: string, action?: string | null): PreviewFlavor {
-  if (/heat ?map|earthquake|wildfire|outbreak|cases|crime|density|incidents|hotspots?|events\b/i.test(text)) return "heat";
-  if (/\b(sail|sailing|boat|ferry|cruise|ship|voyage|by sea)\b/i.test(text)) return "sea";
-  if (action === "highlight" || /highlight|every country|countries i|visited|territory|empire|region/i.test(text)) return "highlight";
-  return "route";
-}
 
 /**
  * REAL basemap variants for the landing's style taps — actual style swaps

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { MapPin, Sparkles, Upload, Loader2 } from "lucide-react";
@@ -11,8 +12,16 @@ import type { Interpretation } from "@/lib/parse/intent";
 import { AiIdeaBox } from "./AiIdeaBox";
 import { StoryLens } from "./StoryLens";
 import { InspirationRail } from "./InspirationRail";
-import { LiveStoryMap, flavorForPrompt } from "./LiveStoryMap";
+import { flavorForPrompt } from "./mapPreview";
 import { coordsFor, geocodeStop, cachedStop, isLikelyPlaceName, type GeoStop } from "./worldCoords";
+
+// The living map carries the heavy MapLibre bundle — load it AFTER first paint
+// (ssr:false) so the prompt is interactive immediately; a matched dark panel
+// stands in until it streams. previewMapBridge/intro-fly run on its own mount.
+const LiveStoryMap = dynamic(() => import("./LiveStoryMap").then((m) => m.LiveStoryMap), {
+  ssr: false,
+  loading: () => <div className="absolute inset-0 bg-[#04060f]" aria-hidden />,
+});
 
 const SERIF = "Newsreader, 'Playfair Display', Georgia, serif";
 
