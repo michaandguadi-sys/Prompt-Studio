@@ -55,6 +55,23 @@ const NEVER_FIX = new Set([
   // navy→…). They're style, not geography.
   "green", "red", "blue", "yellow", "orange", "purple", "violet", "pink", "teal", "cyan",
   "white", "black", "crimson", "navy", "magenta", "lime", "bright", "dark", "light", "colour", "color",
+  // Everyday words that appear in prompts and must NEVER fuzzy-snap to a vocab
+  // word (the classic: "night" → "flight"; "plane" → "place"). Correctly spelled
+  // — leave them alone. Adding here only makes spellfix more conservative.
+  "night", "nights", "day", "days", "week", "weeks", "month", "months", "year", "years",
+  "morning", "evening", "dawn", "dusk", "noon", "midnight", "today", "tonight", "hour", "hours",
+  "time", "times", "season", "seasons", "summer", "winter", "spring", "autumn",
+  "weather", "storm", "storms", "rain", "snow", "wind", "winds", "cloud", "clouds", "sun", "moon",
+  "star", "stars", "sky", "skies", "water", "waters", "wave", "waves",
+  "mountain", "mountains", "valley", "valleys", "forest", "forests", "desert", "deserts",
+  "island", "islands", "lake", "lakes", "hill", "hills", "plane", "planes", "train", "trains",
+  "boat", "boats", "ship", "ships", "flight", "flights",
+  "high", "higher", "low", "lower", "above", "below", "under", "over", "first", "last", "next",
+  "show", "shows", "view", "views", "scene", "scenes", "shot", "shots", "frame", "frames",
+  "fast", "slow", "quick", "near",
+  // "las" (Las Vegas / Las Palmas) must not snap to "los"; "san"/"santa" are
+  // place prefixes, not typos.
+  "las", "san", "santa", "santo",
 ]);
 
 function lev(a: string, b: string): number {

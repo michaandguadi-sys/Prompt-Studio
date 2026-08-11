@@ -9,6 +9,13 @@
  *  glowing territory highlights, a heat scatter, or a water-hugging sea lane. */
 export type PreviewFlavor = "route" | "pins" | "highlight" | "heat" | "sea";
 
+/** A parsed "place" that still carries filler/verb tokens is a mis-parsed span
+ *  (e.g. "Sailing Barcelona", "Athens At Golden Hour") — not a name we should
+ *  assert. Used to keep the confident understanding UI from surfacing noise. */
+export function looksNoisy(name: string): boolean {
+  return /\b(at|to|the|of|in|and|from|with|sailing|flying|driving|walking|hiking|trip)\b/i.test(name);
+}
+
 /** Pick the preview flavor from the prompt text + the intent engine's action. */
 export function flavorForPrompt(text: string, action?: string | null): PreviewFlavor {
   if (/heat ?map|earthquake|wildfire|outbreak|cases|crime|density|incidents|hotspots?|events\b/i.test(text)) return "heat";

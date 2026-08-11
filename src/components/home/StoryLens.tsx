@@ -3,6 +3,7 @@
 import React from "react";
 import { MapPin, ArrowRight, Film, Globe2, Sparkles, Clapperboard, Check } from "lucide-react";
 import type { Interpretation } from "@/lib/parse/intent";
+import { looksNoisy } from "./mapPreview";
 
 /** The verb the director will apply — shown only when it adds meaning the
  *  journey chain doesn't already imply (route arrows already read as a journey). */
@@ -64,10 +65,11 @@ export function directorRead(it: Interpretation | null, journey: string[]): stri
   const look = (it.style?.style ?? "cinematic").toLowerCase();
   const secs = it.durationSec > 0 ? Math.round(it.durationSec) : 0;
   const dur = secs ? `about ${secs}s` : "";
-  if (it.route) return `A ${look} journey from ${it.route.from} to ${it.route.to}${dur ? `, ${dur}` : ""}.`;
+  // Build names from the VERIFIED journey (gazetteer-gated), never the raw route
+  // span — otherwise trailing style words leak in ("to Athens At Golden Hour").
   if (it.expandedFrom) return `Every country in ${it.expandedFrom} — ${it.locations.length}${dur ? ` in ${dur}` : ""}.`;
-  if (journey.length === 1) return `A ${look} reveal of ${journey[0]}${dur ? `, ${dur}` : ""}.`;
-  return `A ${look} tour of ${journey.slice(0, 3).join(", ")}${journey.length > 3 ? "…" : ""}${dur ? `, ${dur}` : ""}.`;
+  if (journey.length >= 2) return `A ${look} journey from ${journey[0]} to ${journey[journey.length - 1]}${dur ? `, ${dur}` : ""}.`;
+  return `A ${look} reveal of ${journey[0]}${dur ? `, ${dur}` : ""}.`;
 }
 
 export const StoryLens: React.FC<{
@@ -94,7 +96,10 @@ export const StoryLens: React.FC<{
   const corrections = (it?.corrections ?? []).slice(0, 2);
   const showExpansion = !!it?.expandedFrom && it.expandedFrom !== it.context;
   const durationSec = it && it.durationSec > 0 ? Math.round(it.durationSec) : 0;
-  const dRead = directorRead(it, journey);
+  // Only assert the confident one-liner when the endpoints read as clean names
+  // (a verb-led no-comma span can leak "Sailing Barcelona" into the route).
+  const dRead = (journey.length > 0 && !looksNoisy(journey[0]) && !looksNoisy(journey[journey.length - 1]))
+    ? directorRead(it, journey) : null;
 
   return (
     <div

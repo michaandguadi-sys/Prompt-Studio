@@ -3,6 +3,8 @@
 import React, { useMemo } from "react";
 import { MapPin, ArrowRight, Film, Globe2 } from "lucide-react";
 import { interpret } from "@/lib/parse";
+import { coordsFor, isLikelyPlaceName } from "./worldCoords";
+import { looksNoisy } from "./mapPreview";
 
 /**
  * StoryUnderstanding — the director's live read of a prompt, as glass chips:
@@ -28,7 +30,10 @@ export function deriveUnderstanding(idea: string | undefined): Understanding | n
   if (t.length < 2) return null;
   try {
     const it = interpret(t);
-    const journey = (it.route ? [it.route.from, ...it.route.via, it.route.to] : it.locations).slice(0, 4);
+    // Gazetteer-gate the names (same rule as the map) so trailing style words
+    // ("…vintage atlas") never render as a location chip.
+    const raw = it.route ? [it.route.from, ...it.route.via, it.route.to] : it.locations;
+    const journey = raw.filter((n) => !looksNoisy(n) && (coordsFor(n) || isLikelyPlaceName(n, t))).slice(0, 4);
     if (journey.length === 0 && !it.style) return null;
     return { journey, style: it.style?.style ?? null, context: it.context, dur: it.durationSec > 0 ? Math.round(it.durationSec) : 0 };
   } catch { return null; }
