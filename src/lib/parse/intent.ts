@@ -6,7 +6,7 @@
  * so the UI can show a "here's what I understood" preview (and ask for
  * clarification when unsure). No AI — pure, fast, testable.
  */
-import { CONTINENTS, CONTINENT_ALIASES, PLACE_SET, PLACE_DISPLAY, VOCAB } from "./gazetteer";
+import { CONTINENTS, CONTINENT_ALIASES, PLACE_SET, PLACE_DISPLAY, VOCAB, PLACE_WORDS } from "./gazetteer";
 
 export type StyleProfile = { style: string; camera: string; motion: string; pacing: string; mapTheme: string };
 export type ActionKind = "highlight" | "camera" | "route" | "mixed" | "unknown";
@@ -72,6 +72,11 @@ const NEVER_FIX = new Set([
   // "las" (Las Vegas / Las Palmas) must not snap to "los"; "san"/"santa" are
   // place prefixes, not typos.
   "las", "san", "santa", "santo",
+  // Motion / journey verbs the user types (they drive route + flavor, and must
+  // never snap to a place: "along"→"hong", "drive"→"dive", "sail"→…).
+  "drive", "drives", "drove", "along", "walk", "walks", "walked", "sail", "sails", "sailed",
+  "cruise", "cruises", "hike", "hikes", "hiked", "trek", "treks", "cross", "crossing",
+  "wall", "walls", "camino",
 ]);
 
 function lev(a: string, b: string): number {
@@ -108,7 +113,13 @@ export function spellfix(text: string): { corrected: string; corrections: { from
     if (COMMON[lw]) { corrections.push({ from: w, to: COMMON[lw] }); return matchCase(w, COMMON[lw]); }
     if (NEVER_FIX.has(lw)) return w; // real English word — don't snap to a place
     const fix = closest(lw);
-    if (fix && fix !== lw) { corrections.push({ from: w, to: fix }); return matchCase(w, fix); }
+    if (fix && fix !== lw) {
+      // A capitalised word is a proper noun (a place/name the user typed on
+      // purpose). Only accept a correction toward another PLACE — never snap it
+      // to a common lexicon word ("Porto"→"north", "Wall"→"all", "Drive"→"dive").
+      if (w[0] >= "A" && w[0] <= "Z" && !PLACE_WORDS.has(fix)) return w;
+      corrections.push({ from: w, to: fix }); return matchCase(w, fix);
+    }
     return w;
   });
   return { corrected, corrections };
@@ -159,7 +170,17 @@ const resolvePlace = (frag: string): string | null => {
   if (PLACE_SET.has(lf)) return f.replace(/\b\w/g, (c) => c.toUpperCase());
   // Unknown but plausible (≤4 words, alphabetic) → Title-case and let the geocoder resolve it.
   if (/^[A-Za-z][A-Za-z .'-]{1,40}$/.test(f) && f.split(/\s+/).length <= 4) {
-    const stop = new Set(["all", "countries", "country", "world", "map", "everything", "them", "it"]);
+    const stop = new Set([
+      "all", "countries", "country", "world", "map", "everything", "them", "it",
+      // Generic geography words are not places on their own (named ones —
+      // "Ivory Coast", "Amazon River", "South China Sea" — resolved above by
+      // full name, so only the bare word is rejected here).
+      "coast", "coasts", "coastline", "shore", "shores", "border", "borders",
+      "sea", "seas", "ocean", "oceans", "river", "rivers", "lake", "lakes",
+      "desert", "deserts", "forest", "forests", "mountain", "mountains", "valley", "valleys",
+      "hill", "hills", "peak", "peaks", "range", "ranges", "region", "regions", "area", "areas",
+      "north", "south", "east", "west", "route", "routes", "trip", "way",
+    ]);
     if (stop.has(lf)) return null;
     // Art-direction is never geography. Trailing craft phrases ("…, vintage atlas
     // style", "…map animation") get split into fragments here and would otherwise
@@ -215,7 +236,10 @@ function extractRoute(text: string): { from: string; to: string; via: string[] }
   const fi = t.toLowerCase().indexOf("from ");
   if (fi >= 0) t = t.slice(fi + 5); // start after the first "from"
   t = t.replace(/\b(show|create|make|animate|the|my|a|an|i|we|us|travel(?:led|ed)?|trip|journey|route|road ?trip|flight|then|expedition|voyage)\b/gi, " ");
-  const seq = t.split(/→|->|—|–|\bto\b|\bthrough\b|\bvia\b|,/i).map((s) => resolvePlace(s)).filter((s): s is string => !!s);
+  // Split on arrows, route connectors AND trailing prepositional phrases, so a
+  // destination ends at the place ("…to Porto along the coast" → Porto, not
+  // "Porto Along Coast"; "…over the Alps", "…across the Sahara").
+  const seq = t.split(/→|->|—|–|\bto\b|\bthrough\b|\bvia\b|\balong\b|\bover\b|\bacross\b|\bnear\b|\bpast\b|\btowards?\b|\balongside\b|\baround\b|,/i).map((s) => resolvePlace(s)).filter((s): s is string => !!s);
   const uniq = seq.filter((s, i) => seq.indexOf(s) === i);
   if (uniq.length < 2) return null;
   return { from: uniq[0], to: uniq[uniq.length - 1], via: uniq.slice(1, -1) };
