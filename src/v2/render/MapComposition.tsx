@@ -21,7 +21,6 @@ import type {
   AnnotationLayer, ConnectionsLayer, SpotlightLayer, TrackLayer, ChoroplethLayer, BubbleLayer, FlowLayer, HeatmapLayer, Look,
 } from "../doc/schema";
 import { minZoomForAspect } from "../doc/schema";
-import { fontStack, WEBFONTS_CSS_URL } from "../doc/themes";
 
 /** Photoreal 3D (Google Earth) overlay — lazy so deck.gl/loaders.gl never load
  *  in the headless render path; only fetched in the browser preview when used. */
@@ -259,14 +258,16 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
   }, [isRendering, frame, pose.lon, pose.lat, pose.zoom, pose.pitch, pose.bearing, ohmYear]);
 
   // ── Webfonts (Bebas Neue, Montserrat, …) ──
-  // Inject the Google-Fonts stylesheet once, in BOTH the player preview and the
-  // headless render, then gate the render on document.fonts.ready so titles
-  // export in the chosen typeface instead of falling back to a system font.
+  // Load the webfonts stylesheet through our SAME-ORIGIN proxy (/api/fonts), in
+  // BOTH the player preview and the headless render, then gate the render on
+  // document.fonts.ready so titles export in the chosen typeface. Direct
+  // cross-origin Google-Fonts loads get a 400 / ERR_BLOCKED_BY_ORB in headless
+  // Chromium — the proxy fetches server-side and rewrites files to same-origin.
   React.useEffect(() => {
     if (typeof document === "undefined") return;
     if (!document.getElementById("ps-webfonts")) {
       const link = document.createElement("link");
-      link.id = "ps-webfonts"; link.rel = "stylesheet"; link.href = WEBFONTS_CSS_URL;
+      link.id = "ps-webfonts"; link.rel = "stylesheet"; link.href = "/api/fonts";
       document.head.appendChild(link);
     }
   }, []);
