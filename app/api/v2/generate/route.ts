@@ -103,7 +103,7 @@ type PlanLayer =
   // An editorial leader-line callout pointing at a place.
   | ({ kind: "annotation"; place: string; text: string; sub?: string; side?: "top" | "bottom" | "left" | "right" | "auto" } & Styled & Timed)
   // A network of arcs: hub-and-spoke (hub → places) or a chain (places in order).
-  | ({ kind: "connections"; hub?: string; places: string[]; mode?: "hub" | "chain" } & Styled & Timed)
+  | ({ kind: "connections"; hub?: string; places: string[]; mode?: "hub" | "chain"; arrowheads?: boolean; pulse?: boolean } & Styled & Timed)
   // Darken everything except a circle on `place` to force the eye there.
   | ({ kind: "spotlight"; place: string } & Styled & Timed)
   // COMPOSITE: a clash between two countries — auto-highlights BOTH (opposing
@@ -200,7 +200,7 @@ layer kinds (refer to places by NAME — coords are resolved for you):
  {"kind":"chart","variant":"counter","value":67000000,"suffix":" people","label":"population"}
  {"kind":"marker","place":"Pearl Harbor" OR "between":["India","Pakistan"],"icon":"swords"|"explosion"|"fire"|"skull"|"alert"|"radiation"|"oil"|"money"|"anchor"|"crown"|"target"|"landmark","label":"optional","emoji":"optional override"}
  {"kind":"annotation","place":"Suez Canal","text":"CHOKEPOINT","sub":"optional","side":"top"|"bottom"|"left"|"right"|"auto"}
- {"kind":"connections","hub":"London","places":["New York","Cairo","Mumbai"],"mode":"hub"|"chain"}
+ {"kind":"connections","hub":"London","places":["New York","Cairo","Mumbai"],"mode":"hub"|"chain","arrowheads":bool,"pulse":bool}  ← set "arrowheads":true for DIRECTIONAL flows (backer→proxy support, an advance, a supply line — the Vox "arrow INTO the country" look); leave false for a neutral network/web. "pulse":true sends light travelling along the arcs (aid/influence flowing in). hub → each place; chain → A→B→C in order, arrow at each step.
  {"kind":"spotlight","place":"Berlin"}
  {"kind":"conflict","a":"India","b":"Pakistan","swords":4}  ← AUTO: highlights BOTH countries in opposing colours, draws the REAL shared border glowing, and places crossing-swords ALONG it. Use for ANY clash/war/dispute/tension between two countries.
  {"kind":"regionFlags","region":"Europe"}  ← AUTO: drops EVERY country in the region as a flag, popped in one-by-one, camera framed on the region. Regions with flags: Europe, Scandinavia, Baltics, Balkans.
@@ -1454,7 +1454,7 @@ async function buildFromPlan(plan: Plan, opts: { story?: boolean } = {}): Promis
         const hubG = pl.hub ? await geocode(pl.hub) : null;
         if (geos.length < (hubG ? 1 : 2)) continue;
         const mode = hubG ? (pl.mode ?? "hub") : "chain";
-        add(createLayer("connections", { name: "Network", mode, hub: hubG ? { lon: hubG.lon, lat: hubG.lat, name: hubG.name } : null, points: geos.map((g) => ({ lon: g.lon, lat: g.lat, name: g.name })), timing, ...(pl.style ?? {}) }), pl.style);
+        add(createLayer("connections", { name: "Network", mode, hub: hubG ? { lon: hubG.lon, lat: hubG.lat, name: hubG.name } : null, points: geos.map((g) => ({ lon: g.lon, lat: g.lat, name: g.name })), timing, ...(pl.style ?? {}), ...(pl.arrowheads != null ? { arrowheads: pl.arrowheads } : {}), ...(pl.pulse != null ? { pulse: pl.pulse } : {}) }), pl.style);
       } else if (pl.kind === "spotlight") {
         const g = await geocode(pl.place); if (!g) continue;
         add(createLayer("spotlight", { name: `Spotlight ${pl.place}`, anchor: { lon: g.lon, lat: g.lat }, timing, ...(pl.style ?? {}) }), pl.style);

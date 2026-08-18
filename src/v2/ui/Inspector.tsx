@@ -1816,6 +1816,13 @@ const ConnectionsFields: React.FC<{ layer: Extract<Layer, { type: "connections" 
       <Field label="Node colour"><ColorInput value={layer.dotColor} onChange={(v) => set({ dotColor: v })} /></Field>
     </div>
     <Field label="Reveal"><Select value={layer.reveal} onChange={(e) => set({ reveal: e.target.value })}><option value="draw">Draw on</option><option value="grow">Grow</option><option value="fade">Fade</option><option value="static">Static</option></Select></Field>
+    <div className="grid grid-cols-2 gap-2">
+      <Toggle label="Flow arrows" checked={layer.arrowheads ?? false} onChange={(v) => set({ arrowheads: v })} />
+      <Toggle label="Pulse" checked={layer.pulse} onChange={(v) => set({ pulse: v })} />
+    </div>
+    {layer.arrowheads && (
+      <Slider label="Arrow size" value={layer.arrowScale ?? 1.6} min={0.5} max={4} onChange={(v) => set({ arrowScale: v })} format={(v) => `${v.toFixed(1)}×`} />
+    )}
     <Advanced label="Line & nodes">
       <div className="grid grid-cols-2 gap-2">
         <Field label="Line width"><NumberInput value={layer.width} step={1} min={1} max={40} unit="px" onChange={(v) => set({ width: v })} /></Field>

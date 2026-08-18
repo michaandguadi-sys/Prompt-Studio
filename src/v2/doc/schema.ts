@@ -592,6 +592,10 @@ export const ConnectionsLayer = z.object({
   dotColor: z.string().default("#ffffff"),
   pulse: z.boolean().default(false),                   // travelling pulse along arcs
   showLabels: z.boolean().default(false),
+  /** Bold arrowhead at each destination end — turns arcs into directional flow
+   *  arrows (backer→proxy, advance, supply line — the Vox-explainer look). */
+  arrowheads: z.boolean().default(false),
+  arrowScale: z.number().min(0.5).max(4).default(1.6), // arrowhead size ×line width
 });
 
 // ── Layer: Spotlight (darken everything except a circle to direct the eye) ────
