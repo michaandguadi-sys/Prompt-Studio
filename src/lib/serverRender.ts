@@ -26,6 +26,8 @@ export type ServerRenderJob = {
   status: ServerJobStatus;
   /** True while a running job is suspended (SIGSTOP) — resume with SIGCONT. */
   paused?: boolean;
+  /** When it was paused, so a forgotten pause can be reasoned about. */
+  pausedAt?: number;
   progress: number; // 0–1
   message: string;
   outFile: string;
@@ -143,14 +145,22 @@ export function retryServerJob(id: string): ServerRenderJob | null {
   } catch { return null; }
 }
 
-/** Suspend a running render (SIGSTOP) — frees CPU without losing progress. */
+/** Suspend a running render (SIGSTOP) — frees CPU without losing progress.
+ *
+ *  A paused job also RELEASES its concurrency slot. It used to keep it: finish()
+ *  is the only thing that decrements runningCount and it only runs when the
+ *  process exits, so with MAX_CONCURRENT = 1 a single paused render blocked the
+ *  queue for every user, indefinitely. */
 export function pauseServerJob(id: string): boolean {
   const job = jobs.get(id);
   const proc = procs.get(id);
   if (!job || !proc || job.status !== "running" || job.paused) return false;
   try { proc.kill("SIGSTOP"); } catch { return false; }
   job.paused = true;
+  job.pausedAt = Date.now();
   job.message = "Paused";
+  runningCount = Math.max(0, runningCount - 1);
+  processNext();
   return true;
 }
 
@@ -158,8 +168,17 @@ export function resumeServerJob(id: string): boolean {
   const job = jobs.get(id);
   const proc = procs.get(id);
   if (!job || !proc || !job.paused) return false;
+  // Pausing released the slot, so resuming has to take one back. If the queue
+  // handed it to someone else, stay paused rather than running two renders at
+  // once — 2 x Remotion (2 tabs each) would saturate all 4 vCPU.
+  if (runningCount >= MAX_CONCURRENT) {
+    job.message = "Waiting for a free slot…";
+    return false;
+  }
   try { proc.kill("SIGCONT"); } catch { return false; }
   job.paused = false;
+  job.pausedAt = undefined;
+  runningCount++;
   job.message = "Resumed…";
   return true;
 }
@@ -173,6 +192,24 @@ function sweepOldOutputs() {
       jobs.delete(id);
     }
   }
+
+  // `jobs` is in-memory, so it is EMPTY after a restart — every file written
+  // before the restart became invisible to the loop above and survived forever.
+  // .renders/ is a docker volume on the VPS; a 4K mp4 per render fills the disk,
+  // and a full disk takes down renders, the file store and Postgres together.
+  // Sweep by mtime so orphans are collected regardless of what is in memory.
+  const live = new Set<string>();
+  for (const [id, job] of jobs.entries()) { live.add(path.basename(job.outFile)); live.add(`${id}.job.json`); }
+  try {
+    for (const name of fs.readdirSync(RENDER_DIR)) {
+      if (live.has(name)) continue;                       // tracked by a live job
+      const full = path.join(RENDER_DIR, name);
+      try {
+        const st = fs.statSync(full);
+        if (st.isFile() && st.mtimeMs < cutoff) fs.rmSync(full, { force: true });
+      } catch { /* raced with another sweep or a write — skip */ }
+    }
+  } catch { /* RENDER_DIR missing — nothing to sweep */ }
 }
 
 function processNext() {
@@ -218,8 +255,15 @@ function processNext() {
     stderrTail = (stderrTail + b.toString()).slice(-2000);
   });
 
+  // 'close' and 'error' can BOTH fire for the same process (a failed spawn is
+  // the common case), which ran finish() twice: runningCount went NEGATIVE, so
+  // `runningCount >= MAX_CONCURRENT` was never true again and the queue started
+  // every job at once — unbounded parallel Chromium on a 4 vCPU box.
+  let finished = false;
   const finish = (ok: boolean, errMsg?: string) => {
-    runningCount--;
+    if (finished) return;
+    finished = true;
+    runningCount = Math.max(0, runningCount - 1);
     procs.delete(job.id);
     job.finishedAt = Date.now();
     job.paused = false;
