@@ -30,6 +30,49 @@ import { TIERS, type Tier } from "./tiers";
  * runs NODE_ENV=production can still force it on with a second explicit opt-in,
  * TEST_UNLIMITED_ALLOW_PROD=true. In development the single flag is enough.
  */
+/**
+ * Record a COMPLETED render so it counts against a count-metered tier's cap.
+ *
+ * `checkQuota` measures free-tier usage by counting render_logs rows, but the
+ * only writer used to be /api/agent/complete — the self-hosted Render Agent
+ * path. Free users are explicitly denied the agent (`agentAllowed: false`) and
+ * are forced onto the SERVER render path, which wrote no row at all. The
+ * "3 animations / month" cap therefore counted a table that never grew, and
+ * free rendering was effectively unlimited — real CPU on a 4 vCPU VPS.
+ *
+ * Best-effort by design: metering must never fail a render the user already
+ * paid for in wall-clock time. Callers can fire-and-forget.
+ */
+export async function logRenderCompleted(opts: {
+  userId: string;
+  sceneName: string;
+  durationSeconds: number;
+}): Promise<void> {
+  if (!db || grantAllPro()) return;
+  try {
+    const [sub] = await db
+      .select({ tier: schema.subscriptions.tier, status: schema.subscriptions.status })
+      .from(schema.subscriptions)
+      .where(eq(schema.subscriptions.userId, opts.userId))
+      .limit(1);
+    // Same fail-closed resolution as checkQuota: an unknown tier or an
+    // unentitled status is metered as free rather than waved through.
+    const claimed = sub?.tier as Tier | undefined;
+    const entitled = sub ? ["active", "trialing", "lifetime"].includes(sub.status) : false;
+    const tier: Tier = claimed && claimed in TIERS && entitled ? claimed : "free";
+    if (TIERS[tier]?.maxRenders == null) return;   // unmetered tier — nothing to count
+    await db.insert(schema.renderLogs).values({
+      userId:          opts.userId,
+      sceneName:       opts.sceneName,
+      durationSeconds: String(Math.max(0, opts.durationSeconds)),
+      tierAtRender:    tier,
+      status:          "completed",
+    });
+  } catch {
+    // Never let metering break a finished render.
+  }
+}
+
 export function grantAllPro(): boolean {
   if (process.env.TEST_UNLIMITED !== "true") return false;
   if (process.env.NODE_ENV === "production" && process.env.TEST_UNLIMITED_ALLOW_PROD !== "true") return false;
@@ -134,7 +177,18 @@ export async function checkQuota(userId: string): Promise<QuotaResult> {
     };
   }
 
-  const tier = sub.tier as Tier;
+  // Fail CLOSED on both axes — every other tier check in the app already does.
+  //
+  // 1. `sub.tier` is free text in the DB. An unrecognised value (a hand-edited
+  //    row, a restored backup, a future rename) previously made TIERS[tier]
+  //    undefined, so maxRenders fell to null and `allowed` became unconditional
+  //    true — an unknown tier granted MORE than a known one.
+  // 2. `sub.status` was never consulted, so a past_due / canceled / unpaid row
+  //    kept full paid entitlement: a Creator whose card fails would keep
+  //    unwatermarked 4K renders indefinitely.
+  const ENTITLED = new Set(["active", "trialing", "lifetime"]);
+  const claimed = sub.tier as Tier;
+  const tier: Tier = claimed in TIERS && ENTITLED.has(sub.status) ? claimed : "free";
   const maxRenders = TIERS[tier]?.maxRenders ?? null;
   const periodStart = sub.currentPeriodStart ?? new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 

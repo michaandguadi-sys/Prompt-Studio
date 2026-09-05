@@ -13,6 +13,7 @@ import { spawn, ChildProcess } from "child_process";
 import { randomUUID } from "crypto";
 import fs from "fs";
 import path from "path";
+import { logRenderCompleted } from "./quota";
 
 export type ServerJobStatus = "queued" | "running" | "done" | "failed" | "cancelled";
 
@@ -228,6 +229,15 @@ function processNext() {
       job.status = "done";
       job.progress = 1;
       job.message = `Ready in ${Math.round((job.finishedAt - (job.startedAt ?? job.finishedAt)) / 1000)}s`;
+      // Meter the render so a count-capped tier actually reaches its cap. The
+      // agent path logs via /api/agent/complete; this is the equivalent for the
+      // server path, which free users are forced onto. Fire-and-forget: a
+      // metering failure must never turn a finished render into a failed one.
+      void logRenderCompleted({
+        userId:          job.userId,
+        sceneName:       job.name || job.compId,
+        durationSeconds: Math.round((job.finishedAt - (job.startedAt ?? job.finishedAt)) / 1000),
+      });
     } else {
       job.status = "failed";
       job.error = job.error || errMsg || stderrTail.split("\n").filter(Boolean).pop() || "Render failed";
