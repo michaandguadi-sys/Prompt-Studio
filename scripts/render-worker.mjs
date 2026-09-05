@@ -15,6 +15,27 @@ import { existsSync, readFileSync, mkdirSync, symlinkSync } from "fs";
 import path from "path";
 import { cpus } from "os";
 
+/** How many Chromium tabs composite frames in parallel.
+ *
+ *  Default: half the cores, capped at 4 — on the 4 vCPU VPS that is 2, which
+ *  leaves headroom for the web server while a render runs.
+ *
+ *  RENDER_CONCURRENCY overrides it. Remotion accepts either a NUMBER or a
+ *  percentage STRING ("50%"), so the raw env value could not just be passed
+ *  through: `RENDER_CONCURRENCY=2` handed Remotion the string "2", which is
+ *  neither form. Parse both shapes and ignore anything else rather than letting
+ *  a typo take the render down mid-job. */
+function resolveConcurrency() {
+  const fallback = Math.max(1, Math.min(4, Math.floor((cpus().length || 2) / 2)));
+  const raw = (process.env.RENDER_CONCURRENCY ?? "").trim();
+  if (!raw) return fallback;
+  if (/^\d+%$/.test(raw)) return raw;              // Remotion's percentage form
+  const n = Number(raw);
+  if (Number.isInteger(n) && n >= 1) return n;
+  console.warn(`[render-worker] ignoring invalid RENDER_CONCURRENCY=${raw}; using ${fallback}`);
+  return fallback;
+}
+
 const emit = (progress, message) =>
   process.stdout.write(JSON.stringify({ progress, message }) + "\n");
 const fail = (message) => {
@@ -115,7 +136,7 @@ try {
       pixelFormat: "yuva444p10le",
       imageFormat: "png",
     }),
-    concurrency: process.env.RENDER_CONCURRENCY || Math.max(1, Math.min(4, Math.floor((cpus().length || 2) / 2))),
+    concurrency: resolveConcurrency(),
     timeoutInMilliseconds: 120_000,
     onProgress: ({ progress, renderedFrames }) =>
       emit(0.05 + progress * 0.94, `Rendering frame ${renderedFrames}/${totalFrames} — ${Math.round(progress * 100)}%`),
