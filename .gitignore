@@ -1,25 +1,43 @@
+# ── Dependencies & build output ──────────────────────────────────────────────
 node_modules/
-.next/
 out/
-.env.local
-.env.production
-# presets/
-.dev-data/
 *.tsbuildinfo
-.DS_Store
+
+# Next build dirs — the bare `.next` AND every alternate distDir used for
+# verification builds (NEXT_DIST_DIR=.next-verify / .next-buildcheck).
+# The unanchored `.next-*` pattern is what stopped 662 MB of webpack cache
+# from being committed a second time.
+.next/
+.next-*/
+
+# ── Environment & secrets ────────────────────────────────────────────────────
+# Ignore EVERY env file, then re-allow only the committed templates.
+# docker-compose reads build args from a bare `.env` on the VPS — that file
+# holds live keys and must never be committable.
+.env
+.env.*
+!.env.example
+!.env.local.example
+!.env.production.example
 
 # clerk configuration (can include secrets)
 /.clerk/
 
-# Claude Code agent worktrees (embedded git repos — never commit)
-.claude/worktrees/
+# ── Local runtime data (lives in docker volumes on the VPS) ──────────────────
+.dev-data/
+projects-v2/
+# server-side cloud renders (transient outputs)
+.renders/
+
+# ── Generated render bundle & smoke-test artifacts ───────────────────────────
 public/remotion-bundle
 .remotion-bundle-tmp
 .smoke-render.mp4
 .smoke-route.mp4
+*.mp4
+*.mov
 
-# server-side cloud renders (transient outputs)
-.renders/
-
-# user project data — lives in the docker volume on the VPS, not in git
-projects-v2/
+# ── Editor / OS / agent cruft ────────────────────────────────────────────────
+.DS_Store
+# Claude Code agent worktrees (embedded git repos — never commit)
+.claude/worktrees/

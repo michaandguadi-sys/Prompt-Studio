@@ -1,15 +1,14 @@
 # Mapanisy — Caddy v2 reverse proxy
 # Caddy automatically obtains and renews TLS from Let's Encrypt.
 #
-# Deploy: copy this file to /etc/caddy/Caddyfile on the VPS (or the same
-# directory as docker-compose.yml), then: systemctl reload caddy
+# Deploy: copy this file to /etc/caddy/Caddyfile on the VPS, replace the two
+# domain names below with your own, then:
+#     caddy validate --config /etc/caddy/Caddyfile
+#     systemctl reload caddy
 #
-# Replace mapanisy.com with your actual domain.
+# Replace mapanisy.com with your actual domain (both blocks).
 
 mapanisy.com {
-    # Forward all traffic to the Next.js app running in Docker on port 3030
-    reverse_proxy localhost:3030
-
     # Compress text responses
     encode gzip zstd
 
@@ -18,9 +17,22 @@ mapanisy.com {
     @renders path /renders/*
     header @renders Cache-Control "public, max-age=2592000, immutable"
 
-    # Strip the X-Forwarded-For spoofing risk — Caddy re-adds the real one
-    header_up X-Forwarded-For {remote_host}
-    header_up X-Real-IP {remote_host}
+    # Forward all traffic to the Next.js app running in Docker on port 3030.
+    #
+    # header_up is a reverse_proxy SUBDIRECTIVE — it must live inside this block.
+    # At site level Caddy rejects it as an unknown directive and refuses to start.
+    #
+    # Overwriting (not appending) X-Forwarded-For / X-Real-IP with {remote_host}
+    # discards any client-supplied value, so a caller cannot spoof its own IP and
+    # evade the app's per-IP rate limiting.
+    reverse_proxy localhost:3030 {
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Real-IP {remote_host}
+
+        # A 4K render streams for minutes before the first byte. Caddy streams
+        # responses by default, but be explicit so a slow render is never cut off.
+        flush_interval -1
+    }
 }
 
 # Optional: redirect www → apex
