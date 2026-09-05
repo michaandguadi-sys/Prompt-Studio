@@ -13,7 +13,7 @@ export type PreviewFlavor = "route" | "pins" | "highlight" | "heat" | "sea";
  *  (e.g. "Sailing Barcelona", "Athens At Golden Hour") — not a name we should
  *  assert. Used to keep the confident understanding UI from surfacing noise. */
 export function looksNoisy(name: string): boolean {
-  return /\b(at|to|the|of|in|and|from|with|sailing|flying|driving|walking|hiking|trip)\b/i.test(name);
+  return /\b(at|by|to|the|of|in|on|and|from|with|during|while|over|under|through|sailing|flying|driving|walking|hiking|cruising|cycling|trip|train|golden hour)\b/i.test(name);
 }
 
 /** Pick the preview flavor from the prompt text + the intent engine's action. */

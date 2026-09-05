@@ -69,6 +69,10 @@ const NEVER_FIX = new Set([
   "high", "higher", "low", "lower", "above", "below", "under", "over", "first", "last", "next",
   "show", "shows", "view", "views", "scene", "scenes", "shot", "shots", "frame", "frames",
   "fast", "slow", "quick", "near",
+  // Common travel scenery nouns — correctly spelled, must not snap to a vocab
+  // place ("trail" → "brazil", "lights" → "flight", "coast" → …).
+  "trail", "trails", "light", "lights", "coast", "coasts", "coastline", "shore", "shores",
+  "beach", "beaches", "cliff", "cliffs", "source", "sources", "route", "trip",
   // "las" (Las Vegas / Las Palmas) must not snap to "los"; "san"/"santa" are
   // place prefixes, not typos.
   "las", "san", "santa", "santo",
@@ -162,6 +166,33 @@ function detectStyle(text: string): StyleProfile | null {
 
 /* ── Location resolution ──────────────────────────────────────────────────── */
 
+/** Words that are pure art-direction / atmosphere / transit — never part of a
+ *  geographic name. A real place always carries at least one word that ISN'T one
+ *  of these, so a fragment made only of them ("vintage atlas", "golden hour",
+ *  "by train", "playful colorful") is style, not a stop; a leading or trailing
+ *  run of them ("Sailing Barcelona", "Los Angeles cinematic") is trimmed back to
+ *  the place. Keeps the map + generation + understanding UI from ever routing to
+ *  a phantom destination. Place-type nouns (sea, coast, valley…) are handled by
+ *  the stop set instead — so "Baltic Sea" survives while bare "sea" does not. */
+const DESCRIPTOR = new Set<string>([
+  // craft / camera / render / named styles
+  "cinematic", "epic", "dramatic", "documentary", "vintage", "retro", "modern", "minimal", "minimalist",
+  "clean", "luxury", "premium", "elegant", "moody", "dreamy", "nostalgic", "playful", "colorful", "colourful",
+  "vibrant", "serene", "bold", "grand", "sweeping", "aesthetic", "filmic", "montage", "realistic",
+  "style", "styles", "look", "vibe", "mood", "tone", "animation", "animated", "voiceover", "narration",
+  "narrated", "flythrough", "flyover", "timelapse", "hyperlapse", "aerial", "satellite", "terrain", "atlas", "overlay",
+  "beautiful", "stunning", "gorgeous", "breathtaking", "scenic", "majestic", "dreamlike",
+  // temporal / atmosphere
+  "golden", "hour", "magic", "twilight", "sunset", "sunrise", "dawn", "dusk", "night", "nights", "noon",
+  "midnight", "morning", "evening", "daytime", "daylight", "light", "lights", "moonlight", "sunlight", "starlight",
+  "misty", "foggy", "hazy", "rainy", "snowy", "sunny", "stormy", "cloudy", "overcast",
+  "spring", "summer", "autumn", "winter", "season", "seasons",
+  // transit modes (trailing "by train", leading "Sailing …")
+  "train", "boat", "ship", "bus", "plane", "car", "bike", "bicycle", "ferry", "kayak", "canoe", "foot",
+  "horseback", "sailing", "flying", "driving", "walking", "hiking", "cruising", "cruise", "cycling", "biking",
+  "riding", "roaming", "wandering", "exploring", "touring", "trekking",
+]);
+
 const resolvePlace = (frag: string): string | null => {
   const f = frag.trim().replace(/^(the|a|an|of|in|into|to|from)\s+/i, "").replace(/[.?!]+$/, "").trim();
   if (!f) return null;
@@ -180,14 +211,19 @@ const resolvePlace = (frag: string): string | null => {
       "desert", "deserts", "forest", "forests", "mountain", "mountains", "valley", "valleys",
       "hill", "hills", "peak", "peaks", "range", "ranges", "region", "regions", "area", "areas",
       "north", "south", "east", "west", "route", "routes", "trip", "way",
+      "source", "sources", "horizon", "distance", "nowhere", "everywhere", "somewhere", "anywhere",
     ]);
     if (stop.has(lf)) return null;
-    // Art-direction is never geography. Trailing craft phrases ("…, vintage atlas
-    // style", "…map animation") get split into fragments here and would otherwise
-    // Title-case into phantom route stops / highlights. These words never appear
-    // in a real place name, so rejecting them is safe (known places resolved above).
-    if (/\b(styles?|animation|animated|documentary|cinematic|voiceover|narration|flythrough|aesthetic|filmic|montage)\b/i.test(f)) return null;
-    return f.replace(/\b\w/g, (c) => c.toUpperCase());
+    // Trim leading + trailing art-direction / atmosphere / transit words, then
+    // keep only if a real place word remains: "Sailing Barcelona" → Barcelona,
+    // "Los Angeles cinematic" → Los Angeles, "vintage atlas" / "golden hour" → null.
+    const words = f.split(/\s+/);
+    let s = 0, e = words.length;
+    while (s < e && DESCRIPTOR.has(words[s].toLowerCase())) s++;
+    while (e > s && DESCRIPTOR.has(words[e - 1].toLowerCase())) e--;
+    const kept = words.slice(s, e);
+    if (!kept.length || kept.every((w) => stop.has(w.toLowerCase()))) return null;
+    return kept.join(" ").replace(/\b\w/g, (c) => c.toUpperCase());
   }
   return null;
 };
@@ -229,17 +265,22 @@ function extractRoute(text: string): { from: string; to: string; via: string[] }
   const routeNoun = ROUTE_NOUN_RE.test(text);
   const startsWithVerb = /^\s*(zoom|fly|move|go|travel|navigate|pan|dive|show|highlight|mark|focus|reveal|display|emphasi[sz]e|colou?r|fill|outline)\b/i.test(text);
   if (!arrow && !fromTo && !routeNoun) {
-    // "Paris to Rome" — bare place-to-place, not led by an action verb.
-    if (!(/\bto\b/i.test(text) && !startsWithVerb && scanKnownPlaces(text).length >= 2)) return null;
+    // "Paris to Rome" — bare place-to-place. A leading action verb usually means
+    // a single camera move ("Fly to Rome"), so it's excluded — UNLESS a place
+    // sits between the verb and "to" ("Fly New York to Reykjavik"), which is a
+    // genuine A→B the other gates miss.
+    const toIdx = text.search(/\bto\b/i);
+    const placeBeforeTo = toIdx > 0 && scanKnownPlaces(text.slice(0, toIdx)).length >= 1;
+    if (!(toIdx >= 0 && scanKnownPlaces(text).length >= 2 && (!startsWithVerb || placeBeforeTo))) return null;
   }
   let t = text;
   const fi = t.toLowerCase().indexOf("from ");
   if (fi >= 0) t = t.slice(fi + 5); // start after the first "from"
-  t = t.replace(/\b(show|create|make|animate|the|my|a|an|i|we|us|travel(?:led|ed)?|trip|journey|route|road ?trip|flight|then|expedition|voyage)\b/gi, " ");
+  t = t.replace(/\b(show|create|make|animate|the|my|a|an|i|we|us|travel(?:led|ed|ling)?|trip|journey|route|road ?trip|flight|then|expedition|voyage|fly(?:ing)?|driv(?:e|ing)|sail(?:ing)?|walk(?:ing)?|hik(?:e|ing)|trek(?:king)?|cruis(?:e|ing)|cycl(?:e|ing)|bik(?:e|ing)|rid(?:e|ing)|zoom|mov(?:e|ing)|navigat(?:e|ing)|dive|pan|wander(?:ing)?|roam(?:ing)?|explor(?:e|ing)|tour(?:ing)?|cross(?:ing)?|go(?:ing)?)\b/gi, " ");
   // Split on arrows, route connectors AND trailing prepositional phrases, so a
   // destination ends at the place ("…to Porto along the coast" → Porto, not
   // "Porto Along Coast"; "…over the Alps", "…across the Sahara").
-  const seq = t.split(/→|->|—|–|\bto\b|\bthrough\b|\bvia\b|\balong\b|\bover\b|\bacross\b|\bnear\b|\bpast\b|\btowards?\b|\balongside\b|\baround\b|,/i).map((s) => resolvePlace(s)).filter((s): s is string => !!s);
+  const seq = t.split(/→|->|—|–|\bto\b|\bthrough\b|\bvia\b|\balong\b|\bover\b|\bacross\b|\bnear\b|\bpast\b|\btowards?\b|\balongside\b|\baround\b|\bat\b|\bby\b|\bin\b|\bduring\b|\bwhile\b|\bunder\b|,/i).map((s) => resolvePlace(s)).filter((s): s is string => !!s);
   const uniq = seq.filter((s, i) => seq.indexOf(s) === i);
   if (uniq.length < 2) return null;
   return { from: uniq[0], to: uniq[uniq.length - 1], via: uniq.slice(1, -1) };

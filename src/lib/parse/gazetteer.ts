@@ -49,11 +49,15 @@ export const CITIES: string[] = [
   "New York", "Los Angeles", "San Francisco", "Chicago", "Miami", "Toronto", "Mexico City",
   "Tokyo", "Osaka", "Kyoto", "Seoul", "Beijing", "Shanghai", "Hong Kong", "Bangkok", "Singapore",
   "Mumbai", "Delhi", "Dubai", "Cairo", "Cape Town", "Nairobi", "Sydney", "Melbourne", "Rio de Janeiro", "Buenos Aires", "Lima",
+  // Iconic creator destinations the living map can already plot (worldCoords) —
+  // so the parser recognises everything the map can render.
+  "Reykjavik", "Kathmandu", "Marrakech", "Guatemala City", "Honolulu", "Anchorage", "Santiago", "Auckland",
 ];
 
 export const REGIONS: string[] = [
   "Bavaria", "Patagonia", "Andalusia", "Tuscany", "Catalonia", "Scotland", "Wales", "Provence", "Normandy",
   "Tibet", "Siberia", "Kashmir", "Sicily", "Crimea", "Galicia", "Lapland", "Transylvania",
+  "Greenland", "Cook Islands",
 ];
 
 export const FEATURES: string[] = [
