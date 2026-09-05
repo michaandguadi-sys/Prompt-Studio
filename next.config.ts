@@ -13,8 +13,11 @@ const SECURITY_HEADERS = [
   { key: "X-DNS-Prefetch-Control", value: "on" },
   // HSTS — only enforced over HTTPS; safe to ship now, ignored on HTTP
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
-  // Prevent cross-site scripting via unguessable token
-  { key: "X-XSS-Protection", value: "1; mode=block" },
+  // X-XSS-Protection is DEPRECATED. The legacy auditor it enabled could itself
+  // be abused to introduce XSS, so every major browser removed it and the
+  // guidance is to explicitly disable it rather than turn it on. Real XSS
+  // defence here is React's escaping + a CSP (see LAUNCH.md backlog).
+  { key: "X-XSS-Protection", value: "0" },
 ];
 
 const config: NextConfig = {
@@ -22,6 +25,14 @@ const config: NextConfig = {
   // server) without clobbering the dev server's .next. Unset in normal use.
   ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {}),
   reactStrictMode: false,
+  // This app renders every image through MapLibre/deck.gl canvases and plain
+  // <img>; there is not one `next/image` import in app/ or src/. Disabling the
+  // optimizer turns that into an enforced guarantee rather than a coincidence:
+  //  • /_next/image stops being a reachable endpoint (it is a known SSRF and
+  //    CPU-exhaustion surface — costly on a 4 vCPU VPS that also renders video).
+  //  • Next's bundled `sharp` (0.34.5, carrying the libvips CVEs in
+  //    GHSA-f88m-g3jw-g9cj) is never invoked.
+  images: { unoptimized: true },
   transpilePackages: ["mapbox-gl", "react-map-gl"],
   async headers() {
     return [
