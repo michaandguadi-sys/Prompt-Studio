@@ -1,0 +1,89 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Mapanisy on the guadiandmicha.com VPS (Hostinger KVM 2 — 2 vCPU / 8 GB).
+#
+# This file REPLACES docker-compose.yml for this box. Two things differ:
+#
+#   1. Traefik, not Caddy. The Hostinger "Ubuntu 24.04 with Docker and Traefik"
+#      template already owns :80 and :443 and terminates TLS. This service
+#      publishes NO ports at all — Traefik reaches it over the shared docker
+#      network and routes by Host header, so the existing nginx site on the
+#      apex domain is untouched.
+#   2. Sized for 2 vCPU / 8 GB, not the 4 vCPU / 16 GB the other file assumes
+#      (a 12g limit on an 8 GB host is meaningless).
+#
+# ── Before you run this, confirm two values ──────────────────────────────────
+#   docker network ls                     # → the network Traefik is attached to
+#   docker inspect traefik | grep -iE 'entryPoints|certresolver'
+# Then set them in .env next to this file:
+#   TRAEFIK_NETWORK=...        (e.g. root_default)
+#   TRAEFIK_ENTRYPOINT=...     (e.g. websecure)
+#   TRAEFIK_CERTRESOLVER=...   (e.g. letsencrypt)
+#   APP_HOST=mapinsy.guadiandmicha.com
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  mapanisy:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_MAPBOX_TOKEN: ${NEXT_PUBLIC_MAPBOX_TOKEN}
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+    container_name: mapanisy
+    env_file:
+      - .env.production
+    restart: unless-stopped
+
+    # NO `ports:` — deliberately. Traefik is the only thing that should reach
+    # this. Publishing a port here would expose the app on the VPS IP over plain
+    # HTTP, bypassing TLS, and Docker's iptables rules bypass ufw so a firewall
+    # would not close it.
+
+    # Chromium composites frames in /dev/shm. 2 GB of an 8 GB host is a large
+    # slice but renders segfault below ~512 MB; 1 GB is the compromise here.
+    shm_size: 1gb
+
+    # `deploy:` is honoured by Compose V2, but mem_limit is unambiguous on a
+    # single host. 5 GB leaves room for Traefik, nginx, the existing site and
+    # the OS on an 8 GB box.
+    mem_limit: 5g
+
+    environment:
+      # 2 vCPU → half the cores is 1. Set explicitly so a render can never take
+      # both cores and starve the web server (and the neighbouring site).
+      RENDER_CONCURRENCY: "1"
+
+    volumes:
+      - ./data/projects:/app/projects-v2
+      - ./data/renders:/app/.renders
+      - ./data/dev:/app/.dev-data
+
+    networks:
+      - traefik
+      - default
+
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${TRAEFIK_NETWORK}
+      traefik.http.routers.mapanisy.rule: Host(`${APP_HOST}`)
+      traefik.http.routers.mapanisy.entrypoints: ${TRAEFIK_ENTRYPOINT}
+      traefik.http.routers.mapanisy.tls: "true"
+      traefik.http.routers.mapanisy.tls.certresolver: ${TRAEFIK_CERTRESOLVER}
+      traefik.http.services.mapanisy.loadbalancer.server.port: "3030"
+      # Overwrite rather than append, so a caller cannot spoof its own IP and
+      # evade the app's per-IP rate limiting on the paid AI routes.
+      traefik.http.middlewares.mapanisy-realip.headers.customrequestheaders.X-Real-IP: ""
+      traefik.http.routers.mapanisy.middlewares: mapanisy-realip
+
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3030/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s      # first boot is slow on 2 vCPU
+
+networks:
+  traefik:
+    name: ${TRAEFIK_NETWORK}
+    external: true
+  default:
