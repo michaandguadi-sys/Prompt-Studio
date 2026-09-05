@@ -188,7 +188,20 @@ the build.
   native-binding dependency to fix a dead path is the riskier trade. Instead
   `images.unoptimized` makes the unreachability enforced and closes `/_next/image`
   as an SSRF/CPU surface.
-- **No postcss fix.** Build-time only, nested inside Next's own dependencies.
+- **No postcss fix.** Build-time only, nested inside Next's own dependencies;
+  npm's only fix is Next 16 (semver-major).
+- **No deck.gl downgrade.** The `@loaders.gl` / `image-size` / `texture-compressor`
+  advisories are real, but npm's "fix" is a **downgrade** to `@deck.gl` 9.0.6 from
+  9.3.4 — backwards across a major. That is not a fix, and the map layers depend
+  on 9.3.
+
+> **Corrected 2026-09-06.** An earlier revision of this document claimed the only
+> standing production findings were sharp and postcss. That was read off a
+> truncated `npm audit` tail and was wrong: there were also **eight Next.js
+> advisories**, three of them high and genuinely reachable (Server Actions DoS,
+> Server Actions SSRF, rewrites SSRF, plus unauthenticated disclosure of internal
+> Server Function endpoints). CI caught it. Fixed by bumping Next 15.5.20 →
+> 15.5.25; `tsc` and `build` re-verified green.
 - **No v1 deletion.** See 3.10 — the dependency graph does not match the docs.
   Needs its own session with the build as the gate.
 - **No CSP.** Real work with MapLibre/deck.gl; the other headers are in place.

@@ -1,20 +1,23 @@
 name: CI
 
 # The gates that must hold before a VPS deploy. There is no test suite yet, so
-# these three are the safety net:
+# these are the safety net:
 #   1. `npm ci` resolves        — this is what broke the Docker build before
 #                                 (react pinned to a version Clerk rejects).
 #   2. TypeScript is clean.
 #   3. The production build succeeds, INCLUDING the Remotion render bundle.
 
 on:
+  # Only `main` on push. Other branches are covered by pull_request — listing
+  # both here made every push to an open PR's branch run the whole workflow
+  # TWICE for the same commit.
   push:
-    branches: [main, security-hardening]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -23,9 +26,9 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22          # must match the Dockerfile's node:22
           cache: npm
@@ -56,15 +59,56 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Informational: a vulnerable transitive dep should be visible, but it must
-    # not block shipping a fix.
-    continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=high
+
+      # INFORMATIONAL — deliberately does not gate the PR.
+      #
+      # Not because audit findings do not matter: this job is what caught the
+      # eight Next.js advisories (3 high — Server Actions DoS, Server Actions
+      # SSRF, rewrites SSRF) that were fixed by bumping 15.5.20 → 15.5.25.
+      # Reachable findings get FIXED.
+      #
+      # What is left cannot be fixed without breaking the app, so gating on it
+      # would mean a permanently red check that everyone learns to ignore —
+      # which is worse than no check:
+      #   • deck.gl / loaders.gl chain (image-size, texture-compressor,
+      #     @luma.gl/gltf) — npm's "fix" is a DOWNGRADE to @deck.gl 9.0.6 from
+      #     9.3.4 (semver-major, backwards). That is not a fix.
+      #   • postcss — build-time only, nested in Next's own deps; npm's fix is
+      #     Next 16 (major).
+      #   • sharp (libvips CVEs) — Next pulls it in for image optimisation, but
+      #     `next/image` is imported NOWHERE and next.config.ts sets
+      #     images.unoptimized, so the code never runs.
+      #
+      # The live list is written to the job summary on every run so it stays
+      # visible and a NEW finding is noticed. To make this gate later, drop the
+      # `|| true` and set --audit-level.
+      - name: Audit production dependencies (informational)
+        run: |
+          set -o pipefail
+          npm audit --omit=dev --json > audit.json || true
+          node -e '
+            const a = require("./audit.json");
+            const m = a.metadata?.vulnerabilities ?? {};
+            const total = Object.values(m).reduce((n, v) => n + v, 0);
+            const rows = Object.entries(a.vulnerabilities ?? {})
+              .filter(([, v]) => ["high", "critical"].includes(v.severity))
+              .map(([name, v]) => `| \`${name}\` | ${v.severity} | ${v.via?.[0]?.title ?? v.via?.[0] ?? "—"} |`);
+            const out = [
+              `### npm audit — production dependencies`,
+              ``,
+              `**${total}** total: ${m.critical ?? 0} critical · ${m.high ?? 0} high · ${m.moderate ?? 0} moderate · ${m.low ?? 0} low`,
+              ``,
+              rows.length ? `| Package | Severity | Advisory |\n|---|---|---|\n${rows.join("\n")}` : `No high or critical findings.`,
+              ``,
+              `_Informational — see docs/LAUNCH_PLAN.md §4 for why the standing findings are not gated._`,
+            ].join("\n");
+            console.log(out);
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, out + "\n");
+          '
