@@ -255,7 +255,13 @@ export const useEditor = create<EditorState>()(
         duplicateLayer: (id) => {
           const src = get().project.composition.layers.find((l) => l.id === id);
           if (!src || src.type === "camera") return;
-          const copy = createLayer(src.type, { ...clone(src), id: undefined, name: `${src.name || src.type} copy` } as any);
+          // OMIT id rather than setting it undefined. `id: undefined` still
+          // creates the key, and since overrides are spread LAST it clobbered
+          // the fresh id createLayer() generates — so LayerSchema.parse() threw
+          // a ZodError on every duplicate, and ⌘D / the Layers panel / LayerHalo
+          // all silently did nothing.
+          const { id: _discard, ...rest } = clone(src) as Record<string, unknown>;
+          const copy = createLayer(src.type, { ...rest, name: `${src.name || src.type} copy` });
           commit((p) => {
             const i = layerIndex(p, id);
             p.composition.layers.splice(i + 1, 0, copy);
