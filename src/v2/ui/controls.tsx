@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, GripVertical } from "lucide-react";
 
 /** Polished form primitives for the v2 editor — token-themed, soft + tactile. */
 
@@ -53,9 +53,46 @@ export const NumberInput: React.FC<{
   };
   const bounded = min != null && max != null && !noSlider;
   const pct = bounded ? ((clamp(value) - (min as number)) / ((max as number) - (min as number) || 1)) * 100 : 0;
+
+  // Scrubby drag (Figma/Blender): grab the grip and drag horizontally to change
+  // the value — bounded fields span their full range across ~one field width,
+  // unbounded step per 3px. Shift = fine (×0.25). Snaps to `step`, never fights
+  // typing (separate zone). Round to the step's precision to avoid float dust.
+  const dec = step < 1 ? (String(step).split(".")[1]?.length ?? 0) : 0;
+  const range = min != null && max != null ? (max as number) - (min as number) : null;
+  const scrub = (e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    setText(null);
+    const startX = e.clientX;
+    const startVal = value;
+    const perPx = range != null ? range / 240 : step / 3;
+    const move = (ev: PointerEvent) => {
+      const dx = ev.clientX - startX;
+      let v = startVal + dx * perPx * (ev.shiftKey ? 0.25 : 1);
+      v = Number((Math.round(v / step) * step).toFixed(dec));
+      onChange(clamp(v));
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
   return (
     <div>
       <div className="flex items-center rounded-lg border border-line bg-paper-50 transition-all duration-150 hover:border-graphite/25 focus-within:border-iris/70 focus-within:ring-[3px] focus-within:ring-iris/15">
+        <span
+          onPointerDown={scrub}
+          aria-hidden="true"
+          title="Drag to scrub · hold Shift for fine control"
+          className="flex shrink-0 cursor-ew-resize touch-none select-none items-center self-stretch pl-1.5 pr-0.5 text-graphite-muted/35 transition-colors hover:text-iris"
+        >
+          <GripVertical size={13} />
+        </span>
         <input
           type="number"
           value={text ?? String(value)}
@@ -66,7 +103,7 @@ export const NumberInput: React.FC<{
             if (e.target.value !== "" && !Number.isNaN(v)) onChange(clamp(v));
           }}
           onBlur={() => setText(null)}
-          className="w-full bg-transparent px-3 py-2 text-[13px] tabular-nums text-graphite focus:outline-none"
+          className="w-full bg-transparent py-2 pl-1 pr-3 text-[13px] tabular-nums text-graphite focus:outline-none"
         />
         {unit && <span className="pr-3 text-[11px] font-medium text-graphite-muted">{unit}</span>}
       </div>
@@ -77,6 +114,7 @@ export const NumberInput: React.FC<{
           <div className="pointer-events-none absolute h-2.5 w-2.5 -translate-x-1/2 rounded-full border-2 border-iris bg-white shadow transition-transform group-hover:scale-110" style={{ left: `${pct}%` }} />
           <input
             type="range" min={min} max={max} step={step} value={clamp(value)}
+            aria-label={unit ? `Value (${unit})` : "Value"}
             onChange={(e) => { setText(null); onChange(Number(e.target.value)); }}
             className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
           />
@@ -125,6 +163,57 @@ export const Slider: React.FC<{
         />
       </div>
     </label>
+  );
+};
+
+/**
+ * SegTabs — a compact segmented control for switching CONTEXTS (not pages).
+ * The backbone of the "edit one thing at a time" inspector: pick Style and you
+ * see everything style-related together; pick Scene and only scene settings
+ * show. Mirrors how people think — one intent, one focused set of controls.
+ */
+export const SegTabs: React.FC<{
+  tabs: { key: string; label: string; icon?: React.ReactNode }[];
+  active: string;
+  onChange: (key: string) => void;
+}> = ({ tabs, active, onChange }) => (
+  <div className="flex rounded-xl bg-graphite/[0.05] p-0.5">
+    {tabs.map((t) => (
+      <button
+        key={t.key}
+        onClick={() => onChange(t.key)}
+        className={`flex flex-1 items-center justify-center gap-1.5 rounded-[10px] px-2 py-1.5 text-[11.5px] font-medium transition-all ${
+          active === t.key ? "bg-white text-graphite shadow-sm" : "text-graphite/50 hover:text-graphite/80"
+        }`}
+      >
+        {t.icon}{t.label}
+      </button>
+    ))}
+  </div>
+);
+
+/**
+ * Advanced — progressive disclosure for the long tail. Essentials stay visible;
+ * everything a first-time creator doesn't need collapses behind this quiet
+ * "Advanced" row (closed by default). Power is one tap away, never in the way.
+ */
+export const Advanced: React.FC<{ label?: string; children: React.ReactNode }> = ({ label = "Advanced", children }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={open ? "rounded-lg border border-line/60 bg-graphite/[0.015]" : ""}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-graphite/40 transition-colors hover:text-graphite/70"
+      >
+        {label}
+        <ChevronDown size={12} className={`transition-transform duration-300 ${open ? "" : "-rotate-90"}`} />
+      </button>
+      <div className={`grid transition-[grid-template-rows] duration-300 ease-[cubic-bezier(0.4,0,0.2,1)] ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+        <div className="overflow-hidden">
+          <div className="space-y-2.5 px-2 pb-2.5 pt-1">{children}</div>
+        </div>
+      </div>
+    </div>
   );
 };
 

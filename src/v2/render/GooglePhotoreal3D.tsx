@@ -24,28 +24,48 @@ import { delayRender, continueRender, getRemotionEnvironment } from "remotion";
  * Cloud). Google requires showing the tileset's data attribution — surfaced via
  * `onAttribution`.
  */
-const GooglePhotoreal3D: React.FC<{ apiKey: string; onAttribution?: (s: string) => void; timeOfDay?: number; sunDate?: string }> = ({ apiKey, onAttribution, timeOfDay = 13, sunDate }) => {
+const GooglePhotoreal3D: React.FC<{
+  apiKey: string;
+  onAttribution?: (s: string) => void;
+  onStatus?: (s: "loading" | "ready" | "error") => void;
+  timeOfDay?: number;
+  sunDate?: string;
+}> = ({ apiKey, onAttribution, onStatus, timeOfDay = 13, sunDate }) => {
   const overlay = useControl(() => new MapboxOverlay({ interleaved: true, layers: [], effects: [] })) as MapboxOverlay;
+  const errored = React.useRef(false);
+
+  React.useEffect(() => { errored.current = false; onStatus?.("loading"); }, [apiKey, onStatus]);
 
   const layer = React.useMemo(
     () =>
       new Tile3DLayer({
         id: "google-photoreal-3d",
-        data: "https://tile.googleapis.com/v1/3dtiles/root.json",
+        // Key in BOTH places: query param (the form Google's docs use — some
+        // gateway paths ignore the header) AND the header (covers child-tile
+        // fetches that loaders.gl issues without re-appending query params).
+        data: `https://tile.googleapis.com/v1/3dtiles/root.json?key=${encodeURIComponent(apiKey)}`,
         loader: Tiles3DLoader,
         loadOptions: { fetch: { headers: { "X-GOOG-API-KEY": apiKey } } },
-        // Draw + occlude against the map so labels/overlays sit correctly.
-        operation: "terrain+draw",
+        onTileError: (err: unknown) => {
+          // Surface auth/quota failures — a silent black overlay is undebuggable.
+          console.warn("[photoreal3d] tile error (check key restrictions / Map Tiles API enabled):", err);
+          if (!errored.current) { errored.current = true; onStatus?.("error"); }
+        },
+        // NOTE: default draw operation on purpose. `operation:"terrain+draw"`
+        // routes the tiles through deck's terrain pass, which without a
+        // TerrainExtension consumer can leave NOTHING visibly drawn — the
+        // "toggle on, nothing changes" failure mode.
         // Receive + cast the sun's shadows (the Google-Earth time-of-day look).
         _shadow: true,
         onTilesetLoad: (tileset: any) => {
+          onStatus?.("ready");
           try {
             const c = tileset?.tileset?.asset?.copyright || tileset?.tileset?.copyright;
             if (c && onAttribution) onAttribution(String(c));
           } catch { /* attribution optional */ }
         },
       }),
-    [apiKey, onAttribution],
+    [apiKey, onAttribution, onStatus],
   );
 
   // Real sun for the chosen date + hour. SunLight derives the solar position from

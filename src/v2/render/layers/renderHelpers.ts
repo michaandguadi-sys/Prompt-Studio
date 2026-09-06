@@ -1,20 +1,27 @@
 import React from "react";
-import { Theme, HighlightLayer, CameraLayer, CameraPose, RouteLayer, TrackLayer, Look } from "../../doc/schema";
+import { Theme, HighlightLayer, CameraLayer, CameraPose, RouteLayer, TrackLayer, Look, KfEase } from "../../doc/schema";
 import { fontStack } from "../../doc/themes";
 import { centroidOf } from "../../../lib/geo";
 import { patternImageId } from "../../../lib/mapPatterns";
 import { linearChain } from "../../../lib/interp";
+import { applyKfEase } from "../timing";
 
 /* ── Render State (Module Singletons) ─────────────────────────────────────── */
 export let LIVE_ZOOM = 8;
 export let LIVE_FRAME = 0;
 export let LIVE_TOTAL = 1;
+/** The exact camera pose the preview is showing at the current frame — written
+ *  every render, read by the "Adjust camera" gizmo so a fresh keyframe seeds
+ *  from whatever the camera is doing right now (any director: camera/route/…). */
+export let LIVE_POSE: CameraPose = { lon: 0, lat: 20, zoom: 3, pitch: 0, bearing: 0 };
 
 export function updateLiveState(zoom: number, frame: number, total: number) {
   LIVE_ZOOM = zoom;
   LIVE_FRAME = frame;
   LIVE_TOTAL = total;
 }
+export function updateLivePose(p: CameraPose) { LIVE_POSE = p; }
+export function getLivePose(): CameraPose { return LIVE_POSE; }
 
 /* ── Theme (fonts) propagation ──────────────────────────────────────────────── */
 export const DEFAULT_THEME: Theme = { name: "Default", accent: "#6E7BFF", fill: "#6E7BFF", border: "#6E7BFF", glow: "#6E7BFF", text: "#ffffff", fontDisplay: "Inter", fontBody: "Inter" };
@@ -68,7 +75,7 @@ export function sanitizePose(p: CameraPose): CameraPose {
     lon: clampN(finiteOr(p.lon, 0), -180, 180),
     lat: clampN(finiteOr(p.lat, 20), -85, 85),
     zoom: clampN(finiteOr(p.zoom, 3), 0.5, 22),
-    pitch: clampN(finiteOr(p.pitch, 0), 0, 84),
+    pitch: clampN(finiteOr(p.pitch, 0), 0, 85),
     bearing: finiteOr(p.bearing, 0) % 360,
   };
 }
@@ -179,6 +186,36 @@ function pathPose(cam: CameraLayer, progress: number, reverse = false): CameraPo
       : linearChain(vals, progress);
   };
   return { lon: pick("lon"), lat: pick("lat"), zoom: pick("zoom"), pitch: pick("pitch"), bearing: pick("bearing") };
+}
+
+/** Does this camera have explicit time-based keyframes driving it? */
+export function hasCamKeys(cam?: CameraLayer | null): boolean {
+  return !!cam && Array.isArray((cam as any).keys) && (cam as any).keys.length > 0;
+}
+
+/**
+ * Sample the camera pose from explicit time-based keyframes at scene-time `t`
+ * (0..1) — the Earth-Studio model. Interpolates between the two surrounding
+ * keys with the earlier key's easing; bearing takes the shortest arc; before
+ * the first / after the last key it holds. Assumes ≥1 key (see hasCamKeys).
+ */
+export function keyframedPose(cam: CameraLayer, t: number): CameraPose {
+  const keys = [...(cam as any).keys as { t: number; pose: CameraPose; ease: string }[]].sort((a, b) => a.t - b.t);
+  if (keys.length === 0) return poseAt(cam, t); // safety — caller should guard
+  if (keys.length === 1 || t <= keys[0].t) return { ...keys[0].pose };
+  if (t >= keys[keys.length - 1].t) return { ...keys[keys.length - 1].pose };
+  let i = 0;
+  while (i < keys.length - 1 && t > keys[i + 1].t) i++;
+  const a = keys[i], b = keys[i + 1];
+  const span = Math.max(1e-6, b.t - a.t);
+  const e = applyKfEase(a.ease as KfEase, clampN((t - a.t) / span, 0, 1));
+  return {
+    lon: lerp(a.pose.lon, b.pose.lon, e),
+    lat: lerp(a.pose.lat, b.pose.lat, e),
+    zoom: lerp(a.pose.zoom, b.pose.zoom, e),
+    pitch: lerp(a.pose.pitch, b.pose.pitch, e),
+    bearing: shortestBearingLerp(a.pose.bearing, b.pose.bearing, e),
+  };
 }
 
 export function poseAt(cam: CameraLayer, p: number): CameraPose {

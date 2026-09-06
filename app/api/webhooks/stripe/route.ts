@@ -19,9 +19,9 @@
  */
 import { headers } from "next/headers";
 import { db, schema } from "@/lib/db";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { stripe } from "@/lib/stripe";
-import { tierFromStripePrice, TIERS } from "@/lib/tiers";
+import { tierFromStripePrice, TIERS, type Tier } from "@/lib/tiers";
 import type Stripe from "stripe";
 
 export async function POST(req: Request) {
@@ -45,11 +45,34 @@ export async function POST(req: Request) {
   switch (event.type) {
     case "checkout.session.completed": {
       const session = event.data.object as Stripe.Checkout.Session;
-      if (session.mode !== "subscription") break;
-
       const userId = session.metadata?.userId;
       if (!userId) break;
 
+      // ONE-TIME (lifetime) purchase — the Pro tier. A `payment`-mode checkout
+      // creates NO subscription, so the customer.subscription.* events never
+      // fire; we must grant the tier right here. It never expires:
+      // currentPeriodEnd stays null and nothing will ever downgrade it.
+      if (session.mode === "payment") {
+        if (session.payment_status !== "paid") break;
+        const metaTier = session.metadata?.tier;
+        const tier: Tier = metaTier && metaTier in TIERS ? (metaTier as Tier) : "pro";
+        const tierCfg = TIERS[tier];
+        // UPSERT — a paying customer with no subscription row (webhook-race new
+        // user, or one operating on the free fallback) must NEVER pay and get
+        // nothing. Grant lands whether or not a row exists.
+        await grantSubscription(userId, {
+          tier,
+          status:               "lifetime",
+          minutesLimit:         tierCfg.minutesPerMonth,
+          stripeSubscriptionId: null,
+          stripePriceId:        tierCfg.stripePriceId,
+          currentPeriodStart:   new Date(),
+          currentPeriodEnd:     null, // lifetime — never expires
+        });
+        break;
+      }
+
+      if (session.mode !== "subscription") break;
       const stripeSub = await stripe.subscriptions.retrieve(session.subscription as string);
       await syncSubscription(userId, stripeSub);
       break;
@@ -69,7 +92,10 @@ export async function POST(req: Request) {
       const userId = stripeSub.metadata?.userId;
       if (!userId) break;
 
-      // Downgrade to free on cancellation
+      // Downgrade to free — but ONLY the row still tied to THIS subscription.
+      // A user who later bought lifetime Pro (stripeSubscriptionId → null) or
+      // moved to a different sub must not have that grant wiped when an old,
+      // unrelated subscription is cancelled.
       await db.update(schema.subscriptions)
         .set({
           tier: "free",
@@ -80,7 +106,10 @@ export async function POST(req: Request) {
           currentPeriodEnd: null,
           updatedAt: new Date(),
         })
-        .where(eq(schema.subscriptions.userId, userId));
+        .where(and(
+          eq(schema.subscriptions.userId, userId),
+          eq(schema.subscriptions.stripeSubscriptionId, stripeSub.id),
+        ));
       break;
     }
 
@@ -101,6 +130,14 @@ export async function POST(req: Request) {
 }
 
 async function syncSubscription(userId: string, stripeSub: Stripe.Subscription) {
+  // Never let a stale/unrelated subscription event overwrite a lifetime (one-time
+  // Pro) grant — that's a paid, never-expiring entitlement.
+  if (db) {
+    const [current] = await db.select({ status: schema.subscriptions.status })
+      .from(schema.subscriptions).where(eq(schema.subscriptions.userId, userId)).limit(1);
+    if (current?.status === "lifetime") return;
+  }
+
   const priceId = stripeSub.items.data[0]?.price.id;
   const tier    = (priceId ? tierFromStripePrice(priceId) : null) ?? "free";
   const tierCfg = TIERS[tier];
@@ -111,16 +148,31 @@ async function syncSubscription(userId: string, stripeSub: Stripe.Subscription) 
     current_period_end?: number;
   };
 
-  await db.update(schema.subscriptions)
-    .set({
-      tier,
-      status:               stripeSub.status,
-      minutesLimit:         tierCfg.minutesPerMonth,
-      stripeSubscriptionId: stripeSub.id,
-      stripePriceId:        priceId ?? null,
-      currentPeriodStart:   item.current_period_start ? new Date(item.current_period_start * 1000) : null,
-      currentPeriodEnd:     item.current_period_end   ? new Date(item.current_period_end   * 1000) : null,
-      updatedAt:            new Date(),
-    })
-    .where(eq(schema.subscriptions.userId, userId));
+  await grantSubscription(userId, {
+    tier,
+    status:               stripeSub.status,
+    minutesLimit:         tierCfg.minutesPerMonth,
+    stripeSubscriptionId: stripeSub.id,
+    stripePriceId:        priceId ?? null,
+    currentPeriodStart:   item.current_period_start ? new Date(item.current_period_start * 1000) : null,
+    currentPeriodEnd:     item.current_period_end   ? new Date(item.current_period_end   * 1000) : null,
+  });
+}
+
+/**
+ * Update the user's subscription row — or INSERT one if it doesn't exist yet.
+ * A missing row must never cause a paid grant to silently vanish (see the render
+ * lockout fix: users can operate on the free fallback with no row). subscriptions
+ * has no unique constraint on userId, so we update-then-insert rather than
+ * onConflict. `updatedAt` is stamped on both paths.
+ */
+async function grantSubscription(userId: string, fields: Record<string, unknown>) {
+  if (!db) return;
+  const updated = await db.update(schema.subscriptions)
+    .set({ ...fields, updatedAt: new Date() })
+    .where(eq(schema.subscriptions.userId, userId))
+    .returning({ id: schema.subscriptions.id });
+  if (updated.length === 0) {
+    await db.insert(schema.subscriptions).values({ userId, ...(fields as any) });
+  }
 }

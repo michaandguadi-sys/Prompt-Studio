@@ -1,10 +1,19 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Film, Focus } from "lucide-react";
 import { useEditor } from "../store/editor";
+import { useToast } from "@/components/Toast/Toast";
 import { LAYER_REGISTRY } from "../layers/registry";
-import type { Layer } from "../doc/schema";
+import type { CameraLayer, Layer } from "../doc/schema";
+import { poseAt, keyframedPose, hasCamKeys } from "../render/layers/renderHelpers";
+import { sampleTrack } from "../render/timing";
+
+/** Identifies a single selected keyframe on the timeline (camera or property). */
+type KfSel =
+  | { kind: "cam"; t: number }
+  | { kind: "prop"; id: string; prop: string; t: number }
+  | null;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const r1 = (v: number) => Math.round(v * 10) / 10;
@@ -143,10 +152,57 @@ const BeatTracks: React.FC<{
   patchLayer: (id: string, p: any) => void;
 }> = ({ layers, dur, selectedId, select, patchTiming, patchLayer }) => {
   const ticks = Array.from({ length: Math.floor(dur) + 1 }, (_, i) => i);
-  const playheadFrame = useEditor((s) => s.playheadFrame);
   const fps = useEditor((s) => s.project.composition.fps);
   const requestSeek = useEditor((s) => s.requestSeek);
-  const pct = dur > 0 && fps > 0 ? clamp((playheadFrame / fps / dur) * 100, 0, 100) : 0;
+  const setPlayheadFrame = useEditor((s) => s.setPlayheadFrame);
+  const moveKeyframe = useEditor((s) => s.moveKeyframe);
+  const moveCameraKey = useEditor((s) => s.moveCameraKey);
+  const setCameraKeyAt = useEditor((s) => s.setCameraKeyAt);
+  const deleteCameraKeyAt = useEditor((s) => s.deleteCameraKeyAt);
+  const addKeyframeAt = useEditor((s) => s.addKeyframeAt);
+  const deleteKeyframeAt = useEditor((s) => s.deleteKeyframeAt);
+  const jumpToT = (t: number) => { const f = Math.round(t * dur * fps); setPlayheadFrame(f); requestSeek?.(f); };
+
+  // Select a keyframe (click a diamond) → Delete/Backspace removes it. Option-
+  // click an empty spot on a lane adds a keyframe there. Makes the timeline a
+  // first-class keyframe editor, not just a viewer.
+  const [selKf, setSelKf] = useState<KfSel>(null);
+  const undo = useEditor((s) => s.undo);
+  const toast = useToast();
+  const camLayer = layers.find((l): l is CameraLayer => l.type === "camera");
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      const el = e.target as HTMLElement;
+      const tag = el?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el?.isContentEditable) return;
+      if (!selKf) return;
+      e.preventDefault();
+      // Runs in the CAPTURE phase (below), so stop the Editor's layer-Delete
+      // handler from ALSO firing — deleting a keyframe must never delete the layer.
+      e.stopImmediatePropagation();
+      if (selKf.kind === "cam") deleteCameraKeyAt(selKf.t);
+      else deleteKeyframeAt(selKf.id, selKf.prop, selKf.t);
+      setSelKf(null);
+      toast.info("Keyframe removed", undefined, { label: "Undo", onClick: undo });
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [selKf, deleteCameraKeyAt, deleteKeyframeAt, toast, undo]);
+
+  // Option-click add: capture the camera's pose (or a property's value) at the
+  // clicked time — a new, editable keyframe pinned right there.
+  const addCamKeyAt = (tt: number) => {
+    if (!camLayer) return;
+    const pose = hasCamKeys(camLayer) ? keyframedPose(camLayer, tt) : poseAt(camLayer, tt);
+    setCameraKeyAt(tt, pose);
+  };
+  const addPropKeyAt = (l: Layer, prop: string, tt: number) => {
+    const track = (l as any).tracks?.[prop] as { t: number; value: number }[] | undefined;
+    const v = sampleTrack(track as any, tt);
+    const value = v == null ? ((l as any)[prop] ?? 0) : v;
+    addKeyframeAt(l.id, prop, tt, value);
+  };
   const seekAt = (e: React.PointerEvent) => {
     const r = e.currentTarget.getBoundingClientRect();
     requestSeek?.(Math.round(clamp((e.clientX - r.left) / r.width, 0, 1) * dur * fps));
@@ -212,9 +268,12 @@ const BeatTracks: React.FC<{
           const left = clamp((start / dur) * 100, 0, 100);
           const width = Math.max(2, Math.min(100 - left, ((end - start) / dur) * 100));
           const c = colorOf(l.type);
+          const tracks = (l as any).tracks as Record<string, { t: number }[]> | undefined;
+          const trackKeys = active && tracks ? Object.keys(tracks).filter((k) => tracks[k]?.length) : [];
+          const camKeys = isCamera ? ((l as any).keys as { t: number; pose: any; ease: string }[] | undefined) ?? [] : [];
           return (
+            <React.Fragment key={l.id}>
             <div
-              key={l.id}
               onPointerDown={() => select(l.id)}
               className={`relative flex h-7 items-center border-b border-line/60 ${active ? "bg-iris/[0.08]" : "hover:bg-graphite/[0.04]"}`}
             >
@@ -239,22 +298,132 @@ const BeatTracks: React.FC<{
                     <span onPointerDown={(e) => startDrag(e, l, "right")} className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize rounded-r-[4px] bg-white/0 hover:bg-graphite/30" />
                   )}
                 </div>
+                {/* Aggregate keyframe pips on the layer bar (when not expanded) */}
+                {!active && tracks && Object.values(tracks).flat().slice(0, 40).map((k, i) => (
+                  <span key={i} className="pointer-events-none absolute top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[1px] bg-white/80" style={{ left: `${(k.t as number) * 100}%` }} />
+                ))}
+                {/* Camera keyframes always show on the camera bar (cyan diamonds) */}
+                {isCamera && !active && camKeys.map((k, i) => (
+                  <span key={i} className="pointer-events-none absolute top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[1px] bg-[#38E1FF]" style={{ left: `${k.t * 100}%` }} />
+                ))}
               </div>
             </div>
+            {/* Earth-Studio-style keyframe lanes — one per animated property */}
+            {trackKeys.map((prop) => (
+              <KfLane key={prop} items={(tracks as any)[prop]} dur={dur} label={humanizeProp(prop)} hex="#6E7BFF" rgb="110,123,255"
+                tooltip={(k) => `${(k.t * dur).toFixed(2)}s · ${humanizeProp(prop)} = ${r1(k.value)} · ${k.ease} — click to select · drag to retime · Delete to remove`}
+                onJump={jumpToT} onMove={(fromT, toT) => moveKeyframe(l.id, prop, fromT, toT)}
+                onAdd={(tt) => addPropKeyAt(l, prop, tt)}
+                selectedT={selKf?.kind === "prop" && selKf.id === l.id && selKf.prop === prop ? selKf.t : null}
+                onSelect={(tt) => setSelKf({ kind: "prop", id: l.id, prop, t: tt })} />
+            ))}
+            {/* Camera move lane — one cyan diamond per pinned pose (Earth-Studio style) */}
+            {active && isCamera && camKeys.length > 0 && (
+              <KfLane items={camKeys} dur={dur} label="Camera move" hex="#38E1FF" rgb="56,225,255"
+                tooltip={(k) => `${(k.t * dur).toFixed(2)}s · z${r1(k.pose?.zoom ?? 0)} · ${Math.round(k.pose?.bearing ?? 0)}° · tilt ${Math.round(k.pose?.pitch ?? 0)}° · ${k.ease} — click to select · drag to retime · Delete to remove`}
+                onJump={jumpToT} onMove={moveCameraKey} onAdd={addCamKeyAt}
+                selectedT={selKf?.kind === "cam" ? selKf.t : null}
+                onSelect={(tt) => setSelKf({ kind: "cam", t: tt })} />
+            )}
+            </React.Fragment>
           );
         })}
       </div>
 
-      {/* Playhead — a creative scrubber synced to the live preview. Offset past
-          the 7rem (w-28) track-label gutter so it lands over the timeline area. */}
-      {dur > 0 && fps > 0 && (
-        <div className="pointer-events-none absolute inset-y-0 z-10" style={{ left: "7rem", right: 0 }}>
-          <div className="absolute inset-y-0" style={{ left: `${pct}%` }}>
-            <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2" style={{ background: "#6E7BFF", boxShadow: "0 0 6px 0 rgba(110,123,255,0.85)" }} />
-            <div className="absolute left-1/2 top-0 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/3 rotate-45 rounded-[2px]" style={{ background: "#6E7BFF", boxShadow: "0 0 8px 1px rgba(110,123,255,0.9)" }} />
-          </div>
-        </div>
-      )}
+      {/* Playhead — isolated into its own subscriber so only IT re-renders on
+          each playback tick (~60/s), not every layer row + keyframe diamond. */}
+      <Playhead dur={dur} fps={fps} />
     </div>
   );
 };
+
+/** The moving playhead line. Subscribes to `playheadFrame` ALONE so a playing
+ *  scene doesn't re-render the whole BeatTracks (rows/diamonds) 60× a second. */
+const Playhead: React.FC<{ dur: number; fps: number }> = ({ dur, fps }) => {
+  const playheadFrame = useEditor((s) => s.playheadFrame);
+  if (!(dur > 0 && fps > 0)) return null;
+  const pct = clamp((playheadFrame / fps / dur) * 100, 0, 100);
+  return (
+    <div className="pointer-events-none absolute inset-y-0 z-10" style={{ left: "7rem", right: 0 }}>
+      <div className="absolute inset-y-0" style={{ left: `${pct}%` }}>
+        <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2" style={{ background: "#6E7BFF", boxShadow: "0 0 6px 0 rgba(110,123,255,0.85)" }} />
+        <div className="absolute left-1/2 top-0 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/3 rotate-45 rounded-[2px]" style={{ background: "#6E7BFF", boxShadow: "0 0 8px 1px rgba(110,123,255,0.9)" }} />
+      </div>
+    </div>
+  );
+};
+
+/* ── Keyframe lane — one animated property's diamonds on the timeline ────────
+   Earth-Studio / After-Effects style: every keyframe is a diamond at its time.
+   Click a diamond to jump the playhead there; drag it to retime the keyframe. */
+const KF_LABEL: Record<string, string> = {
+  fillOpacity: "Fill opacity", borderWidth: "Border width", glowWidth: "Glow size",
+  extrude: "Extrude", sizePx: "Size", glow: "Glow", width: "Line width", opacity: "Opacity",
+};
+const humanizeProp = (p: string) => KF_LABEL[p] ?? p.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase());
+
+/** Shared drag/click behaviour for a keyframe diamond: <2px = click (jump +
+ *  select), else drag to retime. */
+const kfDrag = (
+  e: React.PointerEvent, origT: number,
+  onMove: (fromT: number, toT: number) => void, onClick: (t: number) => void,
+) => {
+  e.stopPropagation();
+  const lane = (e.currentTarget as HTMLElement).closest("[data-kflane]") as HTMLElement | null;
+  if (!lane) return;
+  const rect = lane.getBoundingClientRect();
+  const startX = e.clientX;
+  let moved = false;
+  const move = (ev: PointerEvent) => {
+    if (Math.abs(ev.clientX - startX) > 2) moved = true;
+    if (moved) onMove(origT, clamp((ev.clientX - rect.left) / rect.width, 0, 1));
+  };
+  const up = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    if (!moved) onClick(origT);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+};
+
+/** Option/Alt-click an empty spot on a lane → add a keyframe there. */
+const laneAltAdd = (e: React.PointerEvent, onAdd: (t: number) => void) => {
+  if (!e.altKey) return;
+  e.stopPropagation();
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  onAdd(clamp((e.clientX - rect.left) / rect.width, 0, 1));
+};
+
+/* ── Keyframe lane — one row of diamonds for a property track OR the camera
+   move. Click a diamond to select+jump; drag to retime; ⌥-click empty to add.
+   `hex`/`rgb` are the accent (iris for props, cyan for the camera lane);
+   `tooltip(k)` renders each diamond's title (value vs pose summary). */
+const KfLane: React.FC<{
+  items: { t: number; ease: string }[]; dur: number; label: string;
+  hex: string; rgb: string; tooltip: (k: any) => string;
+  onJump: (t: number) => void; onMove: (fromT: number, toT: number) => void;
+  onAdd: (t: number) => void; selectedT: number | null; onSelect: (t: number) => void;
+}> = ({ items, label, hex, rgb, tooltip, onJump, onMove, onAdd, selectedT, onSelect }) => (
+  <div className="relative flex h-5 items-center border-b border-line/40" style={{ background: `rgba(${rgb},0.045)` }}>
+    <div className="flex w-28 shrink-0 items-center gap-1 truncate pl-6 pr-2 text-[9.5px] text-graphite/45">
+      <span className="h-[6px] w-[6px] rotate-45 rounded-[1px]" style={{ background: hex }} />
+      <span className="truncate">{label}</span>
+    </div>
+    <div data-kflane onPointerDown={(e) => laneAltAdd(e, onAdd)} className="relative h-full flex-1" title="⌥-click to add a keyframe here" style={{ cursor: "copy" }}>
+      <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2" style={{ background: `rgba(${rgb},0.2)` }} />
+      {items.map((k, i) => {
+        const sel = selectedT != null && Math.abs(k.t - selectedT) < 1e-4;
+        return (
+          <span
+            key={i}
+            onPointerDown={(e) => kfDrag(e, k.t, onMove, (tt) => { onJump(tt); onSelect(tt); })}
+            title={tooltip(k)}
+            className={`absolute top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 cursor-grab rounded-[2px] border transition-transform hover:scale-125 active:cursor-grabbing ${sel ? "scale-[1.35] border-white ring-2 ring-white/90" : "border-white/70"}`}
+            style={{ left: `${k.t * 100}%`, background: hex, boxShadow: sel ? `0 0 9px rgba(${rgb},0.95)` : `0 0 5px rgba(${rgb},0.6)` }}
+          />
+        );
+      })}
+    </div>
+  </div>
+);

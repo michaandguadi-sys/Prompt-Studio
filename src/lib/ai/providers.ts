@@ -32,6 +32,10 @@ export type AIConfig = {
 
 // Named providers that use the OpenAI Chat Completions shape — auto-fill base URL.
 export const NAMED_PROVIDERS: Record<string, { baseUrl: string; defaultModel: string; label: string }> = {
+  // Z.ai (Zhipu GLM) — the BUILT-IN engine: glm-4.5-flash is free-tier, so every
+  // user gets a working AI Director with zero setup. Set AI_MODEL=glm-4.6 (paid)
+  // for the premium tier. OpenAI-compatible endpoint.
+  zai:         { baseUrl: "https://api.z.ai/api/paas/v4",           defaultModel: "glm-4.5-flash",                                     label: "Z.ai (GLM)" },
   groq:        { baseUrl: "https://api.groq.com/openai/v1",        defaultModel: "llama-3.3-70b-versatile",                           label: "Groq" },
   mistral:     { baseUrl: "https://api.mistral.ai/v1",              defaultModel: "mistral-small-latest",                              label: "Mistral" },
   together:    { baseUrl: "https://api.together.xyz/v1",            defaultModel: "meta-llama/Llama-3.3-70B-Instruct-Turbo",           label: "Together AI" },
@@ -45,18 +49,28 @@ export const NAMED_PROVIDERS: Record<string, { baseUrl: string; defaultModel: st
 };
 
 export function resolveAIConfig(): AIConfig | null {
-  const explicit = (process.env.AI_PROVIDER || "").toLowerCase() as AIProvider | "";
-  const inferred: AIProvider | "" =
+  const explicit = (process.env.AI_PROVIDER || "").toLowerCase();
+  // ZAI_API_KEY is the BUILT-IN engine and wins inference (it's what the
+  // platform ships with); an explicit AI_PROVIDER always overrides.
+  const inferred: string =
     explicit ||
-    (process.env.ANTHROPIC_API_KEY ? "anthropic" :
-      process.env.GOOGLE_AI_KEY ? "gemini" :
-        process.env.AI_BASE_URL && (process.env.AI_API_KEY || process.env.OPENAI_API_KEY) ? "openai-compatible" :
-          process.env.OPENAI_API_KEY ? "openai" : "");
+    (process.env.ZAI_API_KEY ? "zai" :
+      process.env.ANTHROPIC_API_KEY ? "anthropic" :
+        process.env.GOOGLE_AI_KEY ? "gemini" :
+          process.env.AI_BASE_URL && (process.env.AI_API_KEY || process.env.OPENAI_API_KEY) ? "openai-compatible" :
+            process.env.OPENAI_API_KEY ? "openai" : "");
   if (!inferred) return null;
+
+  if (inferred === "zai") {
+    const apiKey = process.env.ZAI_API_KEY || process.env.AI_API_KEY; if (!apiKey) return null;
+    const named = NAMED_PROVIDERS.zai;
+    const model = process.env.AI_MODEL || named.defaultModel;
+    return { provider: "openai-compatible", model, apiKey, baseUrl: named.baseUrl, label: `${named.label} · ${model}` };
+  }
 
   if (inferred === "anthropic") {
     const apiKey = process.env.ANTHROPIC_API_KEY; if (!apiKey) return null;
-    const model = process.env.AI_MODEL || process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
+    const model = process.env.AI_MODEL || process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
     return { provider: "anthropic", model, apiKey, label: `Anthropic · ${model}` };
   }
   if (inferred === "gemini") {
@@ -110,7 +124,7 @@ export function configFromUser(u?: UserAIConfig): AIConfig | null {
 
   if (provId === "anthropic") {
     if (!u.apiKey) return null;
-    const model = u.model || "claude-sonnet-4-6";
+    const model = u.model || "claude-sonnet-5";
     return { provider: "anthropic", model, apiKey: u.apiKey, label: `Anthropic · ${model}` };
   }
   if (provId === "openai") {
@@ -254,21 +268,47 @@ async function aiCompleteOnce(
     // openai + openai-compatible share the Chat Completions shape.
     const base = cfg.provider === "openai" ? "https://api.openai.com/v1" : (cfg.baseUrl || "").replace(/\/$/, "");
     if (!base) return { text: null, error: "Missing base URL for openai-compatible provider." };
+
+    // ── Z.ai (GLM) tuning — the built-in engine must be FAST and emit clean JSON ──
+    // GLM-4.5+ are hybrid-reasoning models that default to a slow "thinking"
+    // phase; the Director doesn't need it (our prompts carry the reasoning), so
+    // disable it via Z.ai's `thinking` extension. GLM is also prone to markdown
+    // fences / preamble, so pin an explicit output contract on the system prompt.
+    const isZai = base.includes("api.z.ai");
+    const sys = isZai
+      ? `${system}\n\nOUTPUT CONTRACT (CRITICAL): Reply with the requested output ONLY. No markdown fences, no commentary, no <think> tags, no preamble — the FIRST character of your reply must be the first character of the answer itself (e.g. '{' or '[' for JSON).`
+      : system;
+    const body: Record<string, unknown> = {
+      model: cfg.model,
+      // GLM flash is most reliable for structured output near-deterministic.
+      temperature: temp ?? (isZai ? 0.3 : 0.6),
+      max_tokens: maxTok,
+      messages: [{ role: "system", content: sys }, { role: "user", content: user }],
+    };
+    if (isZai) body.thinking = { type: "disabled" };
+
     const res = await fetchWithTimeout(`${base}/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${cfg.apiKey}` },
-      body: JSON.stringify({
-        model: cfg.model,
-        temperature: temp ?? 0.6,
-        max_tokens: maxTok,
-        messages: [{ role: "system", content: system }, { role: "user", content: user }],
-      }),
+      body: JSON.stringify(body),
     }, timeoutMs);
     if (!res.ok) return { text: null, error: `${cfg.provider} ${res.status}: ${(await res.text()).slice(0, 180)}` };
     const d = await res.json();
     const truncated = d?.choices?.[0]?.finish_reason === "length";
     const usage = { inputTokens: d?.usage?.prompt_tokens, outputTokens: d?.usage?.completion_tokens };
-    return { text: d?.choices?.[0]?.message?.content ?? null, truncated, usage };
+    let text: string | null = d?.choices?.[0]?.message?.content ?? null;
+    // Load-bearing for GLM: it ignores "no fences / no <think>" in the prompt and
+    // STILL wraps JSON in ```json fences (verified live) — so strip them here or
+    // every downstream JSON.parse fails. Handles any language tag / case, and
+    // any leaked reasoning block.
+    if (text && isZai) {
+      text = text
+        .replace(/<think>[\s\S]*?<\/think>/gi, "")   // leaked reasoning block
+        .replace(/^\s*```[a-z]*\s*\r?\n?/i, "")        // opening fence: ```json / ```JSON / ```
+        .replace(/\r?\n?\s*```\s*$/i, "")               // closing fence
+        .trim() || null;
+    }
+    return { text, truncated, usage };
   } catch (e: any) {
     return { text: null, error: String(e?.message ?? e) };
   }
@@ -279,11 +319,13 @@ export async function generateImage(prompt: string): Promise<string | null> {
   const key = process.env.AI_IMAGE_KEY || process.env.OPENAI_API_KEY;
   if (!url || !key || !prompt) return null;
   try {
-    const res = await fetch(url, {
+    // Timeout like every other provider call — a hung image endpoint must not
+    // stall the request (the only AI fetch that previously had no deadline).
+    const res = await fetchWithTimeout(url, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
       body: JSON.stringify({ model: process.env.AI_IMAGE_MODEL || "gpt-image-1", prompt, n: 1, size: "1024x1024" }),
-    });
+    }, 60_000);
     if (!res.ok) return null;
     const d = await res.json();
     return d?.data?.[0]?.url ?? (d?.data?.[0]?.b64_json ? `data:image/png;base64,${d.data[0].b64_json}` : null);

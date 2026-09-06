@@ -6,8 +6,64 @@ import type { QuotaResult } from "@/lib/quota";
 import { TIERS } from "@/lib/tiers";
 import { useUser } from "@clerk/nextjs";
 import { SettingsModal, loadAISettings, type AISettings } from "@/v2/ui/SettingsModal";
+import { confirmDialog, alertDialog } from "@/v2/ui/dialogs";
 import { ProjectLibrary } from "@/components/dashboard/ProjectLibrary";
+import { tasteProfile, clearTaste, type TasteProfile } from "@/lib/taste";
+import { loadElements } from "@/lib/elements";
 import Link from "next/link";
+
+/** ── Creative DNA — what the studio has learned about your taste ─────────
+ * Fed by the taste engine (styles you apply, fonts you pick, formats you
+ * render). The same profile rides with every generation, so the AI director
+ * personalises toward it. One click forgets everything. */
+const CreativeDNA: React.FC = () => {
+  const [p, setP] = useState<TasteProfile | null>(null);
+  const [elCount, setElCount] = useState(0);
+  useEffect(() => { setP(tasteProfile()); setElCount(loadElements().length); }, []);
+  if (!p) return null;
+  const rows: [string, string][] = [];
+  if (p.styles.length) rows.push(["Favourite looks", p.styles.join(" · ")]);
+  if (p.fonts.length) rows.push(["Fonts", p.fonts.join(" · ")]);
+  if (p.aspect) rows.push(["Usual format", p.aspect]);
+  if (p.mode) rows.push(["Creates mostly", p.mode === "still" ? "still images" : "films"]);
+  if (p.layers.length) rows.push(["Go-to elements", p.layers.join(" · ")]);
+  if (elCount) rows.push(["Saved elements", `${elCount} in My Elements`]);
+  return (
+    <div className="rounded-2xl border border-line bg-white/[0.02] p-6">
+      <div className="mb-1 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-iris/15 text-iris"><Sparkles size={14} /></span>
+          <div className="text-sm font-semibold text-graphite">Creative DNA</div>
+        </div>
+        {p.events > 0 && (
+          <button
+            onClick={async () => { if (await confirmDialog({ title: "Reset Creative DNA?", message: "Forget everything the studio has learned about your taste.", confirmLabel: "Reset", danger: true })) { clearTaste(); setP(tasteProfile()); } }}
+            className="text-[11px] text-graphite/40 transition-colors hover:text-red-400"
+          >
+            Reset
+          </button>
+        )}
+      </div>
+      <p className="mb-4 text-[12px] text-graphite/50">
+        The studio learns your taste from every choice and quietly feeds it to the AI director — so each film starts closer to <em>yours</em>.
+      </p>
+      {rows.length ? (
+        <div className="space-y-2">
+          {rows.map(([k, v]) => (
+            <div key={k} className="flex items-baseline justify-between gap-3 text-[12.5px]">
+              <span className="shrink-0 text-graphite/45">{k}</span>
+              <span className="truncate text-right font-medium text-graphite/85">{v}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-lg border border-dashed border-line px-3 py-4 text-center text-[12px] text-graphite/40">
+          Nothing learned yet — make a few films and watch this fill up.
+        </div>
+      )}
+    </div>
+  );
+};
 
 type AgentStatus = { online: boolean; machine?: string };
 
@@ -80,7 +136,7 @@ export default function DashboardPage() {
     const res = await fetch("/api/stripe/portal", { method: "POST" });
     const { url, error } = await res.json();
     if (url) window.location.href = url;
-    else { alert(error ?? "Could not open billing portal"); setPortalLoading(false); }
+    else { await alertDialog({ title: "Couldn't open billing", message: error ?? "Could not open billing portal. Please try again." }); setPortalLoading(false); }
   };
 
   useEffect(() => {
@@ -256,8 +312,8 @@ export default function DashboardPage() {
               </ul>
             </div>
 
-            {/* ── Upgrade CTA ────────────────────────────────────────── */}
-            {quota.tier !== "custom" && quota.tier !== "agency" && (
+            {/* ── Upgrade CTA (hidden once they're on the top tier) ───── */}
+            {quota.tier !== "pro" && (
               <Link
                 href="/pricing"
                 className="group flex items-center justify-between rounded-xl border border-amber/25 bg-amber/5 hover:bg-amber/8 hover:border-amber/40 px-6 py-5 transition-all duration-200 anim-fade-up"
@@ -291,15 +347,24 @@ export default function DashboardPage() {
         )}
 
         {!loading && !quota && (
-          <div className="rounded-xl border border-red-500/25 bg-red-500/5 p-6 text-sm text-red-400/80">
-            Could not load quota. Set{" "}
-            <code className="font-mono text-red-300">DATABASE_URL</code>
-            {" "}in .env.local and run the Clerk webhook to create your user record.
+          <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-6 text-sm text-amber-400/80">
+            {process.env.NODE_ENV === "development" ? (
+              <>
+                Could not load quota. Set{" "}
+                <code className="font-mono text-amber-300">DATABASE_URL</code>
+                {" "}in .env.local and run the Clerk webhook to create your user record.
+              </>
+            ) : (
+              <>Your usage info is taking a moment to load — refresh in a few seconds. Everything else works normally.</>
+            )}
           </div>
         )}
 
         {/* ── Project library ────────────────────────────────────────── */}
         <ProjectLibrary />
+
+        {/* ── Creative DNA — the studio's learned taste profile ────────── */}
+        <CreativeDNA />
 
         {/* ── AI engine · which mode you're in ───────────────────────── */}
         <div className="rounded-xl border border-line/60 bg-paper-100 overflow-hidden anim-fade-up" style={{ animationDelay: "300ms" }}>
@@ -454,7 +519,7 @@ function SetupStep({ n, label, children }: { n: number; label: string; children:
     <div className="rounded-lg border border-line/50 bg-black/60 px-4 py-3 space-y-2">
       <div className="flex items-center gap-2">
         <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber/15 text-[10px] font-bold text-amber">{n}</span>
-        <span className="text-xs text-graphite/50" dangerouslySetInnerHTML={{ __html: label }} />
+        <span className="text-xs text-graphite/50">{label}</span>
       </div>
       {children}
     </div>

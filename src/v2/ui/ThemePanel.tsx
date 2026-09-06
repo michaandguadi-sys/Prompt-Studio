@@ -3,9 +3,11 @@
 import React, { useEffect, useState } from "react";
 import { Check, Plus, Trash2, Type } from "lucide-react";
 import { Field, Section, Select } from "./controls";
+import { promptDialog } from "./dialogs";
 import { ColorInput } from "@/components/ui/ColorInput";
 import { useEditor } from "../store/editor";
-import { THEME_PRESETS, FONT_CHOICES } from "../doc/themes";
+import { THEME_PRESETS, FONT_CHOICES, FONT_GROUPS } from "../doc/themes";
+import { recordTaste } from "@/lib/taste";
 import type { Theme } from "../doc/schema";
 
 const SAVED_KEY = "mapanisy-themes";
@@ -84,13 +86,21 @@ export const ThemePanel: React.FC = () => {
       {/* Fonts — always available, independent of palette */}
       <div className="grid grid-cols-2 gap-2 pt-1">
         <Field label="Display font" hint="Titles & labels">
-          <Select value={theme.fontDisplay} onChange={(e) => setTheme({ fontDisplay: e.target.value })}>
-            {FONT_CHOICES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+          <Select value={theme.fontDisplay} onChange={(e) => { recordTaste("font", e.target.value); setTheme({ fontDisplay: e.target.value }); }}>
+            {FONT_GROUPS.map((g) => (
+              <optgroup key={g} label={g}>
+                {FONT_CHOICES.filter((f) => f.group === g).map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+              </optgroup>
+            ))}
           </Select>
         </Field>
         <Field label="Body font" hint="Sub-lines">
           <Select value={theme.fontBody} onChange={(e) => setTheme({ fontBody: e.target.value })}>
-            {FONT_CHOICES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+            {FONT_GROUPS.map((g) => (
+              <optgroup key={g} label={g}>
+                {FONT_CHOICES.filter((f) => f.group === g).map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+              </optgroup>
+            ))}
           </Select>
         </Field>
       </div>
@@ -116,8 +126,8 @@ export const ThemePanel: React.FC = () => {
             <Field label="Text"><ColorInput value={theme.text} onChange={(v) => setTheme({ text: v, name: "Custom" }, true)} /></Field>
           </div>
           <button
-            onClick={() => {
-              const name = (window.prompt("Name this palette", "My palette") || "").trim();
+            onClick={async () => {
+              const name = await promptDialog({ title: "Name this palette", defaultValue: "My palette", confirmLabel: "Save" });
               if (!name) return;
               add({ ...theme, name });
               setTheme({ name });

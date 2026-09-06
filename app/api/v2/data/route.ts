@@ -15,11 +15,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { aiComplete, resolveAIConfig, configFromUser } from "@/lib/ai/providers";
 import { resolveUserId } from "@/lib/auth/resolveUserId";
 import { checkQuota } from "@/lib/quota";
+import { db } from "@/lib/db";
 
 export const runtime = "nodejs";
 
-// Pro · Studio · Enterprise (internal tier ids). Free + Creator can't use data layers.
-const PRO_TIERS = new Set(["teams", "custom", "agency"]);
+// Data layers are a Pro perk. (Must match the client gate in Inspector.tsx —
+// PRO_DATA_TIERS. The old ids teams/custom/agency predate the free|creator|pro
+// tier model and blocked data layers for everyone, including real Pro users.)
+const PRO_TIERS = new Set(["pro"]);
 
 type Kind = "choropleth" | "bubble" | "flow";
 
@@ -36,13 +39,21 @@ export async function POST(req: NextRequest) {
   const max = Math.min(150, Math.max(3, Number(body?.max) || 40));
   if (!prompt && !raw) return NextResponse.json({ error: "Describe the data, or paste some rows." }, { status: 400 });
 
-  // Pro-gate (skip the gate when there's no DB — local dev — so it's testable).
+  // Pro-gate. checkQuota() returns "pro" whenever there's no DB (dev-permissive),
+  // so trusting q.tier directly would unlock data layers for EVERYONE in a
+  // production build launched without a DATABASE_URL. Fail closed: only trust the
+  // resolved tier when a DB backs it, or when we're in development (testable).
+  const isProd = process.env.NODE_ENV === "production";
   try {
     const q = await checkQuota(userId);
-    if (q && !PRO_TIERS.has(q.tier)) {
+    const effectiveTier = db || !isProd ? q.tier : "free";
+    if (!PRO_TIERS.has(effectiveTier)) {
       return NextResponse.json({ error: "Data layers are a Pro feature — upgrade to unlock real-data maps.", upgrade: true }, { status: 402 });
     }
-  } catch { /* quota unavailable → allow (dev) */ }
+  } catch {
+    // Quota lookup failed — allow in dev so it stays testable, deny in prod.
+    if (isProd) return NextResponse.json({ error: "Couldn't verify your plan — please try again.", upgrade: true }, { status: 402 });
+  }
 
   const cfg = configFromUser(body?.ai) ?? resolveAIConfig();
   if (!cfg) return NextResponse.json({ error: "No AI provider configured — add a key in Settings to use data layers." }, { status: 400 });

@@ -1,13 +1,15 @@
 "use client";
 
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AbsoluteFill, useCurrentFrame, useVideoConfig, delayRender, continueRender, getRemotionEnvironment, Img, Audio,
 } from "remotion";
 import Map, { MapRef, Source, Layer as MapLayer } from "react-map-gl/maplibre";
 import { LngLat } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { resolveMapStyle, demSource, ML_TERRAIN_SOURCE_ID, isDarkStyle, NOIR, isGridStyle, GRID, graticule } from "@/lib/maplibre";
+import { resolveMapStyle, demSource, ML_TERRAIN_SOURCE_ID, isDarkStyle, applyBasemapIdentity } from "@/lib/maplibre";
+import { previewMapBridge } from "./previewMapBridge";
+import { resolveEarthDate } from "@/lib/presets/earthLayers";
 import { safeInterpolate, easings, catmullRomChain, linearChain } from "@/lib/interp";
 import { centroidOf } from "@/lib/geo";
 import { makePatternImageData, patternImageId } from "@/lib/mapPatterns";
@@ -18,7 +20,7 @@ import type {
   FlagLayer, TitleLayer, ChartLayer, ImageLayer, RouteLayer, MarkerLayer,
   AnnotationLayer, ConnectionsLayer, SpotlightLayer, TrackLayer, ChoroplethLayer, BubbleLayer, FlowLayer, HeatmapLayer, Look,
 } from "../doc/schema";
-import { fontStack, WEBFONTS_CSS_URL } from "../doc/themes";
+import { minZoomForAspect } from "../doc/schema";
 
 /** Photoreal 3D (Google Earth) overlay — lazy so deck.gl/loaders.gl never load
  *  in the headless render path; only fetched in the browser preview when used. */
@@ -30,11 +32,11 @@ function readGoogleKey(): string {
 }
 
 import {
-  DEFAULT_THEME, ThemeCtx, updateLiveState, poseAt, highlightPose,
+  DEFAULT_THEME, ThemeCtx, updateLiveState, updateLivePose, poseAt, keyframedPose, hasCamKeys, highlightPose,
   followRoutePose, trackPose,
   sanitizePose, routeTravel, flagIsoOf, clampN,
-  HighlightSource, HighlightLabel,
-  RouteView, RouteSource, RouteEndpoints, RouteIconView, DistanceLabel,
+  HighlightSource, HighlightLabel, HighlightHitArea,
+  RouteView, RouteSource, RouteEndpoints, RouteIconView, RouteHitArea, DistanceLabel,
   TrackView, TrackSource, TrackOverlay,
   HeatmapSource, HeatmapLegend,
   ChoroplethSource, ChoroplethLegend,
@@ -119,8 +121,15 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
   // the scene-level easing curve as their tween.
   const multiStop = (camera?.waypoints?.length ?? 0) >= 1;
   const p = multiStop ? rawP : ease(rawP);
+  // ABSOLUTE scene progress (0..1 across the whole timeline) — camera keyframes
+  // are pinned to real timeline positions, not the moveFraction-scaled window.
+  const pAbs = totalFrames > 1 ? clampN(frame / (totalFrames - 1), 0, 1) : 0;
   let pose: CameraPose;
-  if (director?.type === "route") {
+  if (hasCamKeys(camera)) {
+    // Explicit camera keyframes WIN over any director's auto-framing — the
+    // creator has hand-directed the move in the viewfinder.
+    pose = keyframedPose(camera as CameraLayer, pAbs);
+  } else if (director?.type === "route") {
     // Lock the camera to the route's OWN travel progress (not the camera ease),
     // so the framing, the drawn line head, and the vehicle move as one.
     const travel = routeTravel(director, frame, fps, totalFrames);
@@ -138,6 +147,7 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
   // camera envelope so the map can never receive a singular transform.
   pose = sanitizePose(pose);
   updateLiveState(pose.zoom, frame, totalFrames);
+  updateLivePose(pose); // share the exact displayed pose with the camera gizmo
 
   // Force the live Mapbox transform to EXACTLY this frame's pose *before* any
   // overlay projects lon/lat → screen. Without this, react-map-gl applies the
@@ -160,14 +170,35 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
     isRendering ? delayRender("v2 map tiles", { timeoutInMilliseconds: 90000 }) : null);
   const released = useRef(false);
 
+  // Release the camera-gizmo bridge when the preview unmounts (aspect switch,
+  // scene change, story mode) so the gizmo never drives a dead map instance.
+  useEffect(() => {
+    if (isRendering) return;
+    return () => previewMapBridge.register(null);
+  }, [isRendering]);
+
   // Photoreal 3D (Google Earth) — preview-only, gated on a BYO Google Maps key.
-  // Key from Settings (browser) OR, in the headless render, from a render prop
-  // (passed in the render request — never written to a file or the project JSON).
-  const googleKey = useMemo(() => readGoogleKey() || (googleApiKey ?? ""), [googleApiKey]);
+  // Key from Settings (browser) OR, in the headless render, from a render prop.
+  // REACTIVE: re-read when Settings saves (the "added my key but nothing
+  // changed until reload" bug) — SettingsModal dispatches `mapanisy-google-key`.
+  const [storedGoogleKey, setStoredGoogleKey] = useState(readGoogleKey);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const update = () => setStoredGoogleKey(readGoogleKey());
+    window.addEventListener("mapanisy-google-key", update);
+    window.addEventListener("storage", update); // other tabs
+    return () => { window.removeEventListener("mapanisy-google-key", update); window.removeEventListener("storage", update); };
+  }, []);
+  const googleKey = storedGoogleKey || (googleApiKey ?? "");
   // Photoreal renders in the editor preview, AND in the headless export WHEN a key
   // was supplied to the render (otherwise export falls back to 3-D satellite).
   const photoreal3d = !!(comp.basemap as any).photoreal3d && !!googleKey && (!isRendering || !!googleApiKey);
   const [googleCredit, setGoogleCredit] = useState("");
+  const [googleStatus, setGoogleStatus] = useState<"loading" | "ready" | "error" | null>(null);
+  // The style's first label (symbol) layer id — NASA/earth rasters insert BELOW
+  // it so the chosen map style's borders, labels, grid and relief stay visible
+  // ON TOP of the real-world imagery (the "data layered over your style" look).
+  const [firstSymbolId, setFirstSymbolId] = useState<string | undefined>(undefined);
   // EXPORT FALLBACK: the headless render can't stream Google's 3D tiles frame-by-
   // frame, so a photoreal scene EXPORTS as a rich satellite + 3D-terrain +
   // 3D-buildings world (the closest faithful 3D look) instead of a flat map.
@@ -227,14 +258,16 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
   }, [isRendering, frame, pose.lon, pose.lat, pose.zoom, pose.pitch, pose.bearing, ohmYear]);
 
   // ── Webfonts (Bebas Neue, Montserrat, …) ──
-  // Inject the Google-Fonts stylesheet once, in BOTH the player preview and the
-  // headless render, then gate the render on document.fonts.ready so titles
-  // export in the chosen typeface instead of falling back to a system font.
+  // Load the webfonts stylesheet through our SAME-ORIGIN proxy (/api/fonts), in
+  // BOTH the player preview and the headless render, then gate the render on
+  // document.fonts.ready so titles export in the chosen typeface. Direct
+  // cross-origin Google-Fonts loads get a 400 / ERR_BLOCKED_BY_ORB in headless
+  // Chromium — the proxy fetches server-side and rewrites files to same-origin.
   React.useEffect(() => {
     if (typeof document === "undefined") return;
     if (!document.getElementById("ps-webfonts")) {
       const link = document.createElement("link");
-      link.id = "ps-webfonts"; link.rel = "stylesheet"; link.href = WEBFONTS_CSS_URL;
+      link.id = "ps-webfonts"; link.rel = "stylesheet"; link.href = "/api/fonts";
       document.head.appendChild(link);
     }
   }, []);
@@ -300,6 +333,10 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
           return isCountryLabel(id) || (isCityLabel(id) && !isMinorLabel(id)) || (!isMinorLabel(id));
         };
         const style = map.getStyle();
+        // Remember where labels/borders begin so earth-observation rasters slot in
+        // UNDER them (keeping the style's cartography readable over NASA imagery).
+        const firstSym = (style?.layers ?? []).find((ly: any) => ly.type === "symbol")?.id;
+        setFirstSymbolId((prev) => (prev === firstSym ? prev : firstSym));
         for (const layer of style?.layers ?? []) {
           const id = (layer.id || "").toLowerCase();
           const isRoad = /road|street|highway|motorway|path|bridge|tunnel|trunk/.test(id);
@@ -421,48 +458,14 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
           map.setLight({ anchor: "map", position: [1.5, azimuth, 90 - altitude * 75], color: night ? "#9fb4e6" : altitude < 0.4 ? "#ffd9a8" : "#ffffff", intensity: night ? 0.25 : 0.4 + altitude * 0.4 } as any);
         } catch {}
       } catch {}
-      // ── Land & water recolour — repaint the MAP ITSELF, not the grade ──
-      // Overrides the basemap's water fills + land background; clearing the
-      // colour restores the style's original (stashed on first touch).
+      // ── Land / water / border recolour + graticule — the style's IDENTITY.
+      // Shared with the landing preview via applyBasemapIdentity() (single source
+      // of truth), so a style looks identical in the editor and the preview.
       try {
-        // Drop stashes from a previous style so we re-capture fresh originals
-        // (and don't leak memory across many style switches).
-        if (paintStyleKey.current !== bm.styleUrl) { paintStyleKey.current = bm.styleUrl; paintBase.current = {}; }
-        const setOrRestore = (layerId: string, prop: string, override: string) => {
-          const key = `${bm.styleUrl}::${layerId}::${prop}`;
-          if (!(key in paintBase.current)) paintBase.current[key] = map.getPaintProperty(layerId, prop as any) ?? null;
-          map.setPaintProperty(layerId, prop as any, override || paintBase.current[key]);
-        };
-        // Signature "noir" deepening: dark basemaps get a richer near-black land +
-        // deep-water + a subtle cool boundary glow by DEFAULT, so every map reads
-        // cinematic out of the box. Explicit land/water colours still win.
-        const grid = isGridStyle(bm.styleUrl);
-        const noir = isDarkStyle(bm.styleUrl);
-        const effLand = (bm as any).landColor || (grid ? GRID.land : noir ? NOIR.land : "");
-        const effWater = (bm as any).waterColor || (grid ? GRID.water : noir ? NOIR.water : "");
-        // A creative 3D style can force a glowing accent boundary on ANY base.
-        const glow = (bm as any).boundaryGlow || "";
-        const boundaryColor = glow || (grid ? GRID.boundary : NOIR.boundary);
-        for (const layer of map.getStyle()?.layers ?? []) {
-          const id = (layer.id || "").toLowerCase();
-          const t = (layer as any).type;
-          if (t === "fill" && /water|ocean|sea|river|lake/.test(id)) setOrRestore(layer.id, "fill-color", effWater);
-          else if (t === "background") setOrRestore(layer.id, "background-color", effLand);
-          else if (t === "fill" && /\bland\b|landcover|landuse|park|grass|wood|sand|ice|earth|natural/.test(id)) setOrRestore(layer.id, "fill-color", effLand);
-          else if ((noir || grid || glow) && t === "line" && /boundary|admin/.test(id) && !/water/.test(id)) {
-            setOrRestore(layer.id, "line-color", boundaryColor);
-          }
-        }
-        // Blueprint graticule — a glowing lat/long grid over the navy base.
-        if (grid) {
-          if (!map.getSource("ps-grid")) map.addSource("ps-grid", { type: "geojson", data: graticule(10) as any } as any);
-          if (!map.getLayer("ps-grid-lines")) {
-            const firstSymbol = (map.getStyle()?.layers ?? []).find((ly: any) => ly.type === "symbol")?.id;
-            map.addLayer({ id: "ps-grid-lines", type: "line", source: "ps-grid", paint: { "line-color": GRID.line, "line-width": 0.7 } as any } as any, firstSymbol);
-          }
-        } else if (map.getLayer("ps-grid-lines")) {
-          map.removeLayer("ps-grid-lines");
-        }
+        const stash = { styleKey: paintStyleKey.current, base: paintBase.current as Record<string, string | null> };
+        applyBasemapIdentity(map, bm as any, stash);
+        paintStyleKey.current = stash.styleKey;
+        paintBase.current = stash.base;
       } catch {}
       map.triggerRepaint?.();
     };
@@ -475,7 +478,7 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
     let tries = 0;
     const retry = setInterval(() => { if (map.isStyleLoaded?.()) { apply(); clearInterval(retry); } else if (++tries > 50) clearInterval(retry); }, 80);
     return () => { map.off?.("styledata", apply); map.off?.("idle", apply); clearInterval(retry); };
-  }, [bm.showStreets, bm.showLabels, (bm as any).labelDetail, bm.terrain, bm.buildings3d, bm.styleUrl, (bm as any).terrainStrength, (bm as any).landColor, (bm as any).waterColor, (bm as any).buildingColor, (bm as any).buildingOpacity, (bm as any).buildingHeightMult, (bm as any).buildingGradient, (bm as any).boundaryGlow, (bm as any).timeOfDay, (bm as any).photoreal3d, photoreal3d, photorealExportFallback]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [bm.showStreets, bm.showLabels, (bm as any).labelDetail, bm.terrain, bm.buildings3d, bm.styleUrl, (bm as any).terrainStrength, (bm as any).landColor, (bm as any).waterColor, (bm as any).buildingColor, (bm as any).buildingOpacity, (bm as any).buildingHeightMult, (bm as any).buildingGradient, (bm as any).boundaryGlow, (bm as any).graticule, (bm as any).graticuleColor, (bm as any).graticuleStep, (bm as any).timeOfDay, (bm as any).photoreal3d, photoreal3d, photorealExportFallback]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── OpenHistoricalMap: show the world AS OF `ohmYear` (animated or static) ──
   // Re-applies the date filter whenever the displayed year TICKS, so borders and
@@ -571,6 +574,15 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
         initialViewState={{ longitude: pose.lon, latitude: pose.lat, zoom: pose.zoom, pitch: pose.pitch, bearing: pose.bearing }}
         interactive={false}
         attributionControl={false}
+        // Explicit pitch ceiling. 85 is maplibre-gl 4.x's HARD limit — passing
+        // >85 throws in the Map constructor and the map never renders. The
+        // brief's full 90° look-ahead needs the maplibre-gl v5 upgrade.
+        maxPitch={85}
+        // World-wrap guard: never zoom out past one-world-fills-the-frame, so a
+        // single frame can never show duplicated landmasses. renderWorldCopies
+        // stays ON so antimeridian-crossing shots (Pacific flight arcs) remain
+        // continuous — the floor alone makes duplicates impossible.
+        minZoom={minZoomForAspect(comp.aspect)}
         // CLEAN RENDER (no artifacts / flicker):
         //  • preserveDrawingBuffer — the headless renderer screenshots the WebGL
         //    canvas; without this the GL back-buffer is cleared after paint and the
@@ -581,17 +593,32 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
         //    of popping — a much nicer editing experience.
         preserveDrawingBuffer={isRendering || !!capturing}
         fadeDuration={isRendering || capturing ? 0 : 250}
-        maxParallelImageRequests={isRendering ? 64 : 16}
+        // 64 parallel tile fetches in the PREVIEW too (default is 16) — the
+        // editor camera crosses many zoom levels, and satellite tiles through
+        // the proxy were bottlenecked four-deep per host. This is the single
+        // biggest "satellite feels slow in the editor" fix.
+        maxParallelImageRequests={64}
         onLoad={() => {
           setMapReady(true);
           const m = mapRef.current?.getMap();
           if (m) {
             (m as any).setMaxTileCacheSize?.(8192);
             (m as any).setMaxParallelImageRequests?.(64);
+            // Expose the on-screen preview map to the camera gizmo (never the
+            // headless render worker — it must not be driven by UI).
+            if (!isRendering) previewMapBridge.register(m as any);
           }
           if (m?.areTilesLoaded?.()) release();
         }}
         onIdle={() => { setMapReady(true); release(); }}
+        onError={(e: any) => {
+          // Transient tile fetch failures (network switch, sleep resume, dev
+          // reload) self-heal on the next camera move — without this handler
+          // react-map-gl console.errors every single aborted tile request.
+          const msg = String(e?.error?.message ?? e?.message ?? "");
+          if (/failed to fetch|networkerror|network changed|abort|load failed/i.test(msg)) return;
+          console.warn("[map]", msg);
+        }}
         style={{ width: "100%", height: "100%", filter: mapFilterCss(comp.look) }}
       >
         {/* PHOTOREAL 3D (Google Earth) — deck.gl overlay of Google's
@@ -599,7 +626,7 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
             and only when the user has supplied a Google Maps key. */}
         {photoreal3d && (
           <React.Suspense fallback={null}>
-            <LazyGoogle3D apiKey={googleKey} onAttribution={setGoogleCredit} timeOfDay={(comp.basemap as any).timeOfDay ?? 13} sunDate={(comp.basemap as any).sunDate} />
+            <LazyGoogle3D apiKey={googleKey} onAttribution={setGoogleCredit} onStatus={setGoogleStatus} timeOfDay={(comp.basemap as any).timeOfDay ?? 13} sunDate={(comp.basemap as any).sunDate} />
           </React.Suspense>
         )}
         {/* ── Pass 1: Earth observation rasters — ALWAYS behind everything else.
@@ -615,35 +642,57 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
           const fmt = el.tileFormat ?? "jpg";
           const matrix = el.tileMatrix ?? "GoogleMapsCompatible_Level9";
           const mz: number = el.maxzoom ?? 9;
-          // GIBS URL: static datasets use the default slot (no date); dated datasets
-          // use YYYY-MM-DD. Both patterns served by the same WMTS endpoint.
-          const date = (el.date && el.date !== "") ? el.date : new Date(Date.now() - 172800000).toISOString().slice(0, 10);
-          const datePart = (el.date === "") ? "/default" : `/${date}`;
-          const tileUrl = `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${dsId}/default${datePart}/${matrix}/{z}/{y}/{x}.${fmt}`;
-          const srcId = `gibs-${l.id}`;
-          const lyrId = `gibs-lyr-${l.id}`;
+          // GIBS WMTS wants a real YYYY-MM-DD time slot (or NO date for static
+          // layers like Blue Marble). "latest"/relative "-30" resolve to a real
+          // recent date — an invalid slot silently 404s and the layer never shows.
+          const isStatic = !!el.staticTime;
+          const date = resolveEarthDate(el.date);
+          const timeSeg = isStatic ? "" : `/${date}`;
+          const tileUrl = `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${dsId}/default${timeSeg}/${matrix}/{z}/{y}/{x}.${fmt}`;
+          // The source id encodes the tile params. A raster Source is immutable
+          // once created — if the id stayed constant, switching dataset/date only
+          // changed the URL string and MapLibre kept serving the OLD tiles (the
+          // "doesn't update when I pick a different type" bug). A params-derived
+          // id makes react-map-gl drop the stale source and mount a fresh one, so
+          // every selection reloads instantly.
+          const tileSig = `${dsId}-${matrix}-${fmt}-${isStatic ? "s" : date}`.replace(/[^a-z0-9]/gi, "").slice(-42);
+          const srcId = `gibs-${l.id}-${tileSig}`;
+          const lyrId = `gibs-lyr-${l.id}-${tileSig}`;
+          // Blend "looks" from real raster paint props (MapLibre has no true blend
+          // mode). screen → brighter/desaturated-lift (night lights, fires on dark);
+          // multiply → darker/contrasty (data over a light style); vivid → punchy.
+          const BLENDS: Record<string, any> = {
+            normal:   {},
+            vivid:    { "raster-saturation": 0.5, "raster-contrast": 0.25 },
+            screen:   { "raster-brightness-min": 0.18, "raster-contrast": 0.12, "raster-saturation": 0.15 },
+            multiply: { "raster-brightness-max": 0.78, "raster-contrast": 0.35, "raster-saturation": 0.2 },
+            ghost:    { "raster-saturation": -0.4, "raster-contrast": -0.1 },
+          };
+          const blendPaint = BLENDS[el.blend ?? "normal"] ?? {};
           // Compare layer: cross-fade between two earth states (before / after).
           // The "before" layer fades IN (inverse opacity) as the "after" fades OUT,
           // creating a smooth temporal transition driven by the timing system.
           const hasCmp = !!(el.compareDatasetId);
           const cmpOpacity = hasCmp ? Math.min(1, (el.opacity ?? 0.75) * Math.max(0, 1 - tr.opacity) * 1.2) : 0;
-          const cDate = el.compareDate && el.compareDate !== "" ? el.compareDate : date;
+          const cDate = resolveEarthDate(el.compareDate && el.compareDate !== "" ? el.compareDate : date);
           const cMatrix = el.tileMatrix ?? "GoogleMapsCompatible_Level9";
           const cMz: number = el.compareMaxzoom ?? mz;
-          const cDatePart = (el.compareDate === "") ? "/default" : `/${cDate}`;
           const cUrl = hasCmp
-            ? `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${el.compareDatasetId}/default${cDatePart}/${cMatrix}/{z}/{y}/{x}.${el.tileFormat ?? "png"}`
+            ? `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/${el.compareDatasetId}/default/${cDate}/${cMatrix}/{z}/{y}/{x}.${el.tileFormat ?? "png"}`
             : null;
           const cSrcId = `gibs-cmp-${l.id}`;
           const cLyrId = `gibs-cmp-lyr-${l.id}`;
           return (
             <React.Fragment key={l.id}>
               <Source id={srcId} type="raster" tiles={[tileUrl]} tileSize={256} minzoom={0} maxzoom={mz} attribution={el.attribution ?? "NASA GIBS / Earthdata"} />
-              <MapLayer id={lyrId} type="raster" source={srcId} paint={{ "raster-opacity": opacity, "raster-fade-duration": 0 }} />
+              {/* beforeId → the raster paints OVER the style's land/water but UNDER
+                  its borders, labels, grid and relief, so a chosen map style stays
+                  fully legible layered on top of the real-world NASA imagery. */}
+              <MapLayer id={lyrId} type="raster" source={srcId} beforeId={firstSymbolId} paint={{ "raster-opacity": opacity, "raster-fade-duration": 0, ...blendPaint }} />
               {cUrl && cmpOpacity > 0.005 && (
                 <>
                   <Source id={cSrcId} type="raster" tiles={[cUrl]} tileSize={256} minzoom={0} maxzoom={cMz} />
-                  <MapLayer id={cLyrId} type="raster" source={cSrcId} paint={{ "raster-opacity": cmpOpacity, "raster-fade-duration": 0 }} />
+                  <MapLayer id={cLyrId} type="raster" source={cSrcId} beforeId={firstSymbolId} paint={{ "raster-opacity": cmpOpacity, "raster-fade-duration": 0 }} />
                 </>
               )}
             </React.Fragment>
@@ -675,6 +724,15 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
       {photoreal3d && (
         <div style={{ position: "absolute", left: 8, bottom: 6, zIndex: 5, fontSize: "1.1vh", color: "rgba(255,255,255,0.7)", textShadow: "0 1px 3px rgba(0,0,0,0.8)", pointerEvents: "none", maxWidth: "60%", lineHeight: 1.3 }}>
           {googleCredit || "Data: Google"}
+        </div>
+      )}
+      {/* Photoreal status — the preview must never fail silently. */}
+      {photoreal3d && !isRendering && googleStatus && googleStatus !== "ready" && (
+        <div style={{ position: "absolute", right: 10, top: 10, zIndex: 7, pointerEvents: "none", display: "flex", alignItems: "center", gap: 6, background: "rgba(4,6,15,0.8)", border: `1px solid ${googleStatus === "error" ? "rgba(255,90,68,0.5)" : "rgba(110,123,255,0.4)"}`, borderRadius: 8, padding: "6px 10px", fontSize: "1.3vh", color: googleStatus === "error" ? "#ff9d8f" : "rgba(255,255,255,0.85)", fontFamily: "Inter, sans-serif" }}>
+          <span style={{ width: "0.8vh", height: "0.8vh", borderRadius: "50%", background: googleStatus === "error" ? "#ff5a44" : "#6E7BFF", boxShadow: `0 0 8px ${googleStatus === "error" ? "#ff5a44" : "#6E7BFF"}` }} />
+          {googleStatus === "error"
+            ? "Google Earth 3D failed — enable the Map Tiles API on your key & check restrictions"
+            : "Loading Google Earth 3D… (visible from city zoom)"}
         </div>
       )}
 
@@ -720,10 +778,14 @@ export const MapComposition: React.FC<{ comp: Composition; watermark?: boolean; 
             );
           }
           case "highlight": return (
-            <HighlightLabel key={`${l.id}-hl`} layer={l} frame={frame} fps={fps} totalFrames={totalFrames} project={project} />
+            <React.Fragment key={`${l.id}-hl`}>
+              <HighlightHitArea layer={l} frame={frame} fps={fps} totalFrames={totalFrames} project={project} />
+              <HighlightLabel layer={l} frame={frame} fps={fps} totalFrames={totalFrames} project={project} />
+            </React.Fragment>
           );
           case "route": return l.coordinates.length > 1 ? (
             <React.Fragment key={`${l.id}-rt`}>
+              <RouteHitArea layer={l} frame={frame} fps={fps} totalFrames={totalFrames} project={project} />
               {(l as any).showEndpoints !== false && <RouteEndpoints layer={l} frame={frame} fps={fps} totalFrames={totalFrames} project={project} />}
               {l.icon !== "none" && <RouteIconView layer={l} frame={frame} fps={fps} totalFrames={totalFrames} project={project} />}
             </React.Fragment>

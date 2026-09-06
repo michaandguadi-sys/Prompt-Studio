@@ -69,6 +69,11 @@ COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/next.config.ts ./next.config.ts
 COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/presets ./presets
+# packages/agent/agent.mjs is read at runtime by GET /api/agent/script, which the
+# dashboard tells users to curl to install the Render Agent. Without this the
+# route 500s in the container and the whole "render on your own machine" flow —
+# the reason paid tiers get unlimited renders — is dead on the VPS.
+COPY --from=builder /app/packages ./packages
 
 # Writable runtime dirs (mounted as volumes in compose so they persist).
 RUN mkdir -p .renders projects-v2 .dev-data && chown -R node:node /app

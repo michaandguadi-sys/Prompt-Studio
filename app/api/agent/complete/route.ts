@@ -7,8 +7,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/lib/db";
 import { eq } from "drizzle-orm";
 import { completeJob, getJob } from "@/lib/agentBridge";
-import { devUserIdForKey } from "@/lib/devAgentStore";
+import { authorizeAgentJob } from "@/lib/agentAuth";
 import { TIERS, type Tier } from "@/lib/tiers";
+import { grantAllPro } from "@/lib/quota";
 
 /** Video length (seconds) of a job — sums scenes for a sequence, else the spec. */
 function jobVideoSeconds(job: ReturnType<typeof getJob>): number {
@@ -24,32 +25,19 @@ export async function POST(req: NextRequest) {
   let body: { agentKey?: string; jobId?: string; error?: string };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Bad JSON" }, { status: 400 }); }
 
-  const { agentKey, jobId, error } = body;
-  if (!agentKey || !jobId) return NextResponse.json({ error: "Missing fields" }, { status: 400 });
-
-  let userId: string | null = null;
-  if (db) {
-    const [user] = await db
-      .select({ id: schema.users.id })
-      .from(schema.users)
-      .where(eq(schema.users.agentKey, agentKey))
-      .limit(1);
-    userId = user?.id ?? null;
-  } else {
-    userId = devUserIdForKey(agentKey) ?? null;
-  }
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  // Capture the job before completeJob() (which may prune finished jobs) so we
-  // can log a render row. Only successful renders count toward quota.
-  const job = getJob(jobId);
-  completeJob(jobId, error);
+  // Resolve the key to a user AND confirm the job is theirs (auth + IDOR guard).
+  const authz = await authorizeAgentJob(body.agentKey, body.jobId);
+  if (!authz.ok) return NextResponse.json({ error: authz.error }, { status: authz.status });
+  const { userId, job } = authz; // job captured before completeJob() prunes it
+  const { jobId, error } = body;
+  completeJob(jobId!, error);
 
   // Log a completed render so the Free tier's 1-animation cap is metered on the
   // agent path. Paid (minute-metered) tiers render on their own machine and are
   // intentionally NOT logged here — that keeps agent renders quota-free for them.
-  // No-op without a DB or on failure.
-  if (db && !error && job) {
+  // No-op without a DB or on failure. Also skipped under TEST_UNLIMITED, where
+  // everyone is Pro/unlimited and no render should count against a Free cap.
+  if (db && !error && job && !grantAllPro()) {
     try {
       const [sub] = await db
         .select({ tier: schema.subscriptions.tier })

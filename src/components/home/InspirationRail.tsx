@@ -11,17 +11,23 @@ import { coordsFor, type GeoStop } from "./worldCoords";
 
 type Card = { emoji: string; title: string; prompt: string; places: string[] };
 
+/** The premium showcase suite — every card is a flagship capability demo
+ *  (terrain flythrough, water-hugging sea voyage, orbital reveal, Pacific
+ *  arc, historical vectors, data bubbles). Prompts are phrased so the intent
+ *  parser resolves the right stops: destinations sit in the from→to chain and
+ *  style words ride after a comma (parser-verified). Same element vocabulary
+ *  the editor renders — routes, highlights, tracks, bubbles, orbits. */
 const CARDS: Card[] = [
+  { emoji: "🥾", title: "Mont Blanc terrain flythrough", prompt: "A terrain-hugging 3D flythrough over Mont Blanc, golden dawn light, documentary style", places: ["Mont Blanc"] },
+  { emoji: "⛵", title: "Mediterranean sea voyage", prompt: "Sailing from Barcelona to Athens, serene dawn light, minimal design", places: ["Barcelona", "Athens"] },
+  { emoji: "🛫", title: "New York → Cook Islands", prompt: "Flight from New York to the Cook Islands, dramatic Pacific arc, cold blue mood", places: ["New York", "Cook Islands"] },
+  { emoji: "⛪", title: "Barcelona cathedral orbit", prompt: "A slow 360 orbit around the cathedral of Barcelona at sunrise, cinematic reveal", places: ["Barcelona"] },
+  { emoji: "🧭", title: "Viking migrations", prompt: "The Viking migrations from Norway to Iceland to Greenland, historical parchment style", places: ["Norway", "Iceland", "Greenland"] },
+  { emoji: "📊", title: "US population bubbles", prompt: "Every American city above 5 million people as glowing population bubbles, data documentary", places: ["United States"] },
   { emoji: "✈️", title: "Around the world in 90 seconds", prompt: "A cinematic flight around the world: New York → London → Dubai → Tokyo → Sydney, smooth camera moves, documentary style", places: ["New York", "London", "Dubai", "Tokyo", "Sydney"] },
-  { emoji: "🏔", title: "Epic hiking adventure", prompt: "Documentary intro of a trek through the Himalayas from Kathmandu to Mount Everest base camp, golden hour, slow aerial camera", places: ["Kathmandu", "Mount Everest"] },
-  { emoji: "🚗", title: "Road trip across America", prompt: "A vintage Route 66 road trip from Chicago to Los Angeles by car, warm nostalgic mood, vintage atlas style", places: ["Chicago", "Los Angeles"] },
-  { emoji: "🎥", title: "Documentary opening", prompt: "The fall of the Berlin Wall, November 1989 — show the divided city, then the moment it crumbled, archival documentary mood", places: ["Berlin"] },
-  { emoji: "🛰", title: "Satellite flyover", prompt: "Satellite flyover of the Amazon from the Andes to the Atlantic, slow drifting camera, National Geographic style", places: ["Andes", "Amazon"] },
-  { emoji: "🌍", title: "Countries I've visited", prompt: "Highlight every country I've visited one by one: France, Italy, Japan, Brazil and Morocco — playful, colorful, energetic", places: ["France", "Italy", "Japan", "Brazil", "Morocco"] },
-  { emoji: "⛵", title: "Mediterranean sailing", prompt: "A sailing journey from Barcelona to Athens across the Mediterranean by boat, serene dawn light, minimal design", places: ["Barcelona", "Athens"] },
   { emoji: "🚂", title: "The Orient Express", prompt: "The legendary Orient Express from Paris via Vienna to Istanbul by train, luxury vintage style, elegant slow camera", places: ["Paris", "Vienna", "Istanbul"] },
-  { emoji: "🌋", title: "Volcano expedition", prompt: "My volcano expedition in Guatemala — fly into Guatemala City, then trek to the crater at dawn, dramatic mood", places: ["Guatemala City"] },
-  { emoji: "🚁", title: "New York to Iceland", prompt: "Fly from New York to Iceland with smooth cinematic camera moves, cold blue mood, aerial documentary style", places: ["New York", "Reykjavik"] },
+  { emoji: "🎥", title: "Documentary opening", prompt: "The fall of the Berlin Wall, November 1989 — show the divided city, then the moment it crumbled, archival documentary mood", places: ["Berlin"] },
+  { emoji: "🌍", title: "Countries I've visited", prompt: "Highlight every country I've visited one by one: France, Italy, Japan, Brazil and Morocco — playful, colorful, energetic", places: ["France", "Italy", "Japan", "Brazil", "Morocco"] },
 ];
 
 export const InspirationRail: React.FC<{
@@ -32,19 +38,25 @@ export const InspirationRail: React.FC<{
     c.places.map((p) => coordsFor(p)).filter(Boolean) as GeoStop[];
 
   return (
-    <div className="group/rail relative w-full overflow-hidden" aria-label="Story inspiration">
+    <div className="group/rail relative w-full overflow-hidden [@media(hover:none)]:overflow-x-auto" aria-label="Story inspiration">
       <style>{`
         @keyframes railScroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
         .rail-track { animation: railScroll 64s linear infinite; }
         .group\\/rail:hover .rail-track { animation-play-state: paused; }
+        .group\\/rail:focus-within .rail-track { animation-play-state: paused; }
         @media (prefers-reduced-motion: reduce) { .rail-track { animation: none; } }
+        @media (hover: none) { .rail-track { animation: none; } }
       `}</style>
       {/* edge fades */}
       <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-20" style={{ background: "linear-gradient(to right, rgba(4,6,16,0.9), transparent)" }} />
       <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-20" style={{ background: "linear-gradient(to left, rgba(4,6,16,0.9), transparent)" }} />
 
       <div className="rail-track flex w-max gap-2.5 py-1">
-        {[...CARDS, ...CARDS].map((c, i) => (
+        {[...CARDS, ...CARDS].map((c, i) => {
+          // The second copy exists only to make the marquee seamless — hide it
+          // from Tab order and screen readers so ideas aren't traversed twice.
+          const isClone = i >= CARDS.length;
+          return (
           <button
             key={`${c.title}-${i}`}
             onMouseEnter={() => onHover(stopsOf(c))}
@@ -52,6 +64,8 @@ export const InspirationRail: React.FC<{
             onFocus={() => onHover(stopsOf(c))}
             onBlur={() => onHover(null)}
             onClick={() => { onPick(c.prompt); onHover(null); }}
+            aria-hidden={isClone || undefined}
+            tabIndex={isClone ? -1 : undefined}
             className="flex shrink-0 items-center gap-2.5 rounded-xl border border-white/[0.09] bg-white/[0.05] px-3.5 py-2.5 text-left backdrop-blur-xl transition-all hover:-translate-y-0.5 hover:border-[#FFB86E]/45 hover:bg-white/[0.09]"
             title={c.prompt}
           >
@@ -61,7 +75,8 @@ export const InspirationRail: React.FC<{
               <span className="block truncate text-[10px] text-white/32">{c.places.join(" → ")}</span>
             </span>
           </button>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

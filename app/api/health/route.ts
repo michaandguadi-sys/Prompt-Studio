@@ -36,11 +36,13 @@ export async function GET() {
     stripe: {
       configured: !!env.STRIPE_SECRET_KEY,
       webhook: !!env.STRIPE_WEBHOOK_SECRET,
+      // Must match the shipping pricing model: Free / Creator (monthly +
+      // annual) / Pro (one-time lifetime). The old teams/custom/agency price
+      // vars no longer exist anywhere, so they always reported false.
       prices: {
         creator: !!env.STRIPE_PRICE_CREATOR,
-        teams: !!env.STRIPE_PRICE_TEAMS,
-        custom: !!env.STRIPE_PRICE_CUSTOM,
-        agency: !!env.STRIPE_PRICE_AGENCY,
+        creatorAnnual: !!env.STRIPE_PRICE_CREATOR_ANNUAL,
+        pro: !!env.STRIPE_PRICE_PRO,
       },
     },
     storage: {
@@ -57,18 +59,35 @@ export async function GET() {
     appUrl: { configured: !!env.NEXT_PUBLIC_APP_URL },
   };
 
-  // "ready" = the minimum needed to actually serve signed-in users end-to-end:
-  // auth + persistence + render output storage. AI/Stripe are optional at launch
-  // (heuristic planner works without AI; free tier needs no Stripe).
+  // "ready" = the minimum a user needs to sign in and generate a story.
+  //
+  // It previously also required database + R2 storage + a Mapbox token, but all
+  // three are documented as OPTIONAL (LAUNCH.md, .env.production.example): the
+  // app falls back to a JSON file store, streams renders from its own volume,
+  // and renders with MapLibre + free tiles. The documented minimum env could
+  // therefore never return ready:true, so the runbook's own post-deploy check
+  // ("curl /api/health → ready") failed on every correct MVP deploy.
+  //
+  // Optional capabilities are still reported under `services` and summarised in
+  // `mode`, so you can see what is enabled without it gating the health check.
   const ready =
     services.clerk.configured &&
-    services.database.configured &&
-    services.database.reachable &&
-    services.storage.configured &&
-    services.mapbox.configured;
+    services.appUrl.configured &&
+    services.ai.configured;
+
+  const mode = {
+    persistence: services.database.reachable
+      ? "postgres"
+      : services.database.configured
+        ? "postgres-unreachable"
+        : "file-store",
+    renderDelivery: services.storage.configured ? "r2" : "local-volume",
+    tiles: services.mapbox.configured ? "mapbox" : "maplibre-free",
+    billing: services.stripe.configured ? "stripe" : "disabled",
+  };
 
   return NextResponse.json(
-    { ok: true, ready, services, ts: new Date().toISOString() },
+    { ok: true, ready, mode, services, ts: new Date().toISOString() },
     { headers: { "cache-control": "no-store" } },
   );
 }

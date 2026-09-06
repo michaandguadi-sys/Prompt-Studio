@@ -56,14 +56,14 @@ const AI_PROVIDERS: ProviderDef[] = [
   {
     id: "anthropic", name: "Anthropic", sub: "Claude",
     color: "#D4764D", initial: "A",
-    defaultModel: "claude-sonnet-4-6",
+    defaultModel: "claude-sonnet-5",
     keyPlaceholder: "sk-ant-…",
     keyLink: "https://console.anthropic.com/settings/keys",
     models: [
-      { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6 (recommended)" },
+      { id: "claude-sonnet-5", label: "Claude Sonnet 5 (recommended)" },
       { id: "claude-opus-4-8", label: "Claude Opus 4.8 (most capable)" },
       { id: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5 (fastest)" },
-      { id: "claude-3-5-sonnet-latest", label: "Claude 3.5 Sonnet" },
+      { id: "claude-3-5-sonnet-latest", label: "Claude 3.5 Sonnet (legacy)" },
     ],
   },
   {
@@ -90,6 +90,20 @@ const AI_PROVIDERS: ProviderDef[] = [
       { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
       { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
       { id: "gemini-1.5-pro", label: "Gemini 1.5 Pro" },
+    ],
+  },
+  {
+    id: "zai", name: "Z.ai", sub: "GLM · built-in engine",
+    color: "#3b82f6", initial: "Z",
+    baseUrl: "https://api.z.ai/api/paas/v4",
+    defaultModel: "glm-4.5-flash",
+    keyPlaceholder: "sk-…",
+    keyLink: "https://z.ai/manage-apikey/apikey-list",
+    models: [
+      { id: "glm-4.5-flash", label: "GLM-4.5 Flash (free — the built-in engine)" },
+      { id: "glm-4.5-air", label: "GLM-4.5 Air (fast, low cost)" },
+      { id: "glm-4.5", label: "GLM-4.5" },
+      { id: "glm-4.6", label: "GLM-4.6 (most capable)" },
     ],
   },
   {
@@ -252,6 +266,9 @@ export const SettingsModal: React.FC<{ open: boolean; onClose: () => void }> = (
       localStorage.setItem(RESTYLE_KEY, JSON.stringify(rs));
       localStorage.setItem(GOOGLE_KEY, JSON.stringify({ apiKey: googleKey.trim() }));
       localStorage.setItem(VOICEOVER_KEY, JSON.stringify(vo));
+      // Live consumers (the preview's Photoreal 3D) re-read keys on this event —
+      // no reload needed after pasting a key.
+      window.dispatchEvent(new Event("mapanisy-google-key"));
     } catch {}
     setSaved(true); setTimeout(() => { setSaved(false); onClose(); }, 700);
   };

@@ -6,8 +6,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { db, schema } from "@/lib/db";
-import { eq } from "drizzle-orm";
+import { db } from "@/lib/db";
 import { generateMapSceneTsx } from "@/lib/codegen/mapScene";
 import { generateDataVizSceneTsx } from "@/lib/codegen/dataVizScene";
 import { generateTitleSceneTsx } from "@/lib/codegen/titleScene";
@@ -16,8 +15,9 @@ import { generateQuoteSceneTsx } from "@/lib/codegen/quoteScene";
 import { toComponentName } from "@/lib/codegen/util";
 import { enqueueAgentJob, sessionForUser, type AgentJobSettings } from "@/lib/agentBridge";
 import { checkQuota } from "@/lib/quota";
+import { TIERS } from "@/lib/tiers";
 import { ExportSpecPayload, parseOrError } from "@/lib/schemas";
-import { devGetOrCreateUserByClerk } from "@/lib/devAgentStore";
+import { resolveOrCreateUserId } from "@/lib/users";
 import type { SceneSpec } from "@/lib/types";
 
 function generateTsx(spec: SceneSpec): string {
@@ -65,19 +65,11 @@ export async function POST(req: NextRequest) {
   const spec = parsed.data.spec as SceneSpec;
   const settings = ((rawBody as any).settings ?? {}) as AgentJobSettings;
 
-  // Look up internal user id — via DB, or the dev store when no DB.
+  // Resolve internal user id, provisioning on demand if the sign-up webhook
+  // hasn't landed yet (never dead-end a new user at "User not found").
   let userId: string;
-  if (db) {
-    const [user] = await db
-      .select({ id: schema.users.id })
-      .from(schema.users)
-      .where(eq(schema.users.clerkId, clerkId))
-      .limit(1);
-    if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
-    userId = user.id;
-  } else {
-    userId = devGetOrCreateUserByClerk(clerkId).id;
-  }
+  try { userId = await resolveOrCreateUserId(clerkId); }
+  catch { return NextResponse.json({ error: "User not found" }, { status: 404 }); }
 
   // Verify agent is online
   const session = sessionForUser(userId);
@@ -118,7 +110,20 @@ export async function POST(req: NextRequest) {
       upgradeUrl: "/pricing",
     }, { status: 402 });
   }
-  const watermark = !!db && quota.tier === "free";
+  // Fail CLOSED in production: no DB ⇒ treat as free. And the agent runs on the
+  // user's own machine where the watermark flag is advisory — branded tiers may
+  // not render here at all; they use the server-authoritative /api/v2/render path.
+  const isProd = process.env.NODE_ENV === "production";
+  const billingTier = db || !isProd ? quota.tier : "free";
+  if (!(TIERS[billingTier]?.agentAllowed ?? true)) {
+    return NextResponse.json({
+      error: "agent_not_allowed",
+      message: "Free renders run in the cloud (with watermark). Upgrade for unlimited renders on your own machine.",
+      tier: billingTier, upgradeUrl: "/pricing",
+    }, { status: 403 });
+  }
+  const watermark = billingTier === "free";
+  settings.scale = Math.min(Math.max(0.1, Number(settings.scale) || 1), TIERS[billingTier]?.maxScale ?? 1);
 
   const job = enqueueAgentJob(userId, spec.name, tsx, rootTsx, settings, spec, scenes, watermark);
   return NextResponse.json({

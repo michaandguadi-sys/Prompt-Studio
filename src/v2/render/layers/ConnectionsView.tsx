@@ -46,27 +46,43 @@ export const ConnectionsView: React.FC<LV<ConnectionsLayer>> = ({ layer: l, fram
         const baseW = l.reveal === "grow" ? Math.max(0.5, l.width * ep) : l.width;
         const w = Math.max(1, baseW * (0.3 + 0.7 * wScale));
         const drawDash = draw < 1 ? { pathLength: 1, strokeDasharray: 1, strokeDashoffset: 1 - draw } : (dashPat ? { strokeDasharray: dashPat } : {});
+        const dx = e.b.x - e.a.x, dy = e.b.y - e.a.y, dist = Math.hypot(dx, dy) || 1;
+        const cx = (e.a.x + e.b.x) / 2 + (-dy / dist) * l.curve * dist * 0.32;
+        const cy = (e.a.y + e.b.y) / 2 + (dx / dist) * l.curve * dist * 0.32;
         const particles = l.pulse && draw > 0.5 ? [0, 0.33, 0.66].map((offset) => {
           const t = ((frame / 35 + offset) % 1) * draw;
-          const dx = e.b.x - e.a.x, dy = e.b.y - e.a.y, dist = Math.hypot(dx, dy) || 1;
-          const cx = (e.a.x + e.b.x) / 2 + (-dy / dist) * l.curve * dist * 0.32;
-          const cy = (e.a.y + e.b.y) / 2 + (dx / dist) * l.curve * dist * 0.32;
           const mt = 1 - t;
           const px = mt * mt * e.a.x + 2 * mt * t * cx + t * t * e.b.x;
           const py = mt * mt * e.a.y + 2 * mt * t * cy + t * t * e.b.y;
           return { px, py };
         }) : [];
+        // Bold arrowhead at the destination — tangent at the arc end is ∝ (b − control).
+        let arrowEl: React.ReactNode = null;
+        if (l.arrowheads && draw > 0.55) {
+          let tx = e.b.x - cx, ty = e.b.y - cy; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+          const nx = -ty, ny = tx;                                   // perpendicular
+          const size = Math.max(9, w * (l.arrowScale ?? 1.6) * 2);
+          const backX = e.b.x - tx * size, backY = e.b.y - ty * size, half = size * 0.6;
+          const aop = clampN((draw - 0.55) / 0.25, 0, 1);
+          arrowEl = (
+            <path
+              d={`M ${e.b.x.toFixed(1)} ${e.b.y.toFixed(1)} L ${(backX + nx * half).toFixed(1)} ${(backY + ny * half).toFixed(1)} L ${(backX - nx * half).toFixed(1)} ${(backY - ny * half).toFixed(1)} Z`}
+              fill={l.color} opacity={aop} strokeLinejoin="round" stroke={l.color} strokeWidth={Math.max(1, w * 0.3)}
+            />
+          );
+        }
         return (
           <g key={i} opacity={op}>
             {glowI > 0.01 && <path d={d} fill="none" stroke={l.color} strokeWidth={w * (2.2 + glowI * 2)} strokeOpacity={0.4 * Math.min(1, glowI)} strokeLinecap="round" style={{ filter: `blur(${Math.max(3, w * 1.1)}px)` }} pathLength={draw < 1 ? 1 : undefined} strokeDasharray={draw < 1 ? 1 : undefined} strokeDashoffset={draw < 1 ? 1 - draw : undefined} />}
             <path d={d} fill="none" stroke={l.color} strokeWidth={w} strokeLinecap="round" {...drawDash} />
+            {arrowEl}
             {particles.map((p, pi) => (
               <circle key={pi} cx={p.px} cy={p.py} r={Math.max(2.5, w * 0.9)} fill="#fff" opacity={0.85} />
             ))}
           </g>
         );
       })}
-      {l.dots && allNodes.map((n, i) => (
+      {l.dots && allNodes.map((n, i) => (l.arrowheads && i > 0) ? null : (
         <g key={`n${i}`} opacity={tr.opacity}>
           <circle cx={n.x} cy={n.y} r={l.width * 1.5 * (1.25 + 0.45 * Math.sin(frame / 6))} fill="none" stroke={l.dotColor} strokeWidth={2} opacity={0.4} />
           <circle cx={n.x} cy={n.y} r={l.width * 1.5} fill={l.dotColor} />

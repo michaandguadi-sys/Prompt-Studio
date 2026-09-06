@@ -1,12 +1,15 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Undo2, Redo2, RotateCcw, Wand2, KeyRound, Boxes,
+  Undo2, Redo2, RotateCcw, Wand2, KeyRound, Camera, Keyboard,
   Layers as LayersIcon, SlidersHorizontal, PanelBottomClose, PanelBottom,
   PanelLeftClose, PanelRightClose,
 } from "lucide-react";
 import { useEditor } from "../store/editor";
+import { useToast } from "@/components/Toast/Toast";
+import { LAYER_REGISTRY } from "../layers/registry";
+import { confirmDialog } from "./dialogs";
 import { LayersPanel } from "./LayersPanel";
 import { Canvas } from "./Canvas";
 import { Inspector } from "./Inspector";
@@ -18,9 +21,11 @@ import { ProjectMenu } from "./ProjectMenu";
 import { Timeline } from "./Timeline";
 import { SceneStrip } from "./SceneStrip";
 import { RestyleModal } from "./RestyleModal";
-import { Map3DStyleModal } from "./Map3DStyleModal";
 import { SettingsModal } from "./SettingsModal";
+import { StillStudio } from "./StillStudio";
 import { CommandPalette } from "./CommandPalette";
+import { QuickAddMenu } from "./QuickAddMenu";
+import { ShortcutsModal } from "./ShortcutsModal";
 import { ErrorBoundary } from "./ErrorBoundary";
 
 /** Persisted panel size, read synchronously so there's no resize flash. */
@@ -55,9 +60,10 @@ export const Editor: React.FC = () => {
   const removeLayer = useEditor((s) => s.removeLayer);
   const duplicateLayer = useEditor((s) => s.duplicateLayer);
   const select = useEditor((s) => s.select);
+  const toast = useToast();
   const [restyleOpen, setRestyleOpen] = useState(false);
-  const [style3dOpen, setStyle3dOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [stillOpen, setStillOpen] = useState(false);
   const [layersOpen, setLayersOpen] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [dockOpen, setDockOpen] = useState(true);
@@ -106,15 +112,34 @@ export const Editor: React.FC = () => {
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el?.isContentEditable) return;
       const mod = e.metaKey || e.ctrlKey;
       const sel = layers.find((l) => l.id === selectedId);
-      if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
+      if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); window.dispatchEvent(new CustomEvent("mapanisy:save")); }
+      else if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
       else if (mod && (e.key.toLowerCase() === "y" || (e.key.toLowerCase() === "z" && e.shiftKey))) { e.preventDefault(); redo(); }
       else if (mod && e.key.toLowerCase() === "d" && sel && sel.type !== "camera") { e.preventDefault(); duplicateLayer(sel.id); }
-      else if ((e.key === "Delete" || e.key === "Backspace") && sel && sel.type !== "camera") { e.preventDefault(); removeLayer(sel.id); }
+      else if ((e.key === "Delete" || e.key === "Backspace") && sel && sel.type !== "camera") {
+        e.preventDefault();
+        const name = sel.name || LAYER_REGISTRY[sel.type]?.label || "layer";
+        removeLayer(sel.id);
+        toast.info(`Removed ${name}`, undefined, { label: "Undo", onClick: undo });
+      }
       else if (e.key === "Escape") { select(null); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo, layers, selectedId, removeLayer, duplicateLayer, select]);
+  }, [undo, redo, layers, selectedId, removeLayer, duplicateLayer, select, toast]);
+
+  // Autosave — debounce a QUIET save ~4s after the last edit, so a creator's
+  // work reaches their library without having to remember ⌘S (localStorage
+  // already covers reload; this covers switching projects / cross-device).
+  // `updatedAt` is bumped by every commit(); we skip the initial mount/load so
+  // opening a project doesn't immediately re-save it. Routes through the robust
+  // save path (checks res.ok, toasts on failure — never a silent autosave loss).
+  const firstAutosave = useRef(true);
+  useEffect(() => {
+    if (firstAutosave.current) { firstAutosave.current = false; return; }
+    const t = setTimeout(() => window.dispatchEvent(new CustomEvent("mapanisy:save", { detail: { quiet: true } })), 4000);
+    return () => clearTimeout(t);
+  }, [updatedAt]);
 
   const iconBtn = "rounded-lg p-1.5 text-graphite-muted transition-all duration-200 hover:bg-graphite/[0.06] hover:text-graphite active:scale-90 disabled:opacity-25 disabled:hover:bg-transparent";
   const toggle = (on: boolean) =>
@@ -152,15 +177,16 @@ export const Editor: React.FC = () => {
           <span className="mx-1 h-5 w-px bg-line" />
           <button onClick={undo} disabled={!past} title="Undo (⌘Z)" className={iconBtn}><Undo2 size={15} /></button>
           <button onClick={redo} disabled={!future} title="Redo (⌘⇧Z)" className={iconBtn}><Redo2 size={15} /></button>
-          <button onClick={() => { if (confirm("Start a fresh project? Unsaved changes will be lost.")) reset(); }} title="New project" className={iconBtn}><RotateCcw size={14} /></button>
+          <button onClick={async () => { if (await confirmDialog({ title: "Start a fresh project?", message: "Unsaved changes will be lost.", confirmLabel: "New project", danger: true })) reset(); }} title="New project" className={iconBtn}><RotateCcw size={14} /></button>
           <span className="mx-1 h-5 w-px bg-line" />
           <ProjectMenu />
-          <button onClick={() => setStyle3dOpen(true)} title="Creative 3D map styles" className={accentBtn}><Boxes size={13} /> 3D</button>
           <button onClick={() => setRestyleOpen(true)} title="Restyle your render with AI" className={accentBtn}><Wand2 size={13} /> Restyle</button>
+          <button onClick={() => setStillOpen(true)} title="Snapshot — extract this frame as a high-res image (annotate & export PNG/JPG/WebP/SVG/PDF)" className={accentBtn}><Camera size={13} /> Snapshot</button>
           <span className="mx-1 h-5 w-px bg-line" />
           <RenderButton />
           <RenderQueue />
           <ExportButton />
+          <button onClick={() => window.dispatchEvent(new CustomEvent("mapanisy:open-shortcuts"))} title="Keyboard shortcuts (?)" className={iconBtn}><Keyboard size={15} /></button>
           <button onClick={() => setSettingsOpen(true)} title="API keys & AI providers" className={iconBtn}><KeyRound size={15} /></button>
         </div>
       </header>
@@ -219,9 +245,11 @@ export const Editor: React.FC = () => {
       </div>
 
       <RestyleModal open={restyleOpen} onClose={() => setRestyleOpen(false)} onOpenSettings={() => { setRestyleOpen(false); setSettingsOpen(true); }} />
-      <Map3DStyleModal open={style3dOpen} onClose={() => setStyle3dOpen(false)} />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <StillStudio open={stillOpen} onClose={() => setStillOpen(false)} />
       <CommandPalette />
+      <QuickAddMenu />
+      <ShortcutsModal />
     </div>
   );
 };

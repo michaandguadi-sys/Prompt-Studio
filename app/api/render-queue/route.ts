@@ -1,24 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { enqueue, listJobs, clearFinished, type JobSettings } from "@/lib/renderQueue";
+import { enqueue, listJobsForUser, clearFinished, type JobSettings } from "@/lib/renderQueue";
 import { db, schema } from "@/lib/db";
 import { eq } from "drizzle-orm";
 import { checkQuota } from "@/lib/quota";
 import { rateLimit } from "@/lib/rateLimit";
 
 /**
- * GET /api/render-queue       — list all jobs (newest first)
+ * GET /api/render-queue       — list the CALLER'S jobs (newest first)
  * POST /api/render-queue      — enqueue a new render job (quota-gated)
- * DELETE /api/render-queue    — clear all finished jobs
+ * DELETE /api/render-queue    — clear the caller's finished jobs
+ *
+ * The queue is shared process memory, so every handler is auth-gated and scoped
+ * to the caller — one user must never see or clear another user's jobs.
  */
 export async function GET() {
-  return NextResponse.json({ jobs: listJobs() });
+  const { userId: clerkId } = await auth();
+  if (!clerkId) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+  return NextResponse.json({ jobs: listJobsForUser(clerkId) });
 }
 
 export async function POST(req: NextRequest) {
   // ── Auth + rate limit ──────────────────────────────────────────────────
   const { userId: clerkId } = await auth();
-  if (clerkId && !rateLimit("render-queue", clerkId, { maxRequests: 10, windowSec: 60 })) {
+  if (!clerkId) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+  if (!rateLimit("render-queue", clerkId, { maxRequests: 10, windowSec: 60 })) {
     return NextResponse.json({ error: "Rate limit exceeded — max 10 renders per minute" }, { status: 429 });
   }
 
@@ -66,11 +72,13 @@ export async function POST(req: NextRequest) {
   if (!compositionId || typeof compositionId !== "string" || !/^[a-zA-Z0-9-]+$/.test(compositionId)) {
     return NextResponse.json({ error: "Invalid compositionId" }, { status: 400 });
   }
-  const job = enqueue(compositionId, settings ?? {});
+  const job = enqueue(compositionId, settings ?? {}, clerkId);
   return NextResponse.json({ job });
 }
 
 export async function DELETE() {
-  const n = clearFinished();
+  const { userId: clerkId } = await auth();
+  if (!clerkId) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+  const n = clearFinished(clerkId);
   return NextResponse.json({ cleared: n });
 }

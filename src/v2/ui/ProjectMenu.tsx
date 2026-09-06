@@ -1,8 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Save, FolderOpen, Loader2, Trash2, Check, Share2, Film } from "lucide-react";
 import { useEditor } from "../store/editor";
+import { useToast } from "@/components/Toast/Toast";
+import { promptDialog } from "./dialogs";
 import { dimsFor } from "../doc/schema";
 import { buildFcpxml, safeFileName } from "@/lib/nle/fcpxml";
 
@@ -12,6 +14,7 @@ type Saved = { id: string; name: string; updatedAt: number };
 export const ProjectMenu: React.FC = () => {
   const project = useEditor((s) => s.project);
   const load = useEditor((s) => s.load);
+  const toast = useToast();
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [open, setOpen] = useState(false);
@@ -29,7 +32,7 @@ export const ProjectMenu: React.FC = () => {
       const d = await r.json();
       if (d?.url) {
         const url = d.url.startsWith("http") ? d.url : `${window.location.origin}${d.url}`;
-        try { await navigator.clipboard.writeText(url); } catch { window.prompt("Copy your share link:", url); }
+        try { await navigator.clipboard.writeText(url); } catch { void promptDialog({ title: "Copy your share link", message: "Select the link below and copy it.", defaultValue: url, confirmLabel: "Done" }); }
         setSharedMsg(true); setTimeout(() => setSharedMsg(false), 1900);
       }
     } catch { /* ignore */ }
@@ -49,19 +52,33 @@ export const ProjectMenu: React.FC = () => {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
 
-  const save = async () => {
-    setSaving(true);
+  const save = async (quiet = false) => {
+    if (!quiet) setSaving(true);
     try {
-      await fetch("/api/v2/projects", {
+      const r = await fetch("/api/v2/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: project.name, project }),
       });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 1600);
-    } catch { /* ignore */ }
-    setSaving(false);
+      // fetch does NOT throw on 4xx/5xx — check res.ok, or a failed save would
+      // still flash "Saved" and the user would close the tab thinking it stuck.
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!quiet) { setSaved(true); setTimeout(() => setSaved(false), 1600); }
+    } catch {
+      // Errors are ALWAYS surfaced, even for autosave — a silently failing
+      // autosave is the most dangerous kind (user assumes it's handled).
+      toast.error("Couldn't save to your library", "Your changes are safe on this device — try Save again.");
+    }
+    if (!quiet) setSaving(false);
   };
+
+  // ⌘S / Ctrl-S (loud) and debounced autosave (quiet) both dispatch mapanisy:save.
+  useEffect(() => {
+    const onSave = (e: Event) => { void save(!!(e as CustomEvent).detail?.quiet); };
+    window.addEventListener("mapanisy:save", onSave);
+    return () => window.removeEventListener("mapanisy:save", onSave);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project]);
 
   const refresh = async () => {
     setList(null);
@@ -91,7 +108,7 @@ export const ProjectMenu: React.FC = () => {
 
   return (
     <div className="flex items-center gap-1.5">
-      <button onClick={save} disabled={saving} title="Save project" className="inline-flex items-center gap-1.5 rounded-lg border border-black/10 bg-paper-100/70 px-2.5 py-1.5 text-xs text-graphite/70 hover:text-graphite hover:border-black/20 transition-colors">
+      <button onClick={() => save()} disabled={saving} title="Save project (⌘S)" className="inline-flex items-center gap-1.5 rounded-lg border border-black/10 bg-paper-100/70 px-2.5 py-1.5 text-xs text-graphite/70 hover:text-graphite hover:border-black/20 transition-colors">
         {saving ? <Loader2 size={12} className="animate-spin" /> : saved ? <Check size={12} className="text-emerald-400" /> : <Save size={12} />}
         {saved ? "Saved" : "Save"}
       </button>

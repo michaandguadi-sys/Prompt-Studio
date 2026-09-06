@@ -2,9 +2,9 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Project, Layer, LayerType, Composition, Timing, Theme, Scene } from "../doc/schema";
+import type { Project, Layer, LayerType, Composition, Timing, Theme, Scene, CameraPose, KfEase } from "../doc/schema";
 import { safeParseProject } from "../doc/schema";
-import { createLayer, createDefaultProject } from "../doc/factory";
+import { createLayer, createDefaultProject, defaultCamera } from "../doc/factory";
 import { recolorLayer } from "../doc/themes";
 
 /**
@@ -17,12 +17,58 @@ import { recolorLayer } from "../doc/themes";
  */
 
 const MAX_HISTORY = 80;
+// Drag ticks (scrubby inputs, keyframe/transform drags) fire many commits in
+// quick succession. Same-key commits within this window collapse into ONE undo
+// entry, so a whole drag = a single ⌘Z (and one history snapshot, not dozens).
+const COALESCE_MS = 900;
+
+/** Current playhead as scene-time t (0..1) plus a "same keyframe" epsilon
+ *  (~0.75 frames), so the keyframe button toggles the one under the playhead. */
+/** Scene frame count (never < 1). */
+function framesOf(p: Project): number {
+  return Math.max(1, Math.round((p.composition.durationSec || 1) * (p.composition.fps || 30)));
+}
+/** The "same keyframe" epsilon (~0.75 frames as a 0..1 t) — one source of truth. */
+function epsFor(p: Project): number {
+  return 0.75 / Math.max(1, framesOf(p) - 1);
+}
+function playheadT(p: Project, playheadFrame: number): { t: number; eps: number } {
+  const tf = framesOf(p);
+  const t = tf > 1 ? Math.min(1, Math.max(0, (playheadFrame || 0) / (tf - 1))) : 0;
+  return { t, eps: epsFor(p) };
+}
+/** Index of the keyframe whose time is nearest `t` (0 on empty — callers guard). */
+function nearestKeyIndex(arr: { t: number }[], t: number): number {
+  let best = 0, bestD = Infinity;
+  for (let i = 0; i < arr.length; i++) { const d = Math.abs(arr[i].t - t); if (d < bestD) { bestD = d; best = i; } }
+  return best;
+}
+/** Clamp a camera pose to the valid editing envelope. */
+function cleanPose(pose: CameraPose): CameraPose {
+  return {
+    lon: pose.lon,
+    lat: Math.min(85, Math.max(-85, pose.lat)),
+    zoom: Math.min(22, Math.max(0, pose.zoom)),
+    pitch: Math.min(85, Math.max(0, pose.pitch)),
+    bearing: ((pose.bearing % 360) + 360) % 360,
+  };
+}
+/** Retime the keyframe nearest `fromT` to `toT`, merging any it now collides with. */
+function retimeKeyframe<T extends { t: number }>(arr: T[], fromT: number, toT: number, eps: number): T[] {
+  const next = arr.slice();
+  const best = nearestKeyIndex(next, fromT);
+  const newT = Math.min(1, Math.max(0, toT));
+  next[best] = { ...next[best], t: newT };
+  return next.filter((k, i) => i === best || Math.abs(k.t - newT) >= eps).sort((a, b) => a.t - b.t);
+}
 
 type EditorState = {
   project: Project;
   selectedId: string | null;
   past: Project[];
   future: Project[];
+  /** Transient: the last commit's coalesce key + time, for drag-merging. */
+  _coalesce: { key: string; at: number } | null;
 
   // selectors are derived in components; actions here:
   load: (p: Project) => void;
@@ -39,6 +85,49 @@ type EditorState = {
 
   patchLayer: (id: string, patch: Record<string, unknown>) => void;
   patchTiming: (id: string, patch: Partial<Timing>) => void;
+
+  // ── Property keyframes (the universal animation system) ──
+  /** Smart numeric setter. If `prop` is keyframed, writes the value to the
+   *  keyframe at the current playhead (inserting one if none is there — After
+   *  Effects style); otherwise sets the plain static field. */
+  setLayerProp: (id: string, prop: string, value: number) => void;
+  /** Toggle a keyframe for `prop` at the current playhead (add with the given
+   *  value, or remove the one already there). Enables/anchors an animation. */
+  toggleKeyframe: (id: string, prop: string, value: number) => void;
+  /** Set the easing of the keyframe at/just-before the playhead on `prop`. */
+  setKfEaseAtPlayhead: (id: string, prop: string, ease: "linear" | "smooth" | "easeIn" | "easeOut" | "hold") => void;
+  /** Remove a property's whole keyframe track (back to a static value). */
+  clearTrack: (id: string, prop: string, value?: number) => void;
+  /** Jump the playhead to the next/prev keyframe of `prop` (−1 prev, +1 next). */
+  gotoKeyframe: (id: string, prop: string, dir: -1 | 1) => void;
+  /** Move a keyframe (identified by its current time `fromT`) to a new time on
+   *  the timeline — powers dragging a diamond in the keyframe lane. */
+  moveKeyframe: (id: string, prop: string, fromT: number, toT: number) => void;
+
+  // ── Camera keyframes (the "Adjust camera" viewfinder / Earth-Studio move) ──
+  /** Upsert a full camera pose keyframe at the current playhead time. If a key
+   *  already sits at the playhead it's replaced; otherwise a new one is inserted
+   *  (kept sorted). This is what the gizmo calls on every drag + Add-keyframe. */
+  setCameraKeyAtPlayhead: (pose: CameraPose, ease?: KfEase) => void;
+  /** Remove the camera keyframe at the current playhead (if any). */
+  deleteCameraKeyAtPlayhead: () => void;
+  /** Retime a camera keyframe (drag its diamond) from `fromT` to `toT`. */
+  moveCameraKey: (fromT: number, toT: number) => void;
+  /** Set the easing out of the camera keyframe governing the playhead. */
+  setCameraKeyEaseAtPlayhead: (ease: KfEase) => void;
+  /** Drop ALL camera keyframes (back to the classic auto/style camera). */
+  clearCameraKeys: () => void;
+  /** Jump the playhead to the next/prev camera keyframe (−1 prev, +1 next). */
+  gotoCameraKey: (dir: -1 | 1) => void;
+  /** Upsert a camera keyframe at an ARBITRARY time (timeline Option-click add). */
+  setCameraKeyAt: (t: number, pose: CameraPose, ease?: KfEase) => void;
+  /** Delete the camera keyframe nearest `t` (timeline Delete key). */
+  deleteCameraKeyAt: (t: number) => void;
+  /** Upsert a property keyframe at an arbitrary time (timeline Option-click add). */
+  addKeyframeAt: (id: string, prop: string, t: number, value: number) => void;
+  /** Delete the property keyframe nearest `t` (timeline Delete key). */
+  deleteKeyframeAt: (id: string, prop: string, t: number) => void;
+
   patchComposition: (patch: Partial<Composition>) => void;
   /** Change the scene duration AND proportionally rescale every layer's timing
    *  (in/out points, narration beats, choreography spans) so the whole film
@@ -109,18 +198,23 @@ function ensureScenes(p: Project): Project {
 export const useEditor = create<EditorState>()(
   persist(
     (set, get) => {
-      /** Apply a mutation to the project with undo bookkeeping. */
-      const commit = (mutate: (p: Project) => void) =>
+      /** Apply a mutation to the project with undo bookkeeping. Pass a
+       *  `coalesceKey` for drag-style edits: consecutive commits sharing the key
+       *  within COALESCE_MS merge into the SAME undo entry (the pre-drag state
+       *  stays as the single undo target) instead of one snapshot per tick. */
+      const commit = (mutate: (p: Project) => void, coalesceKey?: string) =>
         set((s) => {
-          const past = [...s.past, clone(s.project)].slice(-MAX_HISTORY);
+          const now = Date.now();
+          const merge = !!coalesceKey && s._coalesce?.key === coalesceKey && now - (s._coalesce?.at ?? 0) < COALESCE_MS;
+          const past = merge ? s.past : [...s.past, clone(s.project)].slice(-MAX_HISTORY);
           const next = clone(s.project);
           mutate(next);
           // Mirror the live composition back into the active scene so scenes[]
           // is always current (for persist, scene-switching, and rendering).
           const sc = next.scenes?.find((x) => x.id === next.activeSceneId);
           if (sc) sc.composition = next.composition;
-          next.updatedAt = Date.now();
-          return { project: next, past, future: [] };
+          next.updatedAt = now;
+          return { project: next, past, future: [], _coalesce: coalesceKey ? { key: coalesceKey, at: now } : null };
         });
 
       const layerIndex = (p: Project, id: string) => p.composition.layers.findIndex((l) => l.id === id);
@@ -130,9 +224,10 @@ export const useEditor = create<EditorState>()(
         selectedId: null,
         past: [],
         future: [],
+        _coalesce: null,
 
-        load: (p) => set({ project: ensureScenes(clone(p)), selectedId: null, past: [], future: [] }),
-        reset: () => set({ project: ensureScenes(createDefaultProject()), selectedId: null, past: [], future: [] }),
+        load: (p) => set({ project: ensureScenes(clone(p)), selectedId: null, past: [], future: [], _coalesce: null }),
+        reset: () => set({ project: ensureScenes(createDefaultProject()), selectedId: null, past: [], future: [], _coalesce: null }),
         select: (id) => set({ selectedId: id }),
 
         addLayer: (type, overrides) => {
@@ -160,7 +255,13 @@ export const useEditor = create<EditorState>()(
         duplicateLayer: (id) => {
           const src = get().project.composition.layers.find((l) => l.id === id);
           if (!src || src.type === "camera") return;
-          const copy = createLayer(src.type, { ...clone(src), id: undefined, name: `${src.name || src.type} copy` } as any);
+          // OMIT id rather than setting it undefined. `id: undefined` still
+          // creates the key, and since overrides are spread LAST it clobbered
+          // the fresh id createLayer() generates — so LayerSchema.parse() threw
+          // a ZodError on every duplicate, and ⌘D / the Layers panel / LayerHalo
+          // all silently did nothing.
+          const { id: _discard, ...rest } = clone(src) as Record<string, unknown>;
+          const copy = createLayer(src.type, { ...rest, name: `${src.name || src.type} copy` });
           commit((p) => {
             const i = layerIndex(p, id);
             p.composition.layers.splice(i + 1, 0, copy);
@@ -187,12 +288,182 @@ export const useEditor = create<EditorState>()(
         patchLayer: (id, patch) => commit((p) => {
           const l = p.composition.layers.find((x) => x.id === id);
           if (l) Object.assign(l, patch);
-        }),
+        }, `patch:${id}`),
 
         patchTiming: (id, patch) => commit((p) => {
           const l = p.composition.layers.find((x) => x.id === id) as any;
           if (l && l.timing) l.timing = { ...l.timing, ...patch };
         }),
+
+        // ── Property keyframes ──────────────────────────────────────────────
+        setLayerProp: (id, prop, value) => commit((p) => {
+          const l = p.composition.layers.find((x) => x.id === id) as any;
+          if (!l) return;
+          const track = l.tracks?.[prop] as { t: number; value: number; ease: string }[] | undefined;
+          if (track && track.length) {
+            // Keyframed → edit the keyframe at the playhead (insert if none there).
+            const { t, eps } = playheadT(p, get().playheadFrame);
+            const next = [...track];
+            const i = next.findIndex((k) => Math.abs(k.t - t) < eps);
+            if (i >= 0) next[i] = { ...next[i], value };
+            else { next.push({ t, value, ease: "smooth" }); next.sort((a, b) => a.t - b.t); }
+            l.tracks = { ...l.tracks, [prop]: next };
+          }
+          // Always mirror to the static field too (used when the track is empty
+          // and as the value shown when the playhead sits off any keyframe).
+          l[prop] = value;
+        }, `set:${id}:${prop}`),
+
+        toggleKeyframe: (id, prop, value) => commit((p) => {
+          const l = p.composition.layers.find((x) => x.id === id) as any;
+          if (!l) return;
+          if (!l.tracks) l.tracks = {};
+          const { t, eps } = playheadT(p, get().playheadFrame);
+          const track: { t: number; value: number; ease: string }[] = l.tracks[prop] ? [...l.tracks[prop]] : [];
+          const i = track.findIndex((k) => Math.abs(k.t - t) < eps);
+          if (i >= 0) {
+            track.splice(i, 1); // remove the keyframe under the playhead
+            if (track.length === 0) { const { [prop]: _drop, ...rest } = l.tracks; l.tracks = rest; return; }
+          } else {
+            track.push({ t, value, ease: "smooth" });
+            track.sort((a, b) => a.t - b.t);
+          }
+          l.tracks = { ...l.tracks, [prop]: track };
+        }),
+
+        setKfEaseAtPlayhead: (id, prop, ease) => commit((p) => {
+          const l = p.composition.layers.find((x) => x.id === id) as any;
+          const track = l?.tracks?.[prop] as { t: number; value: number; ease: string }[] | undefined;
+          if (!track?.length) return;
+          const { t } = playheadT(p, get().playheadFrame);
+          // The keyframe governing the segment at the playhead is the last one ≤ t.
+          let idx = 0;
+          for (let i = 0; i < track.length; i++) if (track[i].t <= t + 1e-6) idx = i;
+          const next = [...track];
+          next[idx] = { ...next[idx], ease };
+          l.tracks = { ...l.tracks, [prop]: next };
+        }),
+
+        clearTrack: (id, prop, value) => commit((p) => {
+          const l = p.composition.layers.find((x) => x.id === id) as any;
+          if (!l?.tracks?.[prop]) return;
+          const { [prop]: _drop, ...rest } = l.tracks;
+          l.tracks = rest;
+          if (typeof value === "number") l[prop] = value; // freeze on the last-seen value
+        }),
+
+        moveKeyframe: (id, prop, fromT, toT) => commit((p) => {
+          const l = p.composition.layers.find((x) => x.id === id) as any;
+          const track = l?.tracks?.[prop] as { t: number; value: number; ease: string }[] | undefined;
+          if (!track?.length) return;
+          // Retime (merging a dropped-onto neighbour) via the shared primitive.
+          l.tracks = { ...l.tracks, [prop]: retimeKeyframe(track, fromT, toT, epsFor(p)) };
+        }, `movekf:${id}:${prop}`),
+
+        // ── Camera keyframes (Earth-Studio move: a full pose pinned at time t) ──
+        // The playhead variant just resolves t and delegates to setCameraKeyAt.
+        setCameraKeyAtPlayhead: (pose, ease = "smooth") => {
+          const { t } = playheadT(get().project, get().playheadFrame);
+          get().setCameraKeyAt(t, pose, ease);
+        },
+
+        deleteCameraKeyAtPlayhead: () => commit((p) => {
+          const cam = p.composition.layers.find((x) => x.type === "camera") as any;
+          if (!cam?.keys?.length) return;
+          const { t, eps } = playheadT(p, get().playheadFrame);
+          cam.keys = cam.keys.filter((k: any) => Math.abs(k.t - t) >= eps);
+        }),
+
+        moveCameraKey: (fromT, toT) => commit((p) => {
+          const cam = p.composition.layers.find((x) => x.type === "camera") as any;
+          if (!cam?.keys?.length) return;
+          cam.keys = retimeKeyframe(cam.keys, fromT, toT, epsFor(p));
+        }, `movecam:${fromT}`),
+
+        setCameraKeyEaseAtPlayhead: (ease) => commit((p) => {
+          const cam = p.composition.layers.find((x) => x.type === "camera") as any;
+          if (!cam?.keys?.length) return;
+          const { t } = playheadT(p, get().playheadFrame);
+          let idx = 0;
+          for (let i = 0; i < cam.keys.length; i++) if (cam.keys[i].t <= t + 1e-6) idx = i;
+          const keys = [...cam.keys];
+          keys[idx] = { ...keys[idx], ease };
+          cam.keys = keys;
+        }),
+
+        clearCameraKeys: () => commit((p) => {
+          const cam = p.composition.layers.find((x) => x.type === "camera") as any;
+          if (cam) cam.keys = [];
+        }),
+
+        gotoCameraKey: (dir) => {
+          const st = get();
+          const cam = st.project.composition.layers.find((x) => x.type === "camera") as any;
+          if (!cam?.keys?.length) return;
+          const c = st.project.composition;
+          const tf = Math.max(1, Math.round(c.durationSec * c.fps));
+          const cur = st.playheadFrame ?? 0;
+          const frames = cam.keys.map((k: any) => Math.round(k.t * (tf - 1))).sort((a: number, b: number) => a - b);
+          const target = dir > 0 ? frames.find((f: number) => f > cur + 0.5) : [...frames].reverse().find((f: number) => f < cur - 0.5);
+          if (target != null) { st.setPlayheadFrame(target); st.requestSeek?.(target); }
+        },
+
+        setCameraKeyAt: (t, pose, ease = "smooth") => commit((p) => {
+          let cam = p.composition.layers.find((x) => x.type === "camera") as any;
+          if (!cam) { cam = defaultCamera() as any; p.composition.layers.unshift(cam); }
+          const eps = epsFor(p);
+          const clean = cleanPose(pose);
+          const tc = Math.min(1, Math.max(0, t));
+          const keys = Array.isArray(cam.keys) ? [...cam.keys] : [];
+          const i = keys.findIndex((k: any) => Math.abs(k.t - tc) < eps);
+          if (i >= 0) keys[i] = { ...keys[i], pose: clean }; // update in place at this time
+          else keys.push({ t: tc, pose: clean, ease });
+          keys.sort((a: any, b: any) => a.t - b.t);
+          cam.keys = keys;
+        }),
+
+        deleteCameraKeyAt: (t) => commit((p) => {
+          const cam = p.composition.layers.find((x) => x.type === "camera") as any;
+          if (!cam?.keys?.length) return;
+          const best = nearestKeyIndex(cam.keys, t);
+          cam.keys = cam.keys.filter((_: any, i: number) => i !== best);
+        }),
+
+        addKeyframeAt: (id, prop, t, value) => commit((p) => {
+          const l = p.composition.layers.find((x) => x.id === id) as any;
+          if (!l) return;
+          if (!l.tracks) l.tracks = {};
+          const eps = epsFor(p);
+          const tc = Math.min(1, Math.max(0, t));
+          const track = l.tracks[prop] ? [...l.tracks[prop]] : [];
+          const i = track.findIndex((k: any) => Math.abs(k.t - tc) < eps);
+          if (i >= 0) track[i] = { ...track[i], value };
+          else track.push({ t: tc, value, ease: "smooth" });
+          track.sort((a: any, b: any) => a.t - b.t);
+          l.tracks = { ...l.tracks, [prop]: track };
+        }),
+
+        deleteKeyframeAt: (id, prop, t) => commit((p) => {
+          const l = p.composition.layers.find((x) => x.id === id) as any;
+          const track = l?.tracks?.[prop] as { t: number }[] | undefined;
+          if (!track?.length) return;
+          const next = track.filter((_, i) => i !== nearestKeyIndex(track, t));
+          if (next.length) l.tracks = { ...l.tracks, [prop]: next };
+          else { const { [prop]: _drop, ...rest } = l.tracks; l.tracks = rest; }
+        }),
+
+        gotoKeyframe: (id, prop, dir) => {
+          const st = get();
+          const l = st.project.composition.layers.find((x) => x.id === id) as any;
+          const track = l?.tracks?.[prop] as { t: number }[] | undefined;
+          if (!track?.length) return;
+          const c = st.project.composition;
+          const tf = Math.max(1, Math.round(c.durationSec * c.fps));
+          const cur = st.playheadFrame ?? 0;
+          const frames = track.map((k) => Math.round(k.t * (tf - 1))).sort((a, b) => a - b);
+          const target = dir > 0 ? frames.find((f) => f > cur + 0.5) : [...frames].reverse().find((f) => f < cur - 0.5);
+          if (target != null) { st.setPlayheadFrame(target); st.requestSeek?.(target); }
+        },
 
         patchComposition: (patch) => commit((p) => { p.composition = { ...p.composition, ...patch }; }),
 
@@ -209,6 +480,9 @@ export const useEditor = create<EditorState>()(
                 ...l.timing,
                 inSec: clampR(l.timing.inSec * f, 0, dur),
                 outSec: l.timing.outSec == null ? null : clampR(l.timing.outSec * f, 0, dur),
+                // Fade DURATIONS scale too, so a retimed film keeps its ramps proportional.
+                fadeInSec: typeof l.timing.fadeInSec === "number" ? clampR(l.timing.fadeInSec * f, 0, 6) : l.timing.fadeInSec,
+                fadeOutSec: typeof l.timing.fadeOutSec === "number" ? clampR(l.timing.fadeOutSec * f, 0, 6) : l.timing.fadeOutSec,
               };
             }
             // Layer-specific choreography spans scale too (clamped to schema
@@ -347,12 +621,12 @@ export const useEditor = create<EditorState>()(
         undo: () => set((s) => {
           if (s.past.length === 0) return s;
           const prev = s.past[s.past.length - 1];
-          return { project: prev, past: s.past.slice(0, -1), future: [clone(s.project), ...s.future].slice(0, MAX_HISTORY) };
+          return { project: prev, past: s.past.slice(0, -1), future: [clone(s.project), ...s.future].slice(0, MAX_HISTORY), _coalesce: null };
         }),
         redo: () => set((s) => {
           if (s.future.length === 0) return s;
           const next = s.future[0];
-          return { project: next, future: s.future.slice(1), past: [...s.past, clone(s.project)].slice(-MAX_HISTORY) };
+          return { project: next, future: s.future.slice(1), past: [...s.past, clone(s.project)].slice(-MAX_HISTORY), _coalesce: null };
         }),
         canUndo: () => get().past.length > 0,
         canRedo: () => get().future.length > 0,

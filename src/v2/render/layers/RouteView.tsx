@@ -1,7 +1,7 @@
 import React, { useMemo } from "react";
 import { Source, Layer as MapLayer } from "react-map-gl/maplibre";
 import { RouteLayer } from "../../doc/schema";
-import { evalTiming, timingTransform } from "../timing";
+import { evalTiming, timingTransform, kfNum } from "../timing";
 import {
   LV, kfOpacityMul, finalRouteCoords, routeTravel,
   routeStops, pointAlong, displayFont, useTheme,
@@ -32,11 +32,14 @@ function buildRenderCoords(l: RouteLayer, frame: number, fps: number, totalFrame
 export const RouteSource: React.FC<LV<RouteLayer>> = ({ layer: l, frame, fps, totalFrames }) => {
   const tr = evalTiming(l.timing, frame, fps, totalFrames);
   tr.opacity *= kfOpacityMul(l);
+  // Keyframable line width + glow (animate when a track exists).
+  const width = kfNum(l, "width", l.width, frame, totalFrames);
+  const glow = kfNum(l, "glow", l.glow, frame, totalFrames);
   const { t, fullCoords, renderCoords } = useMemo(
     () => buildRenderCoords(l, frame, fps, totalFrames),
     [l, frame, fps, totalFrames]
   );
-  const meshData = useRouteMesh(renderCoords, l.width);
+  const meshData = useRouteMesh(renderCoords, width);
 
   if (tr.opacity < 0.01 || renderCoords.length < 2) return null;
 
@@ -44,12 +47,12 @@ export const RouteSource: React.FC<LV<RouteLayer>> = ({ layer: l, frame, fps, to
 
   return (
     <>
-      {l.glow > 0 && (
+      {glow > 0 && (
         <Source id={`${l.id}-glow`} type="geojson" data={lineData}>
           <MapLayer
             id={`${l.id}-glowL`}
             type="line"
-            paint={{ "line-color": l.color, "line-width": l.width * (2 + l.glow * 1.5), "line-blur": Math.max(2, l.width * 1.5), "line-opacity": tr.opacity * Math.min(1, l.glow) }}
+            paint={{ "line-color": l.color, "line-width": width * (2 + glow * 1.5), "line-blur": Math.max(2, width * 1.5), "line-opacity": tr.opacity * Math.min(1, glow) }}
             layout={{ "line-cap": "round", "line-join": "round" }}
           />
         </Source>
@@ -64,7 +67,7 @@ export const RouteSource: React.FC<LV<RouteLayer>> = ({ layer: l, frame, fps, to
             id={`${l.id}-line`}
             type="line"
             paint={{
-              "line-color": l.color, "line-width": l.width, "line-opacity": tr.opacity,
+              "line-color": l.color, "line-width": width, "line-opacity": tr.opacity,
               ...(l.dashStyle === "dashed" ? { "line-dasharray": [2, 1.5] } : l.dashStyle === "dotted" ? { "line-dasharray": [0.2, 2] } : {}),
             }}
             layout={{ "line-cap": "round", "line-join": "round" }}
@@ -73,12 +76,12 @@ export const RouteSource: React.FC<LV<RouteLayer>> = ({ layer: l, frame, fps, to
       )}
       {l.showEndpoints && t > 0.05 && (
         <Source id={`${l.id}-sm`} type="geojson" data={{ type: "Feature" as const, properties: {}, geometry: { type: "Point" as const, coordinates: fullCoords[0] } }}>
-          <MapLayer id={`${l.id}-smL`} type="circle" paint={{ "circle-radius": l.width * 1.4, "circle-color": l.color, "circle-stroke-width": l.width * 0.4, "circle-stroke-color": "#fff", "circle-opacity": tr.opacity, "circle-stroke-opacity": tr.opacity }} />
+          <MapLayer id={`${l.id}-smL`} type="circle" paint={{ "circle-radius": width * 1.4, "circle-color": l.color, "circle-stroke-width": width * 0.4, "circle-stroke-color": "#fff", "circle-opacity": tr.opacity, "circle-stroke-opacity": tr.opacity }} />
         </Source>
       )}
       {l.showEndpoints && t > 0.95 && (
         <Source id={`${l.id}-em`} type="geojson" data={{ type: "Feature" as const, properties: {}, geometry: { type: "Point" as const, coordinates: fullCoords[fullCoords.length - 1] } }}>
-          <MapLayer id={`${l.id}-emL`} type="circle" paint={{ "circle-radius": l.width * 1.4, "circle-color": l.color, "circle-stroke-width": l.width * 0.4, "circle-stroke-color": "#fff", "circle-opacity": tr.opacity, "circle-stroke-opacity": tr.opacity }} />
+          <MapLayer id={`${l.id}-emL`} type="circle" paint={{ "circle-radius": width * 1.4, "circle-color": l.color, "circle-stroke-width": width * 0.4, "circle-stroke-color": "#fff", "circle-opacity": tr.opacity, "circle-stroke-opacity": tr.opacity }} />
         </Source>
       )}
     </>
@@ -115,6 +118,34 @@ export const RouteEndpoints: React.FC<LV<RouteLayer>> = ({ layer: l, frame, fps,
       {t > 0.05 && l.from.name && pinStyle(l.from.name, startCoord)}
       {t > 0.95 && l.to.name && pinStyle(l.to.name, endCoord)}
     </div>
+  );
+};
+
+// ── RouteHitArea: invisible projected bbox so the route is click-selectable ─
+// The line itself is a MapLibre canvas layer (no DOM), so the editor's geometric
+// hit-test can't reach it. This transparent rect (the route's projected bounding
+// box) carries the layer id, so clicking on/near a route selects it for editing.
+// Markers/labels sit inside smaller boxes, so they correctly win the pick.
+export const RouteHitArea: React.FC<LV<RouteLayer>> = ({ layer: l, frame, fps, totalFrames, project }) => {
+  const tr = evalTiming(l.timing, frame, fps, totalFrames);
+  tr.opacity *= kfOpacityMul(l);
+  const coords = useMemo(() => finalRouteCoords(l), [l]);
+  if (tr.opacity < 0.01 || !project || coords.length < 2) return null;
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const c of coords) {
+    const { x, y } = project(c[0], c[1]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    if (x < minX) minX = x; if (y < minY) minY = y;
+    if (x > maxX) maxX = x; if (y > maxY) maxY = y;
+  }
+  if (!Number.isFinite(minX)) return null;
+  const pad = 10;
+  return (
+    <div
+      data-layer-id={l.id}
+      style={{ position: "absolute", left: minX - pad, top: minY - pad, width: maxX - minX + pad * 2, height: maxY - minY + pad * 2, pointerEvents: "none" }}
+    />
   );
 };
 

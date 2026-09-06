@@ -1,7 +1,7 @@
 import React from "react";
 import { useVideoConfig } from "remotion";
 import { LabelLayer, FlagLayer, MarkerLayer } from "../../doc/schema";
-import { evalTiming, timingTransform } from "../timing";
+import { evalTiming, timingTransform, kfNum } from "../timing";
 import { LV, kfOpacityMul, displayFont, useTheme, outlineStyle, textShadow, tfStyle } from "./renderHelpers";
 
 // ── LabelView ───────────────────────────────────────────────────────────────
@@ -14,7 +14,7 @@ export const LabelView: React.FC<LV<LabelLayer>> = ({ layer: l, frame, fps, tota
   if (tr.opacity < 0.01) return null;
 
   const font = displayFont(theme, l.fontFamily);
-  const sz = l.sizePx;
+  const sz = kfNum(l, "sizePx", l.sizePx, frame, totalFrames);
   const shadow = l.shadow > 0 ? textShadow(l.shadow) : undefined;
 
   let x: number | string = "50%";
@@ -41,7 +41,7 @@ export const LabelView: React.FC<LV<LabelLayer>> = ({ layer: l, frame, fps, tota
 
   if (l.variant === "pin") {
     return (
-      <div style={base}>
+      <div data-layer-id={l.id} style={base}>
         <div style={{ ...outlineStyle(l.outline, sz * 0.04), fontSize: sz, fontWeight: 800, color: l.color, textShadow: shadow, letterSpacing: 1 }}>{l.text}</div>
         {l.sub && <div style={{ fontSize: sz * 0.5, color: l.accent, marginTop: sz * 0.1, fontWeight: 600, textShadow: shadow }}>{l.sub}</div>}
         <div style={{ width: sz * 0.12, height: sz * 0.35, background: l.accent, margin: `${sz * 0.12}px auto 0`, borderRadius: sz * 0.06 }} />
@@ -51,7 +51,7 @@ export const LabelView: React.FC<LV<LabelLayer>> = ({ layer: l, frame, fps, tota
 
   if (l.variant === "card") {
     return (
-      <div style={{ ...base, transform: `translate(-50%,-50%) ${timingTransform(tr)}${tfStyle(l, vw, vh)}` }}>
+      <div data-layer-id={l.id} style={{ ...base, transform: `translate(-50%,-50%) ${timingTransform(tr)}${tfStyle(l, vw, vh)}` }}>
         <div style={{ display: "inline-block", padding: `${sz * 0.3}px ${sz * 0.6}px`, background: "rgba(6,8,15,0.85)", border: `${Math.max(2, sz * 0.04)}px solid ${l.accent}`, borderRadius: sz * 0.16, backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)" }}>
           <div style={{ fontSize: sz, fontWeight: 800, color: l.color, ...outlineStyle(l.outline, sz * 0.04) }}>{l.text}</div>
           {l.sub && <div style={{ fontSize: sz * 0.5, color: l.accent, marginTop: sz * 0.12, fontWeight: 600 }}>{l.sub}</div>}
@@ -62,7 +62,7 @@ export const LabelView: React.FC<LV<LabelLayer>> = ({ layer: l, frame, fps, tota
 
   if (l.variant === "lower-third") {
     return (
-      <div style={{ position: "absolute", left: "5%", bottom: "10%", transform: timingTransform(tr), opacity: tr.opacity, pointerEvents: "none", fontFamily: font }}>
+      <div data-layer-id={l.id} style={{ position: "absolute", left: "5%", bottom: "10%", transform: timingTransform(tr), opacity: tr.opacity, pointerEvents: "none", fontFamily: font }}>
         <div style={{ display: "inline-block", padding: `${sz * 0.22}px ${sz * 0.5}px`, borderLeft: `${Math.max(4, sz * 0.08)}px solid ${l.accent}`, background: "rgba(6,8,15,0.78)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)" }}>
           <div style={{ fontSize: sz, fontWeight: 800, color: l.color, ...outlineStyle(l.outline, sz * 0.04) }}>{l.text}</div>
           {l.sub && <div style={{ fontSize: sz * 0.5, color: l.accent, marginTop: sz * 0.1, fontWeight: 600 }}>{l.sub}</div>}
@@ -71,11 +71,25 @@ export const LabelView: React.FC<LV<LabelLayer>> = ({ layer: l, frame, fps, tota
     );
   }
 
-  // banner
+  // banner — a broadcast-style CENTERED band, never an edge-to-edge slab:
+  // capped width, glass backdrop with soft fade-out edges, accent rules above
+  // and below, and type that scales DOWN as the text gets longer.
+  const bannerFit = Math.min(1, 26 / Math.max(10, l.text.length)); // long text → smaller
+  const bSz = sz * (0.72 + 0.38 * bannerFit);
   return (
-    <div style={{ position: "absolute", left: 0, right: 0, top: "50%", transform: `translateY(-50%) ${timingTransform(tr)}`, opacity: tr.opacity, pointerEvents: "none", textAlign: "center", background: `${l.accent}cc`, padding: `${sz * 0.4}px 0`, fontFamily: font }}>
-      <div style={{ fontSize: sz * 1.1, fontWeight: 900, color: l.color, letterSpacing: 4, textTransform: "uppercase", ...outlineStyle(l.outline, sz * 0.04) }}>{l.text}</div>
-      {l.sub && <div style={{ fontSize: sz * 0.55, color: "rgba(255,255,255,0.82)", marginTop: sz * 0.12 }}>{l.sub}</div>}
+    <div data-layer-id={l.id} style={{ position: "absolute", left: "50%", top: "50%", transform: `translate(-50%,-50%) ${timingTransform(tr)}`, opacity: tr.opacity, pointerEvents: "none", textAlign: "center", maxWidth: "78%", fontFamily: font }}>
+      <div
+        style={{
+          padding: `${bSz * 0.45}px ${bSz * 1.4}px`,
+          background: "linear-gradient(90deg, transparent 0%, rgba(6,8,15,0.82) 12%, rgba(6,8,15,0.82) 88%, transparent 100%)",
+          backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)",
+        }}
+      >
+        <div style={{ height: Math.max(2, bSz * 0.05), width: bSz * 2.4, margin: `0 auto ${bSz * 0.3}px`, background: l.accent, borderRadius: 99, boxShadow: `0 0 14px ${l.accent}aa` }} />
+        <div style={{ fontSize: bSz, fontWeight: 800, color: l.color, lineHeight: 1.12, letterSpacing: bSz * 0.14, textTransform: "uppercase", textWrap: "balance" as any, textShadow: "0 2px 18px rgba(0,0,0,0.55)", ...outlineStyle(l.outline, bSz * 0.04) }}>{l.text}</div>
+        {l.sub && <div style={{ fontSize: bSz * 0.42, fontWeight: 600, letterSpacing: bSz * 0.09, textTransform: "uppercase", color: l.accent, marginTop: bSz * 0.22 }}>{l.sub}</div>}
+        <div style={{ height: Math.max(2, bSz * 0.05), width: bSz * 2.4, margin: `${bSz * 0.3}px auto 0`, background: l.accent, borderRadius: 99, boxShadow: `0 0 14px ${l.accent}aa` }} />
+      </div>
     </div>
   );
 };
@@ -99,6 +113,7 @@ export const FlagView: React.FC<LV<FlagLayer>> = ({ layer: l, frame, fps, totalF
 
   return (
     <div
+      data-layer-id={l.id}
       style={{
         position: "absolute",
         left: x,
@@ -135,7 +150,8 @@ export const MarkerView: React.FC<LV<MarkerLayer>> = ({ layer: l, frame, fps, to
   if (tr.opacity < 0.01 || !project) return null;
 
   const { x, y } = project(l.anchor.lon, l.anchor.lat);
-  const sz = l.sizePx;
+  const sz = kfNum(l, "sizePx", l.sizePx, frame, totalFrames);
+  const glow = kfNum(l, "glow", l.glow, frame, totalFrames);
   const icon = l.emoji || MARKER_ICONS[l.icon] || "📍";
 
   // Animation modifiers
@@ -149,10 +165,11 @@ export const MarkerView: React.FC<LV<MarkerLayer>> = ({ layer: l, frame, fps, to
     ? (Math.floor(frame / 8) % 2 === 0 ? 1 : 0.3)
     : 1;
 
-  const glowSz = sz * 1.6 * (1 + l.glow * 0.4);
+  const glowSz = sz * 1.6 * (1 + glow * 0.4);
 
   return (
     <div
+      data-layer-id={l.id}
       style={{
         position: "absolute",
         left: x,
@@ -164,7 +181,7 @@ export const MarkerView: React.FC<LV<MarkerLayer>> = ({ layer: l, frame, fps, to
         fontFamily: displayFont(theme),
       }}
     >
-      {l.glow > 0 && l.ring && (
+      {glow > 0 && l.ring && (
         <div
           style={{
             position: "absolute",
@@ -175,11 +192,11 @@ export const MarkerView: React.FC<LV<MarkerLayer>> = ({ layer: l, frame, fps, to
             transform: "translate(-50%,-50%)",
             borderRadius: "50%",
             border: `${Math.max(2, sz * 0.06)}px solid ${l.color}`,
-            opacity: 0.4 * l.glow * (0.5 + 0.5 * Math.sin((frame / fps) * Math.PI * 2)),
+            opacity: 0.4 * glow * (0.5 + 0.5 * Math.sin((frame / fps) * Math.PI * 2)),
           }}
         />
       )}
-      <div style={{ fontSize: sz, lineHeight: 1, ...spin, filter: l.glow > 0 ? `drop-shadow(0 0 ${sz * l.glow * 0.3}px ${l.color})` : undefined }}>{icon}</div>
+      <div style={{ fontSize: sz, lineHeight: 1, ...spin, filter: glow > 0 ? `drop-shadow(0 0 ${sz * glow * 0.3}px ${l.color})` : undefined }}>{icon}</div>
       {l.label && (
         <div style={{ fontSize: sz * 0.28, fontWeight: 700, color: l.labelColor, marginTop: sz * 0.08, textShadow: textShadow(0.7), whiteSpace: "nowrap" }}>
           {l.label}

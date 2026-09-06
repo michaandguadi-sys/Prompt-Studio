@@ -27,6 +27,9 @@ const isPublic = createRouteMatcher([
   // and MapLibre fetch these with no Clerk session (headless Chromium has none).
   "/api/dem(.*)",
   "/api/sat(.*)",
+  // Webfont proxy — the headless render loads /api/fonts with no Clerk session;
+  // gated, it 302s to sign-in and every render falls back to system fonts.
+  "/api/fonts(.*)",
 ]);
 
 export default clerkMiddleware(async (auth, req) => {

@@ -1,0 +1,77 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Mapanisy on the guadiandmicha.com VPS — Hostinger KVM 2 (2 vCPU / 8 GB).
+# Verified against the live box: srv1569245 / 82.112.238.211.
+#
+# Use this file INSTEAD of docker-compose.yml here:
+#   docker compose -f docker-compose.vps.yml up -d --build
+#
+# Why it differs from docker-compose.yml:
+#
+#  1. Traefik, not Caddy, already terminates TLS on this box — and it runs with
+#     `network_mode: host`, discovering containers over the docker socket. So
+#     this service uses `network_mode: bridge` and NO compose network, exactly
+#     like the working guadiandmicha_site container next to it. Adding a custom
+#     network here would leave Traefik unable to reach it.
+#
+#  2. It publishes NO ports. Traefik reaches it on the bridge IP. Publishing
+#     would expose the app on the VPS IP over plain HTTP, bypassing TLS — and
+#     Docker's iptables rules bypass ufw, so a firewall would not close it.
+#
+#  3. Sized for 2 vCPU / 8 GB with ~2.7 GB already in use by the neighbouring
+#     site, Traefik and the Hostinger agents — not the 4 vCPU / 16 GB that
+#     docker-compose.yml assumes (its `memory: 12g` is meaningless here).
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  mapanisy:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_MAPBOX_TOKEN: ${NEXT_PUBLIC_MAPBOX_TOKEN}
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+    container_name: mapanisy
+    restart: unless-stopped
+
+    # Same as the working site container. Traefik is on the host network and
+    # routes to this container's 172.17.x.x address.
+    network_mode: bridge
+
+    env_file:
+      - .env.production
+
+    # Chromium composites frames in /dev/shm; the 64 MB default crashes it.
+    shm_size: 1gb
+
+    # 4 GB of ~5 GB available. Leaves headroom for the neighbouring site,
+    # Traefik, the Hostinger agents and the page cache.
+    mem_limit: 4g
+
+    environment:
+      # 2 vCPU. Pinned to 1 so a render can never take both cores and starve
+      # the web server — or the neighbouring site on the apex domain.
+      RENDER_CONCURRENCY: "1"
+
+    volumes:
+      - ./data/projects:/app/projects-v2
+      - ./data/renders:/app/.renders
+      - ./data/dev:/app/.dev-data
+
+    labels:
+      - traefik.enable=true
+      # TRAEFIK_RULE is the whole rule expression so several hostnames can be
+      # served by one router (Traefik needs `||` between them; a newline is NOT
+      # a separator — that is exactly the malformed label on agentbirdie-app
+      # that makes Traefik reject its route outright).
+      - traefik.http.routers.mapanisy.rule=${TRAEFIK_RULE}
+      - traefik.http.routers.mapanisy.entrypoints=websecure
+      - traefik.http.routers.mapanisy.tls=true
+      - traefik.http.routers.mapanisy.tls.certresolver=letsencrypt
+      - traefik.http.services.mapanisy.loadbalancer.server.port=3030
+
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3030/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 120s     # first boot is slow on 2 vCPU

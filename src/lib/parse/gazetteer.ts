@@ -44,16 +44,20 @@ export function continentOf(place: string): string | null {
 
 export const CITIES: string[] = [
   "Berlin", "Munich", "Hamburg", "Paris", "Lyon", "Marseille", "London", "Manchester", "Madrid", "Barcelona",
-  "Rome", "Milan", "Venice", "Lisbon", "Amsterdam", "Brussels", "Vienna", "Zurich", "Prague", "Warsaw",
+  "Rome", "Milan", "Venice", "Lisbon", "Porto", "Amsterdam", "Brussels", "Vienna", "Zurich", "Prague", "Warsaw",
   "Athens", "Istanbul", "Moscow", "Kyiv", "Stockholm", "Oslo", "Copenhagen", "Helsinki", "Dublin",
   "New York", "Los Angeles", "San Francisco", "Chicago", "Miami", "Toronto", "Mexico City",
   "Tokyo", "Osaka", "Kyoto", "Seoul", "Beijing", "Shanghai", "Hong Kong", "Bangkok", "Singapore",
   "Mumbai", "Delhi", "Dubai", "Cairo", "Cape Town", "Nairobi", "Sydney", "Melbourne", "Rio de Janeiro", "Buenos Aires", "Lima",
+  // Iconic creator destinations the living map can already plot (worldCoords) —
+  // so the parser recognises everything the map can render.
+  "Reykjavik", "Kathmandu", "Marrakech", "Guatemala City", "Honolulu", "Anchorage", "Santiago", "Auckland",
 ];
 
 export const REGIONS: string[] = [
   "Bavaria", "Patagonia", "Andalusia", "Tuscany", "Catalonia", "Scotland", "Wales", "Provence", "Normandy",
   "Tibet", "Siberia", "Kashmir", "Sicily", "Crimea", "Galicia", "Lapland", "Transylvania",
+  "Greenland", "Cook Islands",
 ];
 
 export const FEATURES: string[] = [
@@ -71,10 +75,14 @@ for (const p of [...COUNTRIES, ...CITIES, ...REGIONS, ...FEATURES]) PLACE_DISPLA
 
 /** Words the spell-fixer treats as valid (so it never "corrects" them). Built
  *  from place names (incl. their component words) + the action/style lexicon. */
-export const VOCAB = new Set<string>();
+/** Every component word of a known place, lowercased ("new york" → new, york) —
+ *  lets the spell-fixer tell a real place typo from a proper noun it shouldn't
+ *  snap to a common lexicon word ("Porto" must never become "north"). */
+export const PLACE_WORDS = new Set<string>();
 for (const p of [...COUNTRIES, ...CITIES, ...REGIONS, ...FEATURES, ...Object.keys(CONTINENTS)]) {
-  for (const w of p.toLowerCase().split(/\s+/)) VOCAB.add(w);
+  for (const w of p.toLowerCase().split(/\s+/)) PLACE_WORDS.add(w);
 }
+export const VOCAB = new Set<string>(PLACE_WORDS);
 for (const w of [
   // actions / camera / map verbs + nouns
   "highlight", "mark", "focus", "emphasize", "show", "color", "colour", "fill", "outline", "reveal", "display",

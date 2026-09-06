@@ -6,8 +6,24 @@ import { Sparkles, Layers, MapPin, Clapperboard, Palette, Route, ArrowRight } fr
 import { ProjectsGrid } from "@/components/home/ProjectsGrid";
 import { ImportTrackBox } from "@/components/home/ImportTrackBox";
 import { GenerateExperience } from "@/components/home/GenerateExperience";
+import { Showcase } from "@/components/home/Showcase";
 
 const SERIF = "Newsreader, 'Playfair Display', Georgia, serif";
+
+/** Answers the visitor's real objection — "why not just use the free tools?" —
+ *  with the honest contrast against the two things they'd actually consider. */
+const COMPARE: { row: string; ges: boolean | string; ae: boolean | string; us: boolean | string }[] = [
+  { row: "Direct a film from one sentence", ges: false, ae: false, us: true },
+  { row: "In the browser — nothing to install", ges: true, ae: false, us: true },
+  { row: "Time to your first film", ges: "Hours", ae: "Days", us: "~2 min" },
+  { row: "Data maps · GPS flythroughs · live Earth", ges: false, ae: "Manual", us: true },
+  { row: "Unlimited 4K render", ges: "Frames → AE", ae: "Yes", us: true },
+  { row: "Cost", ges: "Free", ae: "~$60 + AE $23/mo", us: "Free · $7.99/mo" },
+];
+const CmpCell: React.FC<{ v: boolean | string; us?: boolean }> = ({ v, us }) =>
+  v === true ? <span className={us ? "text-emerald-300" : "text-emerald-400/70"}>✓</span>
+  : v === false ? <span className="text-white/20">—</span>
+  : <span className={us ? "font-medium text-white/90" : "text-white/50"}>{v}</span>;
 
 /**
  * Homepage — ONE continuous dark cinematic canvas. The immersive GENERATE
@@ -49,7 +65,7 @@ export const HomeContent: React.FC = () => {
               <p className="text-[12px] text-white/40">Pick up where you left off.</p>
             </div>
             <Link
-              href="/studio2"
+              href="/studio2?blank=1"
               className="inline-flex items-center gap-1.5 text-xs text-white/40 transition-colors hover:text-[#aab4ff]"
             >
               <Layers size={12} /> Blank map
@@ -58,12 +74,23 @@ export const HomeContent: React.FC = () => {
           <ProjectsGrid />
         </div>
 
+        {/* Showcase — finished, polished films to open & play in one click */}
+        <div className="mx-auto max-w-6xl px-6 pt-16">
+          <div className="mb-5">
+            <h2 className="text-[20px] font-medium text-white/90" style={{ fontFamily: SERIF }}>
+              Start from a finished story
+            </h2>
+            <p className="text-[12px] text-white/40">Real films across styles — open one to play, then make it yours.</p>
+          </div>
+          <Showcase />
+        </div>
+
         {/* Feature highlights — what makes it premium, in one calm row */}
         <div className="mx-auto max-w-5xl px-6 pt-16">
           <div className="grid gap-4 sm:grid-cols-3">
             {[
               { icon: <Clapperboard size={15} />, title: "Directed, not templated", body: "The AI plans the story, camera and timing like a documentary editor — one continuous cinematic take." },
-              { icon: <Palette size={15} />, title: "17 professional map styles", body: "From Earth Documentary to Vintage Atlas — balanced palettes and cinematic grades, one click each." },
+              { icon: <Palette size={15} />, title: "23 professional map styles", body: "From Earth Documentary to Vintage Atlas — balanced palettes and cinematic grades, one click each." },
               { icon: <Route size={15} />, title: "One-click 4K render", body: "Render in the cloud or on your machine, with live progress and a queue — landscape, vertical or square." },
             ].map((f) => (
               <div key={f.title} className="rounded-2xl border border-white/[0.08] bg-white/[0.04] p-5 backdrop-blur-sm">
@@ -72,6 +99,38 @@ export const HomeContent: React.FC = () => {
                 <p className="mt-1 text-[12px] leading-relaxed text-white/40">{f.body}</p>
               </div>
             ))}
+          </div>
+        </div>
+
+        {/* How we compare — answers "why not just use the free tools?" */}
+        <div className="mx-auto max-w-5xl px-6 pt-16">
+          <div className="mb-5">
+            <h2 className="text-[20px] font-medium text-white/90" style={{ fontFamily: SERIF }}>
+              Why not just use the free tools?
+            </h2>
+            <p className="text-[12px] text-white/40">The same cinematic map moves the pros make in After Effects — directed by AI, in your browser, from one sentence.</p>
+          </div>
+          <div className="overflow-x-auto rounded-2xl border border-white/[0.08] bg-white/[0.03] backdrop-blur-sm">
+            <table className="w-full min-w-[560px] border-collapse text-left text-[12.5px]">
+              <thead>
+                <tr>
+                  <th className="px-4 py-3"></th>
+                  <th className="px-4 py-3 font-medium text-white/40">Google Earth Studio</th>
+                  <th className="px-4 py-3 font-medium text-white/40">After Effects + GeoLayers</th>
+                  <th className="px-4 py-3 font-semibold text-[#aab4ff]">Mapanisy</th>
+                </tr>
+              </thead>
+              <tbody>
+                {COMPARE.map((c) => (
+                  <tr key={c.row} className="border-t border-white/[0.06]">
+                    <td className="px-4 py-2.5 text-white/65">{c.row}</td>
+                    <td className="px-4 py-2.5 tabular-nums"><CmpCell v={c.ges} /></td>
+                    <td className="px-4 py-2.5 tabular-nums"><CmpCell v={c.ae} /></td>
+                    <td className="px-4 py-2.5 bg-iris/[0.06] tabular-nums"><CmpCell v={c.us} us /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
 

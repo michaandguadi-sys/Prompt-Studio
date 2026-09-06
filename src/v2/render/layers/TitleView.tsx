@@ -14,10 +14,13 @@ export const TitleView: React.FC<LV<TitleLayer>> = ({ layer: l, frame, fps, tota
   const hAlign = l.align === "left" ? "flex-start" : l.align === "right" ? "flex-end" : "center";
   const ts = textShadow((l as any).shadow ?? 0.55);
   const tpl = l.template;
-  const headSize = tpl === "impact" ? 160 : tpl === "kicker" ? 116 : 122;
+  // Length-aware type scale: a 6-word headline must never become a wall of
+  // text spanning the frame — long titles step down smoothly (min 55%).
+  const fit = Math.max(0.55, Math.min(1, 24 / Math.max(12, l.text.length)));
+  const headSize = (tpl === "impact" ? 160 : tpl === "kicker" ? 116 : 122) * fit;
   const headWeight = tpl === "impact" ? 800 : tpl === "split" ? 700 : 300;
   const bar = (w: number, h: number) => <div style={{ height: h, width: w, marginTop: 24, background: l.accent, borderRadius: h / 2, marginLeft: hAlign === "center" ? "auto" : 0, marginRight: hAlign === "center" ? "auto" : 0, boxShadow: `0 0 18px ${l.accent}88` }} />;
-  const headline = <div style={{ fontSize: headSize, fontWeight: headWeight, color: l.color, lineHeight: 1.02, letterSpacing: tpl === "impact" ? -2 : -1, textShadow: ts, ...outlineStyle((l as any).outline, headSize) }}>{l.text}</div>;
+  const headline = <div style={{ fontSize: headSize, fontWeight: headWeight, color: l.color, lineHeight: 1.05, letterSpacing: tpl === "impact" ? -2 * fit : -1, maxWidth: "22em", textWrap: "balance" as any, textShadow: ts, ...outlineStyle((l as any).outline, headSize) }}>{l.text}</div>;
   const sub = l.sub ? <div style={{ fontSize: tpl === "kicker" ? 48 : 40, fontWeight: tpl === "kicker" ? 800 : 600, letterSpacing: 6, textTransform: "uppercase", color: l.accent, marginBottom: 16, textShadow: ts }}>{l.sub}</div> : null;
   return (
     <AbsoluteFill style={{ justifyContent: vAlign, alignItems: hAlign, padding: "10%", pointerEvents: "none" }}>

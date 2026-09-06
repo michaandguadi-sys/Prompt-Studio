@@ -14,7 +14,7 @@ import { auth } from "@clerk/nextjs/server";
 import { db, schema } from "@/lib/db";
 import { eq } from "drizzle-orm";
 import { stripe } from "@/lib/stripe";
-import { TIERS } from "@/lib/tiers";
+import { TIERS, tierFromStripePrice } from "@/lib/tiers";
 
 export async function POST(req: Request) {
   if (!stripe) return Response.json({ error: "Stripe not configured" }, { status: 503 });
@@ -28,13 +28,17 @@ export async function POST(req: Request) {
     return Response.json({ error: "priceId is required" }, { status: 400 });
   }
 
-  // Only allow price IDs that map to a known tier — reject arbitrary Stripe prices
+  // Only allow price IDs that map to a known tier — reject arbitrary Stripe
+  // prices. Includes the annual (yearly) Creator price alongside the monthly.
   const knownPriceIds = Object.values(TIERS)
-    .map((t) => t.stripePriceId)
+    .flatMap((t) => [t.stripePriceId, t.stripePriceIdAnnual])
     .filter(Boolean);
   if (!knownPriceIds.includes(priceId)) {
     return Response.json({ error: "Unknown priceId" }, { status: 400 });
   }
+  // The Pro tier is a ONE-TIME (lifetime) purchase; everything else recurs.
+  const tier = tierFromStripePrice(priceId);
+  const isLifetime = tier ? TIERS[tier].billing === "lifetime" : false;
 
   // Look up the user + existing subscription
   const [user] = await db.select().from(schema.users)
@@ -55,24 +59,37 @@ export async function POST(req: Request) {
       metadata: { clerkId, userId: user.id },
     });
     customerId = customer.id;
-    // Persist immediately so we don't create duplicates on retries
+    // Persist immediately so we don't create duplicates on retries — and if the
+    // user has no subscription row yet (webhook-race, or operating on the free
+    // fallback), CREATE one now so the customer id sticks and the post-payment
+    // webhook grant has a row to land on.
     if (sub) {
       await db.update(schema.subscriptions)
         .set({ stripeCustomerId: customerId, updatedAt: new Date() })
         .where(eq(schema.subscriptions.id, sub.id));
+    } else {
+      await db.insert(schema.subscriptions).values({
+        userId: user.id,
+        tier: "free",
+        status: "active",
+        minutesLimit: TIERS.free.minutesPerMonth,
+        stripeCustomerId: customerId,
+      });
     }
   }
 
   const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
+    mode: isLifetime ? "payment" : "subscription",
     customer: customerId,
     line_items: [{ price: priceId, quantity: 1 }],
     success_url: `${appUrl}/dashboard?upgraded=1`,
     cancel_url:  `${appUrl}/pricing`,
-    metadata: { userId: user.id },
-    subscription_data: {
-      metadata: { userId: user.id, clerkId },
-    },
+    // tier travels on the session so the webhook can grant lifetime access on
+    // `checkout.session.completed` (one-time payments create no subscription).
+    metadata: { userId: user.id, tier: tier ?? "" },
+    ...(isLifetime
+      ? {}
+      : { subscription_data: { metadata: { userId: user.id, clerkId } } }),
     allow_promotion_codes: true,
   });
 

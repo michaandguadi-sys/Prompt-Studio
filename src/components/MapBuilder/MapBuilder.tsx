@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { useStudio } from "@/store/studio";
+import { confirmDialog } from "@/v2/ui/dialogs";
 import { Field, Input, NumberInput, Section } from "@/components/ui/Field";
 import { CameraWaypoints } from "./CameraWaypoints";
 import { HighlightEditor } from "./HighlightEditor";
@@ -113,8 +114,8 @@ export const MapBuilder: React.FC = () => {
                   Label {i + 1} · {lab.layout}
                 </span>
                 <button
-                  onClick={() => {
-                    if (confirm(`Delete label "${lab.primary || "untitled"}"?`)) {
+                  onClick={async () => {
+                    if (await confirmDialog({ title: `Delete label "${lab.primary || "untitled"}"?`, confirmLabel: "Delete", danger: true })) {
                       patchScene({ labels: scene.labels.filter((_, idx) => idx !== i) });
                     }
                   }}

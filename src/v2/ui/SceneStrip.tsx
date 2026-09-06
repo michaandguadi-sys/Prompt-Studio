@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { Plus, Copy, Trash2, ChevronLeft, ChevronRight, Film, ChevronDown, ChevronUp, Play, Pencil } from "lucide-react";
 import { useEditor } from "../store/editor";
+import { confirmDialog } from "./dialogs";
 import { SequenceCommandBar } from "./SequenceCommandBar";
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
@@ -80,7 +81,7 @@ export const SceneStrip: React.FC = () => {
                   <button onClick={(e) => { e.stopPropagation(); moveScene(sc.id, 1); }} disabled={i === scenes.length - 1} className="text-graphite/30 hover:text-graphite disabled:opacity-20"><ChevronRight size={11} /></button>
                   <button onClick={(e) => { e.stopPropagation(); duplicateScene(sc.id); }} title="Duplicate scene" className="text-graphite/30 hover:text-iris"><Copy size={10} /></button>
                   {scenes.length > 1 && (
-                    <button onClick={(e) => { e.stopPropagation(); if (confirm(`Delete "${sc.name}"?`)) removeScene(sc.id); }} title="Delete scene" className="text-graphite/30 hover:text-red-400"><Trash2 size={10} /></button>
+                    <button onClick={async (e) => { e.stopPropagation(); if (await confirmDialog({ title: `Delete "${sc.name}"?`, confirmLabel: "Delete", danger: true })) removeScene(sc.id); }} title="Delete scene" className="text-graphite/30 hover:text-red-400"><Trash2 size={10} /></button>
                   )}
                 </div>
               </div>

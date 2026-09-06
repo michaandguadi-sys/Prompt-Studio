@@ -22,7 +22,9 @@ import { sharedBorderLine, sampleAlong, bboxOfGeos } from "@/lib/geoBorders";
 import { resolveRegion, detectRegion, cameraForBbox } from "@/lib/geoRegions";
 import { signatureStyleById } from "@/lib/presets/signatureStyles";
 import { map3dStyleById } from "@/lib/presets/map3dStyles";
+import { detectProStyle } from "@/lib/presets/proMapStyles";
 import { aiComplete, resolveAIConfig, configFromUser, type AIConfig } from "@/lib/ai/providers";
+import { _registerPlanBuilder } from "@/lib/planBuilder";
 import { DIRECTOR_PRINCIPLES, SOURCE_AND_VERIFY, COHESION_LAW, ARCHETYPES, matchArchetype } from "@/lib/ai/directorDoctrine";
 import { interpret, planStory, buildFramework, frameworkInstruction, type ArcContext } from "@/lib/parse";
 import { normalizeAddon } from "@/lib/addons";
@@ -101,7 +103,7 @@ type PlanLayer =
   // An editorial leader-line callout pointing at a place.
   | ({ kind: "annotation"; place: string; text: string; sub?: string; side?: "top" | "bottom" | "left" | "right" | "auto" } & Styled & Timed)
   // A network of arcs: hub-and-spoke (hub → places) or a chain (places in order).
-  | ({ kind: "connections"; hub?: string; places: string[]; mode?: "hub" | "chain" } & Styled & Timed)
+  | ({ kind: "connections"; hub?: string; places: string[]; mode?: "hub" | "chain"; arrowheads?: boolean; pulse?: boolean } & Styled & Timed)
   // Darken everything except a circle on `place` to force the eye there.
   | ({ kind: "spotlight"; place: string } & Styled & Timed)
   // COMPOSITE: a clash between two countries — auto-highlights BOTH (opposing
@@ -138,7 +140,10 @@ type PlanLayer =
   // the documentary ticker ("SEP 1939 → MAY 1945", "DAY 1 → DAY 872").
   | ({ kind: "timestamp"; start?: string; end?: string; format?: "year" | "month-year" | "full"; dayStart?: number; dayEnd?: number; prefix?: string; text?: string; position?: string } & Styled & Timed)
   // CINEMATIC WEATHER: deterministic particles over the whole frame.
-  | ({ kind: "atmosphere"; effect: "snow" | "rain" | "embers" | "dust" | "fog"; density?: number; wind?: number } & Styled & Timed);
+  | ({ kind: "atmosphere"; effect: "snow" | "rain" | "embers" | "dust" | "fog"; density?: number; wind?: number } & Styled & Timed)
+  // AI-DRAWN STICKER: the model authors ORIGINAL inline-SVG art (b-roll) —
+  // rendered via <img src=data:>, so scripts can never execute by construction.
+  | ({ kind: "sticker"; svg: string; place?: string; sizePx?: number; label?: string } & Styled & Timed);
 export type Plan = {
   title: string; subtitle?: string; durationSec: number; aspect?: "16:9" | "9:16" | "1:1";
   basemapStyle?: string; terrain?: boolean; buildings3d?: boolean; focus: string; mood?: string; motion?: string;
@@ -184,7 +189,7 @@ const MOTIONS = ["fly-in", "zoom-out", "orbit", "push-in", "pan", "hold"];
 const SYSTEM = `You are the director of "Mapanisy", a cinematic MAP-animation studio (Vox / Johnny Harris style). Translate the user's idea into ONE finished, well-composed, art-directed map animation. Think like an editor: what is the single visual story, where does the eye go, what's the one focal point?
 
 Output ONLY minified JSON (no prose, no markdown) of EXACTLY this shape:
-{"title":str(≤30),"subtitle":str(≤48),"durationSec":num(5-12),"aspect":"16:9"|"9:16"|"1:1","basemapStyle":"dark"|"light"|"satellite"|"streets"|"outdoors"|"historical","mapYear":"1880 (start era, historical only)","mapYearEnd":"1920 (end era — animates year sweep + on-screen counter; historical only)","terrain":bool,"focus":str,"motion":"fly-in"|"zoom-out"|"orbit"|"push-in"|"pan"|"hold","cameraStops":[str],"mood":"conflict"|"historical"|"trade"|"empire"|"political"|"arctic"|"neutral","palette":"Default"|"Vox Editorial"|"Arctic Cold"|"Conflict Red"|"Trade Green"|"Political Violet"|"Classic Mono","priority":"camera"|"route"|"highlight","map3dStyle":"(optional look) PRO: clean-minimal|apple-light|apple-dark|earth-documentary|natgeo|satellite-cinematic|adventure|hiking|luxury-travel|editorial|filmic|midnight|desert|winter|ocean|vintage-atlas|modern-monochrome · CREATIVE: holographic|neon-noir|miniature|blueprint|obsidian|molten|aurora|crystal-ice|papercraft|war-room|sakura|emerald|golden-hour|monochrome","map3dCustom":{"(optional — INVENT a bespoke 3D world when no preset fits)":"","landColor":"#hex","waterColor":"#hex","buildingColor":"#hex","buildingOpacity":0-1,"buildingHeightMult":0.2-8,"buildingGradient":bool,"boundaryGlow":"#hex","terrain":bool,"terrainStrength":0-5,"bgColor":"#hex","tintColor":"#hex","tintOpacity":0-1,"vignette":0-0.7,"pitch":0-84},"look":{"vignette":0-0.7,"grain":0-0.3,"texture":"none"|"paper","mapFilter":"none"|"antique"|"noir"|"sepia"},"layers":[...]}
+{"title":str(≤30),"subtitle":str(≤48),"durationSec":num(5-12),"aspect":"16:9"|"9:16"|"1:1","basemapStyle":"dark"|"light"|"satellite"|"streets"|"outdoors"|"historical","mapYear":"1880 (start era, historical only)","mapYearEnd":"1920 (end era — animates year sweep + on-screen counter; historical only)","terrain":bool,"focus":str,"motion":"fly-in"|"zoom-out"|"orbit"|"push-in"|"pan"|"hold","cameraStops":[str],"mood":"conflict"|"historical"|"trade"|"empire"|"political"|"arctic"|"neutral","palette":"Default"|"Vox Editorial"|"Arctic Cold"|"Conflict Red"|"Trade Green"|"Political Violet"|"Classic Mono","priority":"camera"|"route"|"highlight","map3dStyle":"(optional look) PRO: cartograph|apple-light|apple-dark|earth-documentary|natgeo|satellite-cinematic|adventure|hiking|luxury-travel|editorial|filmic|midnight|desert|winter|ocean|vintage-atlas|modern-monochrome|metro-night|pastel-city|nordic-light|crimson-atlas|deep-ocean|sunrise-terrain|dark-editorial|satellite-night|risograph|thermal|drafting|synthwave|copperplate · CREATIVE: holographic|neon-noir|miniature|blueprint|obsidian|molten|aurora|crystal-ice|papercraft|war-room|sakura|emerald|golden-hour|monochrome","map3dCustom":{"(optional — INVENT a bespoke 3D world when no preset fits)":"","landColor":"#hex","waterColor":"#hex","buildingColor":"#hex","buildingOpacity":0-1,"buildingHeightMult":0.2-8,"buildingGradient":bool,"boundaryGlow":"#hex","terrain":bool,"terrainStrength":0-5,"bgColor":"#hex","tintColor":"#hex","tintOpacity":0-1,"vignette":0-0.7,"pitch":0-85},"look":{"vignette":0-0.7,"grain":0-0.3,"texture":"none"|"paper","mapFilter":"none"|"antique"|"noir"|"sepia"},"layers":[...]}
 
 layer kinds (refer to places by NAME — coords are resolved for you):
  {"kind":"highlight","place":"France","fill":"flag"|"solid"|"hatch"|"crosshatch"|"stripes"|"dots","mood":"conflict","label":"optional ON-MAP text"}
@@ -195,7 +200,7 @@ layer kinds (refer to places by NAME — coords are resolved for you):
  {"kind":"chart","variant":"counter","value":67000000,"suffix":" people","label":"population"}
  {"kind":"marker","place":"Pearl Harbor" OR "between":["India","Pakistan"],"icon":"swords"|"explosion"|"fire"|"skull"|"alert"|"radiation"|"oil"|"money"|"anchor"|"crown"|"target"|"landmark","label":"optional","emoji":"optional override"}
  {"kind":"annotation","place":"Suez Canal","text":"CHOKEPOINT","sub":"optional","side":"top"|"bottom"|"left"|"right"|"auto"}
- {"kind":"connections","hub":"London","places":["New York","Cairo","Mumbai"],"mode":"hub"|"chain"}
+ {"kind":"connections","hub":"London","places":["New York","Cairo","Mumbai"],"mode":"hub"|"chain","arrowheads":bool,"pulse":bool}  ← set "arrowheads":true for DIRECTIONAL flows (backer→proxy support, an advance, a supply line — the Vox "arrow INTO the country" look); leave false for a neutral network/web. "pulse":true sends light travelling along the arcs (aid/influence flowing in). hub → each place; chain → A→B→C in order, arrow at each step.
  {"kind":"spotlight","place":"Berlin"}
  {"kind":"conflict","a":"India","b":"Pakistan","swords":4}  ← AUTO: highlights BOTH countries in opposing colours, draws the REAL shared border glowing, and places crossing-swords ALONG it. Use for ANY clash/war/dispute/tension between two countries.
  {"kind":"regionFlags","region":"Europe"}  ← AUTO: drops EVERY country in the region as a flag, popped in one-by-one, camera framed on the region. Regions with flags: Europe, Scandinavia, Baltics, Balkans.
@@ -206,6 +211,7 @@ layer kinds (refer to places by NAME — coords are resolved for you):
  {"kind":"flows","hub":"London, UK","places":["New York","Mumbai","Sydney"],"weights":[450,320,180],"mode":"hub"}  ← WEIGHTED FLOWS: arc thickness = volume. Use when quantities differ significantly (trade $450B vs $180B). Shows MAGNITUDE not just connection. Add "pulse":true style for live-trade feel.
  {"kind":"radius","place":"Pyongyang, North Korea","radiusKm":1500,"rings":3,"mode":"grow","color":"#ff5a44"}  ← GEODESIC RANGE RINGS: true distance circles ("within 500 km"). ALWAYS use for: missile/radar/weapon range, blast radius, evacuation zone, earthquake epicenter (mode:"ripple" = endless sonar pulses), airport/port coverage, "everything within X km/hours". The most journalistic way to show REACH and PROXIMITY. Labels show real distances on each ring.
  {"kind":"timestamp","start":"1939-09-01","end":"1945-05-08","format":"month-year","position":"top-right"}  ← ANIMATED DATE TICKER: the date ADVANCES with the film — the documentary time-passing device. ALWAYS add for: wars, pandemics, expeditions, empire rise/fall, any story spanning months/years. Day-counter variant: {"kind":"timestamp","dayStart":1,"dayEnd":872,"prefix":"DAY"} for sieges/disasters ("DAY 872 of the siege"). One per composition.
+ {"kind":"sticker","svg":"<svg viewBox='0 0 100 100'>…</svg>","place":"Lisbon","sizePx":150,"label":"caravel"}  ← DRAW YOUR OWN B-ROLL: when NO existing primitive captures the story's soul, you may AUTHOR original flat vector art as inline SVG (≤1800 chars, viewBox required, flat 2-4 colour shapes, no text) and place it on the map — a caravel for an age-of-discovery story, a compass rose, a mammoth, an oil derrick, a paper plane. This is your creative free will: invent the perfect visual instead of settling. Use AT MOST one per composition, and only when it genuinely elevates the story.
  {"kind":"atmosphere","effect":"snow","density":0.5,"wind":0.3}  ← CINEMATIC WEATHER over the frame: "snow" (winter campaigns, arctic), "rain" (monsoon, storms), "embers" (war zones, wildfires — pairs with marker icon:"fire"), "dust" (deserts, drought), "fog" (mystery, dawn battles). Sets MOOD instantly; use ONE, subtle (density 0.3-0.6), when the story has a strong environmental character.
  {"kind":"earthlayer","dataset":"ndvi","date":"2024-01-01","opacity":0.75,"label":"Vegetation 2024"}  ← EARTH OBSERVATION: overlays real NASA satellite data on the map. ALWAYS use for: deforestation, glaciers melting, wildfires, urban sprawl, drought, sea-level, biodiversity, land cover change. Datasets: "true-color" (daily satellite imagery), "ndvi" (vegetation index — green=healthy forest, brown=lost/dry), "nightlights" (city light growth, urbanization), "fire" (thermal hotspots), "sea-temp" (ocean warming), "snow" (ice/snow extent), "aerosol" (pollution/smoke). For before/after change detection add compareDataset+compareDate (different year). Date format: YYYY-MM-DD. Pairs with basemapStyle:"satellite" and terrain:true for maximum realism. This makes environmental map journalism genuinely data-driven, not illustrative.
 ANY layer may add "style":{...} to art-direct exact fields — e.g. highlight {"fillColor":"#c0392b","extrude":18,"glowColor":"#ff4030"}, route {"color":"#e67e22","dashStyle":"dashed","glow":0.8}, marker {"color":"#ff3030","sizePx":150}.
@@ -255,7 +261,7 @@ FRAMING & STYLE DISCIPLINE — pick the move + style that SUIT the content (the 
  • A JOURNEY / route → basemapStyle:"dark", motion:"fly-in" through cameraStops, moderate tilt.
  • HISTORICAL → basemapStyle:"historical" or the antique look; keep the camera flatter (old maps read top-down).
  Match basemapStyle to the subject EVERY time — a wrong style (satellite under data, flat dark for a skyline) is the #1 thing that makes it look amateur.
- • MAP STYLE via "map3dStyle" — PREFER the PROFESSIONAL collection for most stories (they read like premium travel documentaries): "earth-documentary"/"satellite-cinematic" for landscapes+terrain, "natgeo"/"vintage-atlas" for history/exploration, "editorial"/"clean-minimal" for news/data, "apple-light"/"apple-dark" for modern product-grade looks, "adventure"/"hiking" for outdoor journeys, "luxury-travel"/"filmic"/"midnight" for mood pieces, "desert"/"winter"/"ocean" when the geography matches, "modern-monochrome" for stark editorial. The CREATIVE worlds (holographic, neon-noir, miniature, blueprint, molten, aurora, war-room, sakura, …) are for deliberately stylised pieces — use only when the brief calls for that energy; best on a CITY reveal, pairs with motion:"orbit"/"push-in".
+ • MAP STYLE via "map3dStyle" — PREFER the PROFESSIONAL collection for most stories (they read like premium travel documentaries): "earth-documentary"/"satellite-cinematic" for landscapes+terrain, "natgeo"/"vintage-atlas" for history/exploration, "editorial" for news/data, "cartograph" for adventure/expedition/history with a hand-drawn survey-atlas feel (parchment + 3D terrain + a lat/long grid + ink borders), "dark-editorial" for hard news / geopolitics / conflict (red country borders, grey streets — the newsroom look), "satellite-night" for a dramatic earth-at-night global opener or a space-view reveal, "apple-light"/"apple-dark" for modern product-grade looks, "adventure"/"hiking" for outdoor journeys, "luxury-travel"/"filmic"/"midnight" for mood pieces, "desert"/"winter"/"ocean" when the geography matches, "modern-monochrome" for stark editorial, "risograph" for a bold poster/zine two-ink print, "thermal" for a dramatic infrared magma-relief reveal, "drafting" for an architect's cyan-blueprint-on-cream gridded look. The CREATIVE worlds (holographic, neon-noir, miniature, blueprint, molten, aurora, war-room, sakura, …) are for deliberately stylised pieces — use only when the brief calls for that energy; best on a CITY reveal, pairs with motion:"orbit"/"push-in".
  • INVENT A 3D WORLD: when the story has a strong colour identity that no preset nails (e.g. "a toxic green wasteland", "a royal purple empire", "a frozen crimson tundra"), set "map3dCustom" with your own hexes — landColor, waterColor, buildingColor (+ buildingHeightMult/Gradient), boundaryGlow, terrain, bgColor/tintColor, pitch. Be bold and cohesive; the schema clamps anything out of range. Use a preset OR map3dCustom, not both.
 
 8. PLACE ACCURACY (critical — the map MUST land on the right spot). Every place name you emit is geocoded literally, so be UNAMBIGUOUS:
@@ -335,19 +341,26 @@ const ADDON_INSTRUCTION = `\n\n══ OPTIONAL — INVENT A REUSABLE FEATURE (ad
 
 const withDoctrine = (base: string) => `${base}${DOCTRINE}${BRIEF_INSTRUCTION}${ADDON_INSTRUCTION}`;
 
-/** SIMPLE REQUEST MODE — the lightweight default for direct, non-story prompts.
- *  No documentary expansion, no deep research, no invented context: the user
- *  already knows what they want. Deep research is reserved for prompts that ask
- *  for it (or genuinely need factual grounding). */
-const SIMPLE_MODE = `\n\n══ SIMPLE REQUEST — keep it light ══\nThis is a direct, simple request: the user already knows exactly what they want. Do NOT expand it into a documentary. No research beyond resolving the named places, no extra "context" layers, no invented statistics, dates, or backstory. Produce exactly the requested visual: AT MOST 4 layers, ONE clean intentional camera move, a cohesive look, and at most one short title (only if a heading genuinely helps). Elegant simplicity wins. Include only a one-line "brief": {"thesis":"<what this shows>","angle":"","archetype":"","facts":[],"caveats":[],"disputed":[]}.`;
+/** FAITHFUL MODE — the DEFAULT for every prompt that isn't an explicit request
+ *  for a documentary/story. Build EXACTLY what the creator described, concisely.
+ *  No research, no invented context, no story expansion — their idea, cleanly
+ *  animated. This is the fix for "it's always way too long / not what I asked". */
+const FAITHFUL_MODE = `\n\n══ BUILD EXACTLY WHAT THEY ASKED — faithful & concise (this is NOT a documentary) ══
+The creator described a SPECIFIC animation. Build THAT — every element they named, and nothing they didn't.
+• FAITHFUL: animate precisely what the prompt says. Do NOT add research, statistics, dates, timestamps, extra "context" beats, narration, backstory, or a second story they didn't ask for. If they didn't mention it, it doesn't go in.
+• SHORT: durationSec 6-11 — the shortest length that shows their idea clearly, as ONE continuous camera move. Never 15+ unless they explicitly asked for a long piece.
+• FEW LAYERS — only what the prompt implies, AT MOST 5: "highlight France" → a highlight (+ maybe one title). "flight from A to B" → a route. "show Tokyo" → a city push-in + one pin. Never pad with layers they didn't request.
+• THEIR STYLE, EXACTLY: if they named a look / colour / mood / style, use it (map3dStyle, palette, colours). Match it; don't override with your own taste.
+• At most ONE short title, and only if it helps. Prefer showing over writing.
+• brief: {"thesis":"<what this shows>","angle":"","archetype":"","facts":[],"caveats":[],"disputed":[]}.
+A clean 8-second animation that IS their idea beats a 30-second documentary that isn't. Restraint wins.`;
 
-/** True when a prompt should get the lightweight path: short, direct, ≤2 places,
- *  and no signal that the user wants a researched story. */
-function isSimpleIntent(idea: string, locationCount: number): boolean {
-  if (idea.length >= 140) return false;
-  if (locationCount > 2) return false;
-  const RESEARCHY = /documentar|research|story|history|histor|explain|why\s|how\s|war|battle|empire|evolution|crisis|conflict|migra|trade|econom|gdp|population|statistic|data|timeline|deep|fact|journal/i;
-  return !RESEARCHY.test(idea);
+/** TRUE only when the creator EXPLICITLY wants a researched documentary / multi-
+ *  chapter story / historical explainer — the only case that earns the long,
+ *  research-driven pipeline. A prompt merely mentioning "war" or "trade" or being
+ *  a few sentences long is NOT a documentary request; it's built faithfully. */
+function wantsDocumentary(idea: string): boolean {
+  return /\b(document(a|ary)|the (history|story|rise|fall|origins?|evolution|saga|making|collapse|decline)( and (fall|rise|decline|collapse))? of|tell (me )?(the|a|its) story|explain (why|how|the)|deep[-\s]?dive|full story|over the (years|centuries|decades|ages)|through (the )?(centuries|history|time|ages)|timeline of|chapter by chapter|beat[-\s]by[-\s]beat|step[-\s]by[-\s]step|the (whole|entire) story|how .{0,40}(happened|unfolded|began|came to be|rose|fell|collapsed|spread|conquered)|why .{0,40}(happened|matters|collapsed|fell|rose))\b/i.test(idea);
 }
 
 /* ── Phase 1: Story Director ─────────────────────────────────────────────────
@@ -364,7 +377,7 @@ type DirectorBeat = {
   pacing?: "slow" | "medium" | "fast";
   cameraIntent?: "establish" | "explore" | "focus" | "reveal" | "hero";
   zoom?: number;           // 2–14
-  pitch?: number;          // 0–75 degrees
+  pitch?: number;          // 0–85 degrees (85 = maplibre 4.x max — near-horizon look-ahead)
   bearing?: number;        // -30–30
   motion?: string;         // fly-in | zoom-out | push-in | orbit | hold
   layers: string[];        // plain English layer descriptions in geography→emphasis→text order
@@ -453,7 +466,7 @@ ENERGY (emotional charge → camera language):
 • "building" → momentum rising. pitch 15-35°, push-in. 4-7s.
 • "tension"  → tight, urgent. pitch 30-50°. 3-5s.
 • "reveal"   → the key moment. Punch close OR sudden wide. 3-6s.
-• "payoff"   → hero shot. pitch 50-75°, slow hold or orbit. 5-10s.
+• "payoff"   → hero shot. pitch 50-85°, slow hold or orbit; 75-85° only for sweeping mountain/city look-ahead reveals. 5-10s.
 
 PACING (duration rhythm):
 • "slow" → 6-10s. Layers stagger 0.5s apart.
@@ -484,7 +497,7 @@ LAYER ORDER — SACRED. Within every beat:
 Never put a title before geography in the same beat.
 
 ━━━ OUTPUT — JSON only, no prose ━━━
-{"inputType":"voiceover|idea|brief","arc":"journey|reveal|contrast|scale|data|conflict","thesis":"≤20 words","totalSec":8-30,"palette":"Default|Vox Editorial|Arctic Cold|Conflict Red|Trade Green|Political Violet|Classic Mono","mapStyle":"dark|light|satellite|outdoors|historical","look":{"mapFilter":"none|antique|noir","vignette":0.3-0.6},"beats":[{"title":"≤20 CHARS","narration":"exact voiceover line or vivid invented narrator sentence","focus":"Precise, Country-qualified place name","energy":"calm|building|tension|reveal|payoff","pacing":"slow|medium|fast","cameraIntent":"establish|explore|focus|reveal|hero","zoom":2-14,"pitch":0-75,"bearing":-30-30,"motion":"fly-in|zoom-out|push-in|orbit|hold","layers":["GEOGRAPHY first","EMPHASIS second","TEXT last"],"entities":[{"place":"Full Name, City, Region, Country","value":NUMBER,"label":"≤15 chars"}],"entityMetric":"Annual Visitors","entityUnit":"visitors/yr","entityStagger":0.9}]}
+{"inputType":"voiceover|idea|brief","arc":"journey|reveal|contrast|scale|data|conflict","thesis":"≤20 words","totalSec":8-30,"palette":"Default|Vox Editorial|Arctic Cold|Conflict Red|Trade Green|Political Violet|Classic Mono","mapStyle":"dark|light|satellite|outdoors|historical","look":{"mapFilter":"none|antique|noir","vignette":0.3-0.6},"beats":[{"title":"≤20 CHARS","narration":"exact voiceover line or vivid invented narrator sentence","focus":"Precise, Country-qualified place name","energy":"calm|building|tension|reveal|payoff","pacing":"slow|medium|fast","cameraIntent":"establish|explore|focus|reveal|hero","zoom":3-14,"pitch":0-85,"bearing":-30-30,"motion":"fly-in|zoom-out|push-in|orbit|hold","layers":["GEOGRAPHY first","EMPHASIS second","TEXT last"],"entities":[{"place":"Full Name, City, Region, Country","value":NUMBER,"label":"≤15 chars"}],"entityMetric":"Annual Visitors","entityUnit":"visitors/yr","entityStagger":0.9}]}
 
 LAYER DESCRIPTION EXAMPLES (animator reads these LITERALLY — be precise):
   "highlight Sichuan province, China subtle blue border-first"
@@ -542,6 +555,21 @@ function extractJSON(text: string): Record<string, unknown> | null {
   }
   const repaired = partial + stack.reverse().join("");
   try { return JSON.parse(repaired) as Record<string, unknown>; } catch { return null; }
+}
+
+/** Sanitize AI-authored sticker SVG: size cap, must be a bare <svg> with a
+ *  viewBox, and NO active content (scripts, handlers, external refs, CSS). The
+ *  result only ever renders inside <img src="data:…">, where scripts can't run
+ *  anyway — this keeps the stored document clean too. Returns null to reject. */
+function sanitizeStickerSvg(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const s = raw.trim();
+  if (s.length < 20 || s.length > 4000) return null;
+  if (!/^<svg[\s>]/i.test(s) || !/<\/svg>\s*$/i.test(s)) return null;
+  if (!/viewBox\s*=/i.test(s)) return null;
+  const banned = /<\s*(script|foreignObject|iframe|embed|object|use|image|animate|set)\b|on[a-z]+\s*=|javascript:|href\s*=|xlink:href|url\s*\(|@import|<\s*style\b/i;
+  if (banned.test(s)) return null;
+  return s;
 }
 
 async function directorCall(idea: string, cfg: AIConfig): Promise<DirectorScript | null> {
@@ -1229,7 +1257,7 @@ function resolveLook(plan: Plan, kind: StoryKind, styleKey: string): Record<stri
   }
 }
 
-export async function buildFromPlan(plan: Plan, opts: { story?: boolean } = {}): Promise<Project> {
+async function buildFromPlan(plan: Plan, opts: { story?: boolean } = {}): Promise<Project> {
   const project = createDefaultProject(plan.title || "AI animation");
   // Quick animations stay punchy (≤12s); a STORY earns a longer runtime (≤60s,
   // the Storyboard Review's slider range) so multi-beat narratives can breathe.
@@ -1262,7 +1290,7 @@ export async function buildFromPlan(plan: Plan, opts: { story?: boolean } = {}):
     : defaultCamera();
   if (plan.motion && MOTIONS.includes(plan.motion)) (cam as any).style = plan.motion;
   // The AI's explicit camera overrides always win over the derived framing.
-  if (typeof plan.cameraPitch === "number") (cam as any).end.pitch = Math.max(0, Math.min(84, plan.cameraPitch));
+  if (typeof plan.cameraPitch === "number") (cam as any).end.pitch = Math.max(0, Math.min(85, plan.cameraPitch));
   if (typeof plan.cameraBearing === "number") (cam as any).end.bearing = plan.cameraBearing;
 
   // AI-authored camera poses (Phase 2 output) — these carry full per-beat
@@ -1426,7 +1454,7 @@ export async function buildFromPlan(plan: Plan, opts: { story?: boolean } = {}):
         const hubG = pl.hub ? await geocode(pl.hub) : null;
         if (geos.length < (hubG ? 1 : 2)) continue;
         const mode = hubG ? (pl.mode ?? "hub") : "chain";
-        add(createLayer("connections", { name: "Network", mode, hub: hubG ? { lon: hubG.lon, lat: hubG.lat, name: hubG.name } : null, points: geos.map((g) => ({ lon: g.lon, lat: g.lat, name: g.name })), timing, ...(pl.style ?? {}) }), pl.style);
+        add(createLayer("connections", { name: "Network", mode, hub: hubG ? { lon: hubG.lon, lat: hubG.lat, name: hubG.name } : null, points: geos.map((g) => ({ lon: g.lon, lat: g.lat, name: g.name })), timing, ...(pl.style ?? {}), ...(pl.arrowheads != null ? { arrowheads: pl.arrowheads } : {}), ...(pl.pulse != null ? { pulse: pl.pulse } : {}) }), pl.style);
       } else if (pl.kind === "spotlight") {
         const g = await geocode(pl.place); if (!g) continue;
         add(createLayer("spotlight", { name: `Spotlight ${pl.place}`, anchor: { lon: g.lon, lat: g.lat }, timing, ...(pl.style ?? {}) }), pl.style);
@@ -1459,6 +1487,20 @@ export async function buildFromPlan(plan: Plan, opts: { story?: boolean } = {}):
           density: Math.max(0, Math.min(1, pl.density ?? 0.45)),
           ...(pl.wind != null ? { wind: Math.max(-2, Math.min(2, pl.wind)) } : {}),
           timing: { ...timing, inSec: 0.2 }, ...(pl.style ?? {}),
+        }), pl.style);
+      } else if (pl.kind === "sticker") {
+        // AI-authored SVG b-roll → an image layer with a data URL. Rendered via
+        // <img>, so script execution is impossible; the sanitizer is belt-and-
+        // braces against active content and external fetches.
+        const svg = sanitizeStickerSvg(pl.svg);
+        if (!svg) continue;
+        const g = pl.place ? await geocode(pl.place) : null;
+        const anchor = g ? { kind: "coord", lon: g.lon, lat: g.lat } : { kind: "screen", pos: "center" };
+        add(createLayer("image", {
+          name: pl.label ? `✦ ${pl.label}` : "✦ AI sticker",
+          url: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`,
+          anchor, sizePx: Math.max(60, Math.min(420, pl.sizePx ?? 150)), rounded: false,
+          timing, ...(pl.style ?? {}),
         }), pl.style);
       } else if (pl.kind === "conflict") {
         // The headline composite: two countries, the real frontier, swords on it.
@@ -1719,7 +1761,7 @@ export async function buildFromPlan(plan: Plan, opts: { story?: boolean } = {}):
     const lookPatch: Record<string, unknown> = {};
     for (const k of ["bgColor", "tintColor", "tintOpacity", "vignette"]) if (m3dc[k] !== undefined) lookPatch[k] = m3dc[k];
     project.composition.look = { ...project.composition.look, ...lookPatch } as any;
-    if (typeof m3dc.pitch === "number") (cam as any).end.pitch = Math.max(0, Math.min(84, m3dc.pitch));
+    if (typeof m3dc.pitch === "number") (cam as any).end.pitch = Math.max(0, Math.min(85, m3dc.pitch));
   }
   // Populate composition narration so the renderer can show it as a caption overlay.
   if (Array.isArray((plan as any).narration) && (plan as any).narration[0]) {
@@ -1761,7 +1803,9 @@ export async function buildFromPlan(plan: Plan, opts: { story?: boolean } = {}):
     while (beatStarts.length < narrationArr.length) {
       beatStarts.push(Math.round((beatStarts.length / narrationArr.length) * dur * 10) / 10);
     }
-    (project.composition as any).narrationLines = narrationArr.map((text, i) => ({
+    // Typed since narrationLines joined the Composition schema — previously an
+    // `as any` write that every parseProject() round-trip silently stripped.
+    project.composition.narrationLines = narrationArr.map((text, i) => ({
       text, startSec: beatStarts[i] ?? 0,
     }));
     project.composition.look.showCaptions = true;
@@ -1789,6 +1833,84 @@ function styleForMood(mood: string): { basemapStyle: string; look: Record<string
     case "political": return { basemapStyle: "dark", look: { mapFilter: "duotone", mapFilterAmount: 0.4, vignette: 0.42, grain: 0.1 } };
     default: return { basemapStyle: "dark", look: { vignette: 0.4, grain: 0.1 } };
   }
+}
+
+/**
+ * LITERAL ELEMENT COMMAND — the creator explicitly named the elements to draw:
+ * "highlight France", "route from Paris to Rome", "highlight Japan then route
+ * from Tokyo to Osaka". Build EXACTLY those elements, deterministically — no AI,
+ * no title, no markers, no labels, no extras. This is the "I expect ONLY this"
+ * path. The requested look still applies (detectProStyle). Returns null when the
+ * prompt asks for anything beyond plain highlight/route, so the faithful AI path
+ * (which can build markers, data, titles, etc.) handles the rest.
+ */
+const LITERAL_COLORS: Record<string, string> = {
+  red: "#e0533a", blue: "#3b6ef4", green: "#2fae60", yellow: "#f4c020", orange: "#f0872b",
+  purple: "#8b5cf6", violet: "#8b5cf6", pink: "#ec4899", teal: "#14b8a6", cyan: "#22d3ee",
+  white: "#f5f5f5", gold: "#d4af37", crimson: "#b81d24", navy: "#1e3a8a", magenta: "#d6249f", lime: "#84cc16",
+};
+/** A colour word the creator named ("in blue", "red route") → a hex, so the
+ *  literal element actually takes that colour. */
+function literalColor(idea: string): string | null {
+  const m = idea.toLowerCase().match(/\b(red|blue|green|yellow|orange|purple|violet|pink|teal|cyan|white|gold|crimson|navy|magenta|lime)\b/);
+  return m ? LITERAL_COLORS[m[1]] : null;
+}
+
+function literalPlan(idea: string, it: ReturnType<typeof interpret>): Plan | null {
+  // If the prompt asks for ANY element beyond highlight/route, it isn't a clean
+  // literal highlight/route command — defer to the AI so those get built.
+  const OTHER = /\b(marker|pin\b|flag|chart|counter|graph|\bdata\b|bubble|choropleth|connection|network|\bflow|spotlight|annotation|timestamp|ticker|radius|\bring|sticker|weather|snow|rain|character|truesize|explosion|sword|\bfire\b|volcano|earthquake|nuclear|title|caption|\btext\b|\blabel|pin\b)\b/i;
+  if (OTHER.test(idea)) return null;
+
+  const route = it.route;
+  const routeSet = new Set(route ? [route.from, route.to, ...route.via].map((s) => s.toLowerCase()) : []);
+
+  let hlPlaces = (it.action === "highlight" || it.action === "mixed")
+    ? it.locations.filter((p) => !routeSet.has(p.toLowerCase())).slice(0, 18)
+    : [];
+  // COMBO "highlight X … route A→B": the parser keeps the route but drops the
+  // highlighted place (action becomes "route", locations empties). Recover it by
+  // re-interpreting just the clause BEFORE the route trigger.
+  if (route && hlPlaces.length === 0 && /\b(highlight|fill|colou?r|outline|shade)\b/i.test(idea)) {
+    const pre = idea.split(/\bthen\b/i)[0].split(/\b(route|fly|flight|drive|driving|sail|voyage|walk|trek|journey|travel|from)\b/i)[0];
+    const preIt = interpret(pre);
+    hlPlaces = preIt.locations.filter((p) => !routeSet.has(p.toLowerCase())).slice(0, 18);
+  }
+  if (!route && hlPlaces.length === 0) return null;
+
+  const color = literalColor(idea);
+  const layers: PlanLayer[] = [];
+  for (const p of hlPlaces) {
+    layers.push({ kind: "highlight", place: p, fill: "solid", ...(color ? { style: { fillColor: color, glowColor: color, borderColor: color } } : {}) } as PlanLayer);
+  }
+  if (route) {
+    const t = idea.toLowerCase();
+    const air = /flight|flew|\bfly\b|plane|airl/.test(t);
+    const sea = /sail|voyage|\bship\b|naval|fleet|\bsea\b|boat|cruise|ferry/.test(t);
+    const foot = /\bwalk|hike|trek|\brun\b|\bfoot\b/.test(t);
+    const rail = /train|rail/.test(t);
+    layers.push({
+      kind: "route", from: route.from, to: route.to,
+      transport: air ? "aircraft" : sea ? "boat" : foot ? "walking" : "driving",
+      icon: air ? "plane" : sea ? "boat" : foot ? "walk" : rail ? "train" : "car",
+      cameraMode: "chase", ...(color ? { style: { color, glowColor: color } } : {}),
+    } as PlanLayer);
+  }
+  if (!layers.length) return null;
+
+  const style = detectProStyle(idea);
+  const focus = route ? route.to : (it.context || hlPlaces[0]);
+  const cameraStops = route ? [route.from, ...route.via, route.to] : [];
+  const dur = Math.min(11, Math.max(6, Math.round(it.durationSec) || (route ? 9 : 7)));
+  return {
+    title: "", subtitle: "", durationSec: dur, aspect: "16:9", basemapStyle: "dark",
+    terrain: false, focus, mood: "neutral",
+    motion: route ? "fly-in" : (hlPlaces.length > 1 ? "zoom-out" : "push-in"),
+    palette: "Default", priority: route ? "route" : "highlight",
+    ...(cameraStops.length ? { cameraStops } : {}),
+    ...(style ? { map3dStyle: style } : {}),
+    layers,
+  } as Plan;
 }
 
 function heuristicPlan(idea: string): Plan {
@@ -2018,6 +2140,61 @@ function heuristicBrief(idea: string): any {
  * the AI planner via the prompt; energy + length are deterministic here so even
  * the no-AI path honors them.)
  */
+/**
+ * Camera energy derived from tone — the interview is 3 questions (tone, focus,
+ * length), so when the user hasn't answered a legacy `energy` question the
+ * tone decides the camera language. This keeps every answer consequential on
+ * BOTH the AI and no-AI paths.
+ */
+function energyFromInterview(iv: any): string {
+  const explicit = String(iv?.energy ?? "");
+  if (explicit) return explicit;
+  const tone = String(iv?.tone ?? "");
+  return tone === "urgent" ? "punchy"
+    : tone === "epic" ? "dynamic"
+    : tone === "calm" ? "smooth"
+    : tone === "cinematic" ? "smooth"
+    : "";
+}
+
+/**
+ * Translate the interview answers into BINDING directives in the Director's
+ * own vocabulary (energy arc, pacing, runtime, thesis angle). This is what
+ * makes the 3-tap Q&A actually steer the story engine — the answers arrive as
+ * hard constraints, not a suggestion blob.
+ */
+function interviewDirectives(iv: any, ivText: string): string {
+  if (!iv && !ivText) return "";
+  const lines: string[] = [];
+  const tone = String(iv?.tone ?? "");
+  const energy = energyFromInterview(iv);
+  const length = String(iv?.length ?? "");
+
+  if (tone === "cinematic") lines.push(`TONE (binding): cinematic & dramatic — moody palette, strong vignette, and the energy arc MUST climax in a "payoff" hero beat.`);
+  else if (tone === "calm") lines.push(`TONE (binding): calm & informational — restrained camera, NO "tension" beats; energies stay calm/building, generous dwell time.`);
+  else if (tone === "urgent") lines.push(`TONE (binding): urgent, news-style — "fast" pacing, put a "tension" beat in the middle third, short punchy titles.`);
+  else if (tone === "epic") lines.push(`TONE (binding): epic & sweeping — wide establishing shot first, terrain on, and a "payoff" finale with a slow hero move.`);
+
+  if (energy === "smooth") lines.push(`CAMERA (binding): smooth & elegant — fly-in / push-in moves, eased motion, never abrupt.`);
+  else if (energy === "dynamic") lines.push(`CAMERA (binding): dynamic — favor route-following/chase moves, higher pitch, motion in every beat.`);
+  else if (energy === "punchy") lines.push(`CAMERA (binding): punchy & fast — quick zooms, "fast" pacing on most beats.`);
+  else if (energy === "locked") lines.push(`CAMERA (binding): locked-off & still — hold shots, let the map breathe.`);
+
+  if (length === "8" || length === "15" || length === "30") {
+    const beats = length === "8" ? "2–3" : length === "15" ? "3–4" : "4–6";
+    lines.push(`RUNTIME (binding): totalSec ≈ ${length}. Plan exactly ${beats} beats to fit — do not exceed it.`);
+  }
+
+  // The readable transcript from the client ("• question → chosen label")
+  // carries the tailored FOCUS answer and any AI-generated questions verbatim —
+  // the Director builds the thesis around it.
+  if (ivText) lines.push(`THE CREATOR'S ANSWERS (the "focus" line defines the story's angle — the thesis MUST serve it):\n${ivText}`);
+
+  return lines.length
+    ? `## THE CREATOR'S DECISIONS — binding directives, not suggestions. Every one must be visible in the result:\n${lines.join("\n")}`
+    : "";
+}
+
 function applyInterview(project: Project, iv: any) {
   const comps: any[] = [];
   if (project.composition) comps.push(project.composition);
@@ -2038,7 +2215,7 @@ function applyInterview(project: Project, iv: any) {
     }
   }
 
-  const energy = String(iv.energy ?? "");
+  const energy = energyFromInterview(iv);
   if (!energy) return;
   for (const c of uniq) {
     const cam = c.layers.find((l: Layer) => l.type === "camera") as any;
@@ -2070,11 +2247,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Too many requests — max 10 generations per minute." }, { status: 429 });
   }
 
-  let body: { idea?: string; plan?: Plan; ai?: any; mode?: string; style?: string; interview?: any; interviewText?: string; arc?: ArcContext };
+  let body: { idea?: string; plan?: Plan; ai?: any; mode?: string; style?: string; interview?: any; interviewText?: string; arc?: ArcContext; taste?: string };
   try { body = await req.json(); } catch { return NextResponse.json({ error: "Bad JSON" }, { status: 400 }); }
-  const idea = (body.idea ?? "").trim();
+  const idea = (body.idea ?? "").toString().slice(0, 4000).trim(); // cap: bound the AI prompt size
   const iv = body.interview && typeof body.interview === "object" ? body.interview : null;
   const ivText = (body.interviewText ?? "").toString().slice(0, 400);
+  // TASTE PROFILE — the client's learned preference summary. Biases the AI's
+  // look/palette/pacing choices toward what this user keeps choosing; the
+  // brief always wins on conflict. Never fed to the rule-based parser.
+  const taste = (body.taste ?? "").toString().slice(0, 400);
   // ARC: this generate call is ONE chapter of a larger multi-sequence film.
   const arc = body.arc && typeof body.arc === "object" ? body.arc : null;
 
@@ -2091,9 +2272,21 @@ export async function POST(req: NextRequest) {
   // crude length check.
   const framework = (!directPlan && idea) ? buildFramework(idea, { styleId: body.style, interview: iv ?? undefined }) : null;
 
-  // STORY MODE: explicit toggle, OR the framework says this is a multi-scene
-  // story (journey/multi-entity/etc.), OR a clearly narrative input.
-  const isStory = body.mode === "story" || (framework?.multiScene ?? false) || (!directPlan && (idea.length > 220 || ((idea.match(/[.!?]/g) || []).length >= 3)));
+  // STORY / DOCUMENTARY MODE is OPT-IN — only when the caller sets mode:"story"
+  // or the prompt EXPLICITLY asks for a documentary / history / multi-chapter
+  // story. Length, sentence count, and the auto-storyboard's scene count no
+  // longer inflate a plain request into a 15-45s documentary. Everything else is
+  // built FAITHFULLY and concisely (see FAITHFUL_MODE) — exactly what was asked.
+  const isStory = body.mode === "story" || (!directPlan && !!idea && wantsDocumentary(idea));
+
+  // LITERAL ELEMENT COMMAND — "highlight France", "route from A to B", or both:
+  // build EXACTLY those elements deterministically (no AI, no titles/markers/
+  // extras). This is what "I expect ONLY this" means. Non-literal prompts fall
+  // through to the faithful AI path. Treated like a direct plan downstream.
+  const literal = (!directPlan && !arc && !isStory && framework)
+    ? literalPlan(idea, framework.interpretation)
+    : null;
+  const deterministicPlan = directPlan ?? literal;
 
   // ENGINE CHOICE: the user explicitly picks AI-directed vs "Smart (no AI)".
   // useAI:false → built-in director logic only (instant, no key, private).
@@ -2121,16 +2314,14 @@ export async function POST(req: NextRequest) {
   //   schema, outputs the complete Plan JSON with timing, colors, animations specified.
   //   Heuristics are NOT responsible for creative decisions — they're fallback only.
 
-  // INTENT GATE: simple, direct prompts ("route from Paris to Rome", "highlight
-  // Japan") skip the Director phase AND the research doctrine entirely — one
-  // fast Composer call, minimal layers, no documentary expansion. Deep research
-  // is reserved for stories and prompts that actually ask for it.
-  const simpleIntent = !directPlan && !arc && !isStory
-    && isSimpleIntent(idea, framework?.interpretation?.locations?.length ?? 0);
-
-  // Phase 1: Director call (skip for direct plans, arcs with full spec, no-AI
-  // mode, and simple requests — the arc/simple context needs no story script).
-  const shouldRunDirector = !directPlan && !!aiCfg && !arc && !simpleIntent;
+  // INTENT GATE: the multi-phase DOCUMENTARY pipeline (Director story-script +
+  // research doctrine) is reserved for explicit story/documentary requests only.
+  // Every faithful request ("a flight from A to B, cinematic satellite",
+  // "highlight France, Italy and Japan in bright colours") gets ONE fast Composer
+  // call that builds exactly what's described — minimal layers, no expansion.
+  //
+  // Phase 1: Director call (only for stories; direct plans, arcs, and no-AI skip).
+  const shouldRunDirector = !deterministicPlan && !!aiCfg && !arc && isStory;
 
   // Pre-inject interpretation + archetype into the Director's user prompt.
   // The Director gets verified places, detected route, and archetype recipe BEFORE
@@ -2145,7 +2336,9 @@ export async function POST(req: NextRequest) {
     if (it?.route) ctx.push(`Route: ${it.route.from} → ${it.route.via.length ? it.route.via.join(" → ") + " → " : ""}${it.route.to}`);
     if (it?.action && it.action !== "unknown") ctx.push(`Action type: ${it.action}`);
     if (arch) ctx.push(`Matched story archetype: ${arch.name}.\nRecipe: ${arch.recipe.slice(0, 220)}`);
-    if (ivText) ctx.push(`User director constraints: ${ivText}`);
+    const directives = interviewDirectives(iv, ivText);
+    if (directives) ctx.push(directives);
+    if (taste) ctx.push(`User taste profile (learned from their past choices — bias style/palette/pacing toward it unless the brief says otherwise): ${taste}`);
     if (!ctx.length) return idea;
     return `${idea}\n\n## ENGINE PRE-ANALYSIS — trust and use this:\n${ctx.join("\n")}`;
   })();
@@ -2165,16 +2358,24 @@ export async function POST(req: NextRequest) {
   // so the composer focuses purely on technical animation — not story structure.
   const composerInput = [
     dirScript ? scriptToComposerContext(dirScript) : idea,
-    // Framework instruction still shapes structure when no director script (arc mode).
-    !dirScript && framework && aiCfg ? frameworkInstruction(framework) : "",
-    // Interview constraints always flow through.
-    !dirScript && ivText ? `Director constraints (honor these):\n${ivText}` : "",
+    // Framework storyboard structure is imposed ONLY for stories/arcs. Faithful
+    // requests must NOT be reshaped into a multi-beat storyboard — that's the
+    // over-expansion we're fixing; the Composer builds the prompt verbatim.
+    !dirScript && framework && aiCfg && (isStory || !!arc) ? frameworkInstruction(framework) : "",
+    // Interview decisions flow to the Composer when no Director script carried
+    // them (arc mode / director skipped) — same binding form.
+    !dirScript ? interviewDirectives(iv, ivText) : "",
     // Arc continuity context.
     arcText && aiCfg ? arcText : "",
+    // Learned user taste — a nudge for the composer's map3dStyle/palette/fonts.
+    taste && aiCfg ? `USER TASTE PROFILE (bias look & palette toward this unless the brief contradicts it): ${taste}` : "",
   ].filter(Boolean).join("\n\n");
 
-  const composerSystem = simpleIntent ? `${SYSTEM}${SIMPLE_MODE}` : withDoctrine(isStory ? STORY_SYSTEM : SYSTEM);
-  const ai = (directPlan || !aiCfg) ? { plan: null as Plan | null, warning: undefined as string | undefined, tokensUsed: 0 } : await aiPlan(composerInput, aiCfg, composerSystem);
+  // STORY → full documentary system + research doctrine. FAITHFUL (default) →
+  // the base system + FAITHFUL_MODE, NO doctrine: build the prompt exactly and
+  // concisely, no research expansion.
+  const composerSystem = isStory ? withDoctrine(STORY_SYSTEM) : `${SYSTEM}${FAITHFUL_MODE}`;
+  const ai = (deterministicPlan || !aiCfg) ? { plan: null as Plan | null, warning: undefined as string | undefined, tokensUsed: 0 } : await aiPlan(composerInput, aiCfg, composerSystem);
   const llmPlan = ai.plan;
 
   // AI RESULT HANDLING:
@@ -2184,14 +2385,14 @@ export async function POST(req: NextRequest) {
   // • Key configured but model failed: surface the error so the user can fix it
   //   (wrong key, rate-limit, etc.). We do NOT silently fall back here because
   //   that would mask a real config problem the user needs to know about.
-  if (aiRequested && !directPlan && aiCfg && !llmPlan) {
+  if (aiRequested && !deterministicPlan && aiCfg && !llmPlan) {
     return NextResponse.json({
       error: `AI returned no usable plan: ${ai.error ?? "unknown error"}. Check your API key and model in Settings, then try again.`,
       aiConfigured: true,
     }, { status: 502 });
   }
 
-  const plan = directPlan ?? llmPlan ?? (isStory ? heuristicStoryPlan(idea) : heuristicPlan(idea));
+  const plan = deterministicPlan ?? llmPlan ?? (isStory ? heuristicStoryPlan(idea) : heuristicPlan(idea));
 
   // If the Director produced a script but the Composer didn't include narration,
   // inject the director's narration lines so storyboard review has content.
@@ -2231,11 +2432,11 @@ export async function POST(req: NextRequest) {
   // Verify every place the plan pins actually resolves to the RIGHT spot, and
   // AI-repair the wrong ones, BEFORE we build geometry. Templates (directPlan)
   // are already authored with real coords, so skip them.
-  const placeReport = !directPlan ? await groundPlaces(plan, aiCfg, `${idea}\n${(plan as any).title ?? ""}`) : null;
+  const placeReport = !deterministicPlan ? await groundPlaces(plan, aiCfg, `${idea}\n${(plan as any).title ?? ""}`) : null;
 
   // The fact-checked Director brief (thesis, facts + confidence, caveats) — shown
   // in the Storyboard Review so the user sees the journalism before scenes build.
-  const brief = directPlan ? null : ((plan as any).brief ?? heuristicBrief(idea));
+  const brief = deterministicPlan ? null : ((plan as any).brief ?? heuristicBrief(idea));
   if (brief) {
     brief.provider = llmPlan ? "ai" : "heuristic";
     if (!llmPlan && !(brief.caveats?.length)) brief.caveats = ["Planned by the built-in logic parser — facts were NOT independently researched or verified. Connect an AI provider for fact-checked, journalist-grade planning."];
@@ -2255,6 +2456,16 @@ export async function POST(req: NextRequest) {
     // Keep "historical" if the planner chose period borders — the era is the point.
     if (sig.basemapStyle && plan.basemapStyle !== "historical") plan.basemapStyle = sig.basemapStyle;
   }
+
+  // LANDING-PARITY: turn the creator's requested LOOK language into the matching
+  // pro style so the preview they tapped on the landing (or asked for in the
+  // BuildFlow "look" question) becomes the ACTUAL film — even with no AI. The AI
+  // path sets map3dStyle itself, so only fill it when nothing chose one yet.
+  if (!directPlan && !(plan as any).map3dStyle) {
+    const look = detectProStyle(`${idea} ${ivText}`);
+    if (look) (plan as any).map3dStyle = look;
+  }
+
   try {
     // A story is built as ONE continuous timeline (beats sequenced inside a
     // single composition) — never auto-split into scenes. Users add scenes
@@ -2266,7 +2477,7 @@ export async function POST(req: NextRequest) {
       project,
       plan,
       usedLLM: !!llmPlan,
-      provider: directPlan ? "template" : llmPlan ? (aiCfg?.label ?? "ai") : "heuristic",
+      provider: directPlan ? "template" : literal ? "literal" : llmPlan ? (aiCfg?.label ?? "ai") : "heuristic",
       story: isStory,
       // The fact-checked Director brief (thesis, facts+confidence, caveats, disputed).
       verification: brief,
@@ -2280,7 +2491,7 @@ export async function POST(req: NextRequest) {
       dirScript: dirScript ? { thesis: dirScript.thesis, arc: dirScript.arc, inputType: dirScript.inputType, beats: dirScript.beats.map((b) => ({ title: b.title, narration: b.narration, focus: b.focus, energy: b.energy, pacing: b.pacing, cameraIntent: b.cameraIntent })) } : null,
       // Surface WHY the AI wasn't used (wrong key/model, rate limit, …) instead
       // of silently degrading to the heuristic — so the user can fix it.
-      aiError: !directPlan && !llmPlan && aiCfg ? (ai.error ?? "AI unavailable") : undefined,
+      aiError: !deterministicPlan && !llmPlan && aiCfg ? (ai.error ?? "AI unavailable") : undefined,
       aiConfigured: !!aiCfg,
       layers: project.composition.layers.length,
       // Place-accuracy report: which place names were verified, auto-corrected,
@@ -2297,10 +2508,14 @@ export async function POST(req: NextRequest) {
         warning: ai.warning ?? null,
         // Which pipeline handled it: "simple" = lightweight one-call path (no
         // Director, no research doctrine), "story"/"rich" = full two-phase.
-        intent: directPlan ? "template" : simpleIntent ? "simple" : isStory ? "story" : "rich",
+        intent: directPlan ? "template" : literal ? "literal" : isStory ? "story" : "faithful",
       },
     });
   } catch (e: any) {
     return NextResponse.json({ error: "Failed to assemble project", detail: String(e?.message ?? e) }, { status: 500 });
   }
 }
+
+// Registry: exposes buildFromPlan to sibling routes (addon apply) without a
+// route-module export, which Next's route typegen forbids.
+_registerPlanBuilder(buildFromPlan);

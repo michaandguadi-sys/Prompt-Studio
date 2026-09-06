@@ -11,21 +11,19 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { db, schema } from "@/lib/db";
-import { eq } from "drizzle-orm";
+import { db } from "@/lib/db";
 import { enqueueAgentJob, sessionForUser, listJobsForUser, type AgentJobSettings } from "@/lib/agentBridge";
 import { enqueueServerRender, listServerJobsForUser } from "@/lib/serverRender";
 import { checkQuota } from "@/lib/quota";
-import { devGetOrCreateUserByClerk } from "@/lib/devAgentStore";
+import { TIERS } from "@/lib/tiers";
+import { resolveOrCreateUserId } from "@/lib/users";
 import { Project as ProjectSchema } from "@/v2/doc/schema";
 import { validateProject } from "@/v2/doc/validate";
 
+// Provision the user row on demand so a brand-new sign-up (webhook not yet
+// landed) is never 404'd out of rendering. Returns null only on a real failure.
 async function resolveUserId(clerkId: string): Promise<string | null> {
-  if (db) {
-    const [user] = await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.clerkId, clerkId)).limit(1);
-    return user?.id ?? null;
-  }
-  return devGetOrCreateUserByClerk(clerkId).id;
+  try { return await resolveOrCreateUserId(clerkId); } catch { return null; }
 }
 
 /** GET /api/v2/render — the user's render queue (cloud + agent), newest first. */
@@ -91,7 +89,17 @@ export async function POST(req: NextRequest) {
       tier: quota.tier, unit: quota.unit, upgradeUrl: "/pricing",
     }, { status: 402 });
   }
-  const watermark = !!db && quota.tier === "free";
+  // Fail CLOSED in production: no DB ⇒ no tier lookup ⇒ treat as free
+  // (branded + 720p-capped). Only non-production dev without a DATABASE_URL
+  // keeps the permissive bypass tier from checkQuota.
+  const isProd = process.env.NODE_ENV === "production";
+  const billingTier = db || !isProd ? quota.tier : "free";
+  const watermark = billingTier === "free";
+
+  // Server-authoritative resolution ceiling — the free tier is capped at
+  // 720p-class output no matter what the client's render preset sends.
+  const maxScale = TIERS[billingTier]?.maxScale ?? 1;
+  settings.scale = Math.min(Math.max(0.1, Number(settings.scale) || 1), maxScale);
 
   const name = (project.name || "mapanisy").replace(/[^a-zA-Z0-9\-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "mapanisy";
 
@@ -101,11 +109,27 @@ export async function POST(req: NextRequest) {
   const story = !!body?.story && Array.isArray(project.scenes) && project.scenes.length > 1;
   const compositionId = story ? "MapanisyStory" : "MapanisyV2";
 
-  if (agentOnline) {
+  // The agent renders on the USER'S machine, where watermark/scale flags are
+  // advisory — branded/capped tiers are forced onto the server-authoritative
+  // cloud path instead (free is 3 renders/mo at 720p, so cloud cost is bounded).
+  const agentPermitted = TIERS[billingTier]?.agentAllowed ?? true;
+  if (agentOnline && agentPermitted) {
     const job = story
       ? enqueueAgentJob(userId, name, "", "", settings, undefined, undefined, watermark, undefined, project.scenes)
       : enqueueAgentJob(userId, name, "", "", settings, undefined, undefined, watermark, project.composition);
-    return NextResponse.json({ ok: true, jobId: job.id, mode: "agent", compositionId, watermark, scenes: story ? project.scenes.length : 1, fixes, warnings });
+    return NextResponse.json({ ok: true, jobId: job.id, mode: "agent", compositionId, watermark, scale: settings.scale, scenes: story ? project.scenes.length : 1, fixes, warnings });
+  }
+
+  // Abuse/DoS guard for the shared server-render path (MAX_CONCURRENT=1 globally,
+  // and each queued job holds a full project in memory): cap the in-flight cloud
+  // renders a single user can stack up. The agent path above is exempt — it runs
+  // on the user's own machine.
+  const activeCloud = listServerJobsForUser(userId).filter((j) => j.status === "queued" || j.status === "running").length;
+  if (activeCloud >= 3) {
+    return NextResponse.json({
+      error: "too_many_jobs",
+      message: "You already have renders in progress — let them finish before starting more.",
+    }, { status: 429 });
   }
 
   const inputProps = story
@@ -117,5 +141,5 @@ export async function POST(req: NextRequest) {
     x264Preset: settings.x264Preset,
     alpha: settings.alpha,
   }, req.nextUrl.origin);
-  return NextResponse.json({ ok: true, jobId: job.id, mode: "cloud", compositionId, watermark, scenes: story ? project.scenes.length : 1, fixes, warnings });
+  return NextResponse.json({ ok: true, jobId: job.id, mode: "cloud", compositionId, watermark, scale: settings.scale, scenes: story ? project.scenes.length : 1, fixes, warnings });
 }

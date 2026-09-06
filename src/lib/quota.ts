@@ -12,6 +12,83 @@ import { db, schema } from "./db";
 import { eq, gte, and, sum, count } from "drizzle-orm";
 import { TIERS, type Tier } from "./tiers";
 
+/**
+ * TEST MODE — grant every logged-in user the Pro/unlimited plan.
+ *
+ * Set `TEST_UNLIMITED=true` in the environment to let the whole team exercise
+ * every paid feature (unlimited 4K renders, no watermark, data layers, brand
+ * kits, story arcs, premium AI, priority queue) without paying. It is an
+ * EXPLICIT opt-in and OFF by default, so it can never activate accidentally —
+ * the code below is completely inert unless the flag is set.
+ *
+ * ⚠️ REMOVE (unset the env var) BEFORE PUBLIC LAUNCH — while on, it gives away
+ *    every paid feature for free to anyone who can sign in.
+ *
+ * PRODUCTION FAIL-CLOSED: like the sibling BYPASS_QUOTA, the flag is IGNORED in
+ * production builds (NODE_ENV === "production") so a single forgotten/leaked env
+ * var can never hand out Pro on the live site. A deliberate staging build that
+ * runs NODE_ENV=production can still force it on with a second explicit opt-in,
+ * TEST_UNLIMITED_ALLOW_PROD=true. In development the single flag is enough.
+ */
+/**
+ * Record a COMPLETED render so it counts against a count-metered tier's cap.
+ *
+ * `checkQuota` measures free-tier usage by counting render_logs rows, but the
+ * only writer used to be /api/agent/complete — the self-hosted Render Agent
+ * path. Free users are explicitly denied the agent (`agentAllowed: false`) and
+ * are forced onto the SERVER render path, which wrote no row at all. The
+ * "3 animations / month" cap therefore counted a table that never grew, and
+ * free rendering was effectively unlimited — real CPU on a 4 vCPU VPS.
+ *
+ * Best-effort by design: metering must never fail a render the user already
+ * paid for in wall-clock time. Callers can fire-and-forget.
+ */
+export async function logRenderCompleted(opts: {
+  userId: string;
+  sceneName: string;
+  durationSeconds: number;
+}): Promise<void> {
+  if (!db || grantAllPro()) return;
+  try {
+    const [sub] = await db
+      .select({ tier: schema.subscriptions.tier, status: schema.subscriptions.status })
+      .from(schema.subscriptions)
+      .where(eq(schema.subscriptions.userId, opts.userId))
+      .limit(1);
+    // Same fail-closed resolution as checkQuota: an unknown tier or an
+    // unentitled status is metered as free rather than waved through.
+    const claimed = sub?.tier as Tier | undefined;
+    const entitled = sub ? ["active", "trialing", "lifetime"].includes(sub.status) : false;
+    const tier: Tier = claimed && claimed in TIERS && entitled ? claimed : "free";
+    if (TIERS[tier]?.maxRenders == null) return;   // unmetered tier — nothing to count
+    await db.insert(schema.renderLogs).values({
+      userId:          opts.userId,
+      sceneName:       opts.sceneName,
+      durationSeconds: String(Math.max(0, opts.durationSeconds)),
+      tierAtRender:    tier,
+      status:          "completed",
+    });
+  } catch {
+    // Never let metering break a finished render.
+  }
+}
+
+export function grantAllPro(): boolean {
+  if (process.env.TEST_UNLIMITED !== "true") return false;
+  if (process.env.NODE_ENV === "production" && process.env.TEST_UNLIMITED_ALLOW_PROD !== "true") return false;
+  return true;
+}
+
+if (process.env.TEST_UNLIMITED === "true") {
+  // Loud, once-per-process notice (error-level — this hands out every paid
+  // feature) so it can never quietly ride to launch.
+  if (!grantAllPro()) {
+    console.error("[entitlements] TEST_UNLIMITED=true is IGNORED in this production build. Set TEST_UNLIMITED_ALLOW_PROD=true to force it on a deliberate staging build, or remove it before launch.");
+  } else {
+    console.error("[entitlements] TEST_UNLIMITED active — every logged-in user is treated as Pro/unlimited. REMOVE before public launch.");
+  }
+}
+
 export type QuotaResult = {
   allowed: boolean;
   usedMinutes: number;
@@ -28,14 +105,43 @@ export type QuotaResult = {
   fraction: number;
 };
 
+/**
+ * A fully-unlocked Pro/unlimited quota. Shared by the TEST_UNLIMITED override
+ * and the dev BYPASS_QUOTA path so both hand out identical, always-allowed Pro
+ * entitlements (no watermark, full-scale renders, all features).
+ */
+export function unlimitedProQuota(): QuotaResult {
+  return {
+    allowed: true,
+    usedMinutes: 0,
+    limitMinutes: TIERS.pro.minutesPerMonth,
+    usedRenders: 0,
+    maxRenders: null,
+    unit: "minute",
+    tier: "pro",
+    periodStart: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+    fraction: 0,
+  };
+}
+
 export async function checkQuota(userId: string): Promise<QuotaResult> {
+  // TEST MODE: TEST_UNLIMITED=true → treat everyone as Pro/unlimited. Checked
+  // first so it applies on every path (with or without a DB). Off by default.
+  if (grantAllPro()) return unlimitedProQuota();
+
   // Dev/testing bypass: add BYPASS_QUOTA=true to .env.local to unlock all tiers.
-  // Never set this in production — it disables all metering.
-  if (process.env.BYPASS_QUOTA === "true" || !db) {
+  // REFUSED in production — it would disable all metering and branding, so a
+  // leaked env var must never be able to hand out clean unlimited renders.
+  const bypassRequested = process.env.BYPASS_QUOTA === "true";
+  const isProd = process.env.NODE_ENV === "production";
+  if (bypassRequested && isProd) {
+    console.error("[quota] BYPASS_QUOTA=true is set in PRODUCTION — ignoring it. Remove the env var.");
+  }
+  if ((bypassRequested && !isProd) || !db) {
     return {
       allowed: true, usedMinutes: 0, limitMinutes: 9999,
       usedRenders: 0, maxRenders: null, unit: "minute",
-      tier: "teams", periodStart: new Date(), fraction: 0,
+      tier: "pro", periodStart: new Date(), fraction: 0,
     };
   }
 
@@ -46,14 +152,43 @@ export async function checkQuota(userId: string): Promise<QuotaResult> {
     .limit(1);
 
   if (!sub) {
+    // No subscription row yet — a brand-new user before the Clerk webhook has
+    // provisioned one, or a webhook that never fired. DON'T lock them out of the
+    // product they just signed into: grant the FREE entitlement and count real
+    // usage from renderLogs so the 3-render cap still holds. (Upgrades create a
+    // row, so this only ever grants free — never paid.)
+    const periodStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+    const [row] = await db
+      .select({ renders: count(schema.renderLogs.id) })
+      .from(schema.renderLogs)
+      .where(and(
+        eq(schema.renderLogs.userId, userId),
+        gte(schema.renderLogs.createdAt, periodStart),
+        eq(schema.renderLogs.status, "completed"),
+      ));
+    const usedRenders = Math.max(0, Number(row?.renders ?? 0) || 0);
+    const maxRenders = TIERS.free.maxRenders; // 3
     return {
-      allowed: false, usedMinutes: 0, limitMinutes: 0,
-      usedRenders: 0, maxRenders: 0, unit: "animation",
-      tier: "free", periodStart: new Date(), fraction: 1,
+      allowed: maxRenders != null ? usedRenders < maxRenders : true,
+      usedMinutes: 0, limitMinutes: TIERS.free.minutesPerMonth,
+      usedRenders, maxRenders, unit: "animation",
+      tier: "free", periodStart,
+      fraction: maxRenders ? Math.min(usedRenders / maxRenders, 1) : 0,
     };
   }
 
-  const tier = sub.tier as Tier;
+  // Fail CLOSED on both axes — every other tier check in the app already does.
+  //
+  // 1. `sub.tier` is free text in the DB. An unrecognised value (a hand-edited
+  //    row, a restored backup, a future rename) previously made TIERS[tier]
+  //    undefined, so maxRenders fell to null and `allowed` became unconditional
+  //    true — an unknown tier granted MORE than a known one.
+  // 2. `sub.status` was never consulted, so a past_due / canceled / unpaid row
+  //    kept full paid entitlement: a Creator whose card fails would keep
+  //    unwatermarked 4K renders indefinitely.
+  const ENTITLED = new Set(["active", "trialing", "lifetime"]);
+  const claimed = sub.tier as Tier;
+  const tier: Tier = claimed in TIERS && ENTITLED.has(sub.status) ? claimed : "free";
   const maxRenders = TIERS[tier]?.maxRenders ?? null;
   const periodStart = sub.currentPeriodStart ?? new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 

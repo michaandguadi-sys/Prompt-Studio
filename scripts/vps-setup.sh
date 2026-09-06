@@ -29,6 +29,33 @@ apt-get update -qq
 apt-get install -y caddy
 echo "Caddy $(caddy version) installed."
 
+echo "==> Configuring firewall (ufw)..."
+# Defence in depth. NOTE: Docker publishes ports via its own iptables chain and
+# BYPASSES ufw, so this alone would NOT protect an app published on 0.0.0.0 —
+# docker-compose.yml binds the app to 127.0.0.1 for that reason. ufw still
+# matters for everything not published by Docker.
+apt-get install -y ufw
+ufw --force reset >/dev/null
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow OpenSSH
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw --force enable
+echo "Firewall active: SSH + 80 + 443 only."
+
+echo "==> Ensuring swap exists (Chromium composites 4K frames; OOM kills renders)..."
+if ! swapon --show | grep -q .; then
+  fallocate -l 4G /swapfile
+  chmod 600 /swapfile
+  mkswap /swapfile >/dev/null
+  swapon /swapfile
+  grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  echo "4 GB swapfile created."
+else
+  echo "Swap already present — leaving it alone."
+fi
+
 echo "==> Creating app directory at /opt/mapanisy..."
 mkdir -p /opt/mapanisy
 cd /opt/mapanisy
@@ -41,9 +68,12 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  Setup done. Now do the following manually:"
 echo ""
-echo "  1. Transfer your app files to /opt/mapanisy/ using:"
-echo "       rsync -avz --exclude node_modules --exclude .next \\"
-echo "         /path/to/PROMPT\\ STUDIO/ root@YOUR_VPS_IP:/opt/mapanisy/"
+echo "  1. Get the code into /opt/mapanisy/ (git is preferred — it makes"
+echo "     updates a one-liner: git pull && docker compose up -d --build):"
+echo "       git clone <your-repo-url> /opt/mapanisy"
+echo "     ...or rsync from your machine:"
+echo "       rsync -avz --exclude node_modules --exclude '.next*' \\"
+echo "         ./ root@YOUR_VPS_IP:/opt/mapanisy/"
 echo ""
 echo "  2. Create /opt/mapanisy/.env (build-time public vars):"
 echo "       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_..."

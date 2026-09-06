@@ -6,6 +6,7 @@ import {
   Youtube, Smartphone, Square, Zap,
 } from "lucide-react";
 import { useEditor } from "../store/editor";
+import { recordTaste } from "@/lib/taste";
 import type { Aspect } from "../doc/schema";
 
 /**
@@ -211,7 +212,7 @@ export const RenderButton: React.FC = () => {
           {PRESETS.map((p) => (
             <button
               key={p.id}
-              onClick={() => render(p.settings, p.label, p.aspect)}
+              onClick={() => { recordTaste("renderPreset", p.id); if (p.aspect) recordTaste("aspect", p.aspect); render(p.settings, p.label, p.aspect); }}
               className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-iris/[0.06]"
             >
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-graphite/[0.05]">{p.icon}</span>

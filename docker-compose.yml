@@ -24,8 +24,15 @@ services:
         NEXT_PUBLIC_MAPBOX_TOKEN: ${NEXT_PUBLIC_MAPBOX_TOKEN}
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
         NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+    # Bind to LOOPBACK only. "3030:3030" publishes on 0.0.0.0, which would serve
+    # the whole app at http://<vps-ip>:3030 with no TLS — Clerk session cookies in
+    # plaintext, HSTS meaningless, and Caddy's X-Forwarded-For overwrite bypassed
+    # (so a caller could spoof its IP and evade per-IP rate limiting on the paid
+    # AI routes). Docker writes its own iptables rules that BYPASS ufw, so a
+    # firewall added later would not close this — the bind address is the fix.
+    # Caddy reaches the app over localhost, which is all it needs.
     ports:
-      - "3030:3030"
+      - "127.0.0.1:3030:3030"
     env_file:
       - .env.production
     restart: unless-stopped

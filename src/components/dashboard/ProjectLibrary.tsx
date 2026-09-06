@@ -4,6 +4,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Download, Trash2, Search, Film, Clock, FolderOpen, Loader2, ArrowUpRight, Plus, Share2, Check } from "lucide-react";
 import { useEditor } from "@/v2/store/editor";
+import { useToast } from "@/components/Toast/Toast";
+import { confirmDialog, promptDialog } from "@/v2/ui/dialogs";
 
 type Proj = { id: string; name: string; updatedAt: number; shared?: boolean };
 
@@ -35,7 +37,9 @@ const ago = (t: number) => {
 export const ProjectLibrary: React.FC = () => {
   const router = useRouter();
   const load = useEditor((s) => s.load);
+  const toast = useToast();
   const [projects, setProjects] = useState<Proj[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [folders, setFolders] = useState<Record<string, string>>({});
   const [active, setActive] = useState<string>("All");
   const [q, setQ] = useState("");
@@ -46,10 +50,21 @@ export const ProjectLibrary: React.FC = () => {
   const patchProject = (id: string, patch: Partial<Proj>) =>
     setProjects((ps) => (ps ?? []).map((p) => (p.id === id ? { ...p, ...patch } : p)));
 
+  // Load the library. On failure DON'T fall back to an empty list — that reads
+  // as "all your work vanished". Surface a retryable error state instead.
+  const loadProjects = React.useCallback(() => {
+    setLoadError(false);
+    setProjects(null);
+    fetch("/api/v2/projects")
+      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then((d) => setProjects(d.projects ?? []))
+      .catch(() => { setProjects([]); setLoadError(true); });
+  }, []);
+
   useEffect(() => {
     setFolders(loadFolders());
-    fetch("/api/v2/projects").then((r) => r.json()).then((d) => setProjects(d.projects ?? [])).catch(() => setProjects([]));
-  }, []);
+    loadProjects();
+  }, [loadProjects]);
 
   const setFolder = (id: string, folder: string) => {
     setFolders((f) => { const next = { ...f }; if (!folder) delete next[id]; else next[id] = folder; localStorage.setItem(FOLDERS_KEY, JSON.stringify(next)); return next; });
@@ -68,9 +83,13 @@ export const ProjectLibrary: React.FC = () => {
     setBusy(id);
     try {
       const r = await fetch(`/api/v2/projects?id=${encodeURIComponent(id)}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
       if (d?.project) { load(d.project); router.push("/studio2"); return; }
-    } catch {}
+      throw new Error("Project missing from response");
+    } catch {
+      toast.error("Couldn't open that animation", "Please try again in a moment.");
+    }
     setBusy(null);
   };
   const download = async (id: string, name: string) => {
@@ -85,7 +104,7 @@ export const ProjectLibrary: React.FC = () => {
     } catch {}
   };
   const del = async (id: string) => {
-    if (!confirm("Delete this animation? This can't be undone.")) return;
+    if (!(await confirmDialog({ title: "Delete this animation?", message: "This can't be undone.", confirmLabel: "Delete", danger: true }))) return;
     await fetch(`/api/v2/projects?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
     setProjects((ps) => (ps ?? []).filter((p) => p.id !== id));
   };
@@ -100,7 +119,7 @@ export const ProjectLibrary: React.FC = () => {
       const d = await r.json();
       if (d?.url) {
         const url = d.url.startsWith("http") ? d.url : `${window.location.origin}${d.url}`;
-        try { await navigator.clipboard.writeText(url); } catch { window.prompt("Copy this share link:", url); }
+        try { await navigator.clipboard.writeText(url); } catch { void promptDialog({ title: "Copy your share link", message: "Select the link below and copy it.", defaultValue: url, confirmLabel: "Done" }); }
         patchProject(id, { shared: true });
         setCopied(id); setTimeout(() => setCopied((c) => (c === id ? null : c)), 1800);
       }
@@ -108,7 +127,7 @@ export const ProjectLibrary: React.FC = () => {
     setShareBusy(null);
   };
   const unshare = async (id: string) => {
-    if (!confirm("Stop sharing? The existing link will stop working.")) return;
+    if (!(await confirmDialog({ title: "Stop sharing?", message: "The existing link will stop working.", confirmLabel: "Stop sharing", danger: true }))) return;
     setShareBusy(id);
     await fetch("/api/v2/projects/share", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -117,7 +136,7 @@ export const ProjectLibrary: React.FC = () => {
     patchProject(id, { shared: false });
     setShareBusy(null);
   };
-  const newFolder = (id: string) => { const name = prompt("New folder name")?.trim(); if (name) setFolder(id, name); };
+  const newFolder = async (id: string) => { const name = await promptDialog({ title: "New folder", placeholder: "Folder name", confirmLabel: "Create" }); if (name) setFolder(id, name); };
 
   return (
     <div className="rounded-xl border border-line/60 bg-paper-100 overflow-hidden anim-fade-up" style={{ animationDelay: "390ms" }}>
@@ -147,12 +166,29 @@ export const ProjectLibrary: React.FC = () => {
       <div className="p-6 pt-4">
         {projects === null ? (
           <div className="flex items-center gap-2 py-8 text-graphite/30"><Loader2 size={16} className="animate-spin" /><span className="text-sm">Loading your animations…</span></div>
-        ) : visible.length === 0 ? (
+        ) : loadError ? (
           <div className="rounded-lg border border-dashed border-line py-10 text-center">
-            <Film size={22} className="mx-auto mb-2 text-graphite/25" />
-            <p className="text-sm text-graphite/45">{projects.length === 0 ? "No saved animations yet." : "Nothing in this folder."}</p>
-            <button onClick={() => router.push("/studio2")} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-brand px-3.5 py-2 text-xs font-semibold text-white shadow-glow-iris hover:-translate-y-0.5 transition-transform"><Plus size={13} /> Create one</button>
+            <p className="text-sm text-graphite/60">Couldn't load your animations.</p>
+            <p className="mt-1 text-xs text-graphite/40">Check your connection — your work is safe.</p>
+            <button onClick={loadProjects} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-iris px-3.5 py-2 text-xs font-semibold text-white transition-transform hover:-translate-y-0.5">Try again</button>
           </div>
+        ) : visible.length === 0 ? (
+          projects.length === 0 ? (
+            // First run — no animations at all. A warm, guided start in the
+            // product's own voice, routed to the prompt experience (/home).
+            <div className="rounded-2xl border border-dashed border-line py-12 text-center">
+              <Film size={26} className="mx-auto mb-3 text-iris/50" />
+              <h3 className="text-base font-semibold text-graphite">Create your first map story</h3>
+              <p className="mx-auto mt-1.5 max-w-sm text-sm text-graphite/50">Describe a journey and Mapanisy directs it — like <span className="italic text-graphite/70">“I traveled across Patagonia.”</span></p>
+              <button onClick={() => router.push("/home")} className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-iris px-4 py-2.5 text-sm font-semibold text-white shadow-glow-iris transition-transform hover:-translate-y-0.5"><Plus size={15} /> Start a map story</button>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-line py-10 text-center">
+              <Film size={22} className="mx-auto mb-2 text-graphite/25" />
+              <p className="text-sm text-graphite/45">Nothing in this folder.</p>
+              <button onClick={() => router.push("/home")} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-iris px-3.5 py-2 text-xs font-semibold text-white shadow-glow-iris hover:-translate-y-0.5 transition-transform"><Plus size={13} /> New map story</button>
+            </div>
+          )
         ) : (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
             {visible.map((p) => (

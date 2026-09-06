@@ -53,7 +53,13 @@ export function useTier(): UseTierResult {
           });
         }
       } catch {
-        if (!cancelled) setState({ tier: null, unit: null, usedRenders: null, maxRenders: null });
+        // Fail CLOSED. This used to set tier:null, and since `watermark` is
+        // `tier === "free"`, null meant NO watermark — so any /api/quota hiccup
+        // (a brand-new user whose Clerk webhook has not landed yet, a blip, an
+        // offline tab) handed a free user a clean export from the in-browser
+        // recorder. Every server-side path already defaults to "free"; this is
+        // the one place that defaulted the permissive way.
+        if (!cancelled) setState({ tier: "free", unit: null, usedRenders: null, maxRenders: null });
       } finally {
         if (!cancelled) setLoading(false);
       }

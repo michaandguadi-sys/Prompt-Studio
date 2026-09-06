@@ -10,19 +10,25 @@ import { CheckCircle, Info, AlertTriangle, X } from "lucide-react";
  *   const toast = useToast();
  *   toast.success("Saved", "Scene-Berlin.scene.json downloaded");
  *
- * Toasts auto-dismiss after 3.5s but can be manually closed. They stack from
- * the bottom-left so they don't collide with the render queue widget at
- * bottom-right.
+ * Pass a 4th `action` arg to add an inline button — the launch-grade "undo an
+ * accidental delete" affordance:
+ *
+ *   toast.info("Removed Spain", undefined, { label: "Undo", onClick: undo });
+ *
+ * Plain toasts auto-dismiss after 3.5s; actionable ones linger 6s (so there's
+ * time to hit Undo) but can be closed manually. They stack from the bottom-left.
  */
 
 type ToastKind = "success" | "info" | "error";
-type Toast = { id: string; kind: ToastKind; title: string; detail?: string };
+type ToastAction = { label: string; onClick: () => void };
+type Toast = { id: string; kind: ToastKind; title: string; detail?: string; action?: ToastAction };
 
+type Fire = (title: string, detail?: string, action?: ToastAction) => void;
 const ToastCtx = createContext<{
-  push: (kind: ToastKind, title: string, detail?: string) => void;
-  success: (title: string, detail?: string) => void;
-  info: (title: string, detail?: string) => void;
-  error: (title: string, detail?: string) => void;
+  push: (kind: ToastKind, title: string, detail?: string, action?: ToastAction) => void;
+  success: Fire;
+  info: Fire;
+  error: Fire;
 }>({
   push: () => {},
   success: () => {},
@@ -33,17 +39,17 @@ const ToastCtx = createContext<{
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const push = useCallback((kind: ToastKind, title: string, detail?: string) => {
+  const push = useCallback((kind: ToastKind, title: string, detail?: string, action?: ToastAction) => {
     const id = Math.random().toString(36).slice(2);
-    setToasts((t) => [...t, { id, kind, title, detail }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3500);
+    setToasts((t) => [...t, { id, kind, title, detail, action }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), action ? 6000 : 3500);
   }, []);
 
   const ctx = {
     push,
-    success: (t: string, d?: string) => push("success", t, d),
-    info:    (t: string, d?: string) => push("info", t, d),
-    error:   (t: string, d?: string) => push("error", t, d),
+    success: (t: string, d?: string, a?: ToastAction) => push("success", t, d, a),
+    info:    (t: string, d?: string, a?: ToastAction) => push("info", t, d, a),
+    error:   (t: string, d?: string, a?: ToastAction) => push("error", t, d, a),
   };
 
   return (
@@ -83,6 +89,14 @@ const ToastItem: React.FC<{ toast: Toast; onClose: () => void }> = ({ toast, onC
         <div className="font-semibold text-white">{toast.title}</div>
         {toast.detail && <div className="text-white/60 mt-0.5">{toast.detail}</div>}
       </div>
+      {toast.action && (
+        <button
+          onClick={() => { toast.action!.onClick(); onClose(); }}
+          className="shrink-0 rounded bg-white/10 px-2 py-1 text-[11px] font-semibold text-white hover:bg-white/20"
+        >
+          {toast.action.label}
+        </button>
+      )}
       <button onClick={onClose} className="text-white/40 hover:text-white shrink-0 mt-0.5">
         <X size={12} />
       </button>

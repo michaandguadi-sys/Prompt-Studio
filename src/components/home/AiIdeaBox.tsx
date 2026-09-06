@@ -1,17 +1,41 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEditor } from "@/v2/store/editor";
 import { Sparkles, Loader2, ArrowRight, KeyRound, Plus, X, Wand2, Film, Check } from "lucide-react";
 import { SettingsModal, loadAISettings } from "@/v2/ui/SettingsModal";
 import { SIGNATURE_STYLES } from "@/lib/presets/signatureStyles";
 import { STYLE_KEY } from "@/components/home/OnboardingModal";
-import { StoryboardReview, type ReviewData } from "./StoryboardReview";
-import { GeneratingOverlay } from "./GeneratingOverlay";
+import { type ReviewData } from "./StoryboardReview";
+// Only needed AFTER Generate is clicked — kept out of first-load JS.
+const StoryboardReview = dynamic(() => import("./StoryboardReview").then((m) => m.StoryboardReview), { ssr: false });
+const GeneratingOverlay = dynamic(() => import("./GeneratingOverlay").then((m) => m.GeneratingOverlay), { ssr: false });
 import { buildArc, summarizeSequence, type StoryArc, type ArcContext } from "@/lib/parse";
 import { addAddon, type Addon } from "@/lib/addons";
 import { useAiEngine } from "@/lib/aiEngine";
+import { recordTaste, tasteSummary } from "@/lib/taste";
+
+/** POST JSON with a hard timeout. The AI planning endpoints legitimately take
+ *  20-40s (research + compose), so the ceilings are generous — but without an
+ *  abort a stalled model or dropped connection would strand the creator on the
+ *  loading overlay forever. On timeout the fetch rejects with an AbortError the
+ *  callers turn into a friendly "taking longer than usual" message. */
+async function postJSON(url: string, body: unknown, timeoutMs: number): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 const EXAMPLES = [
   "The fall of the Berlin Wall, 1989",
@@ -54,7 +78,10 @@ export const AiIdeaBox: React.FC<{
   /** Fired the moment real generation begins — lets the page start its own
    *  transition (e.g. the living map dives toward the first destination). */
   onGenerateStart?: () => void;
-}> = ({ onPromptChange, darkMode = false, onGenerateStart }) => {
+  /** Fired on every terminal path (success-before-nav, error, back-out) so the
+   *  page can resume its idle life — otherwise the living map freezes forever. */
+  onGenerateEnd?: () => void;
+}> = ({ onPromptChange, darkMode = false, onGenerateStart, onGenerateEnd }) => {
   const router = useRouter();
   const load = useEditor((s) => s.load);
   const addSceneFromComposition = useEditor((s) => s.addSceneFromComposition);
@@ -68,6 +95,8 @@ export const AiIdeaBox: React.FC<{
   const [step, setStep] = useState<{ current: number; total: number }>({ current: 1, total: 1 });
   const [phase, setPhase] = useState<"director" | "composer" | null>(null);
   const phaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const firstFieldRef = useRef<HTMLTextAreaElement>(null);
+  const prefetchedRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [generationWarning, setGenerationWarning] = useState<string | null>(null);
   const [aiNudge, setAiNudge] = useState(false);
@@ -77,6 +106,35 @@ export const AiIdeaBox: React.FC<{
   const [ivLoading, setIvLoading] = useState(false);
   const [placeholderIdx, setPlaceholderIdx] = useState(0);
   const [isFocused, setIsFocused] = useState(false);
+  // Honour the OS "reduce motion" setting for the JS-driven placeholder carousel
+  // and the inline-styled animations CSS media queries can't reach.
+  const [reduceMotion, setReduceMotion] = useState(false);
+  // Platform-aware shortcut glyph (⌘ on Apple, Ctrl elsewhere). Computed in an
+  // effect — `navigator` is undefined during SSR and would crash hydration.
+  const [modKey, setModKey] = useState("⌘");
+  useEffect(() => {
+    try {
+      const m = window.matchMedia("(prefers-reduced-motion: reduce)");
+      const on = () => setReduceMotion(m.matches);
+      on();
+      m.addEventListener("change", on);
+      setModKey(/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl");
+      return () => m.removeEventListener("change", on);
+    } catch { /* older browser / SSR */ }
+  }, []);
+
+  // Resume the page's idle life on every terminal path (loading cleared, no
+  // review pending). Idempotent — the parent no-ops if already idle.
+  useEffect(() => { if (!loading && !review) onGenerateEnd?.(); }, [loading, review, onGenerateEnd]);
+
+  // Desktop: place the cursor ready, WITHOUT the on-load scroll jump autoFocus
+  // causes. On touch we deliberately don't focus — it would pop the soft
+  // keyboard and hide the hero the instant the page opens.
+  useEffect(() => {
+    try {
+      if (window.matchMedia("(hover:hover)").matches) firstFieldRef.current?.focus({ preventScroll: true });
+    } catch { /* SSR / older browser */ }
+  }, []);
 
   useEffect(() => {
     const apply = (idea?: string) => { if (idea && idea.trim()) { setPrompts([idea]); setIv(null); } };
@@ -108,15 +166,18 @@ export const AiIdeaBox: React.FC<{
 
   const multi = prompts.length > 1;
   const filled = prompts.map((p) => p.trim()).filter(Boolean);
+  // A single AI prompt opens the vision interview before generating — the button
+  // should say so, not promise a film it isn't about to build yet.
+  const willInterview = filled.length === 1 && useAI && !iv;
   // Cycling placeholder shows whenever the box is empty — even while focused,
   // so the page can autofocus (cursor ready) and still inspire with examples.
   const showPlaceholder = (prompts[0]?.trim() ?? "") === "" && !multi && !iv;
 
   useEffect(() => {
-    if (!showPlaceholder) return;
+    if (!showPlaceholder || reduceMotion) return;
     const t = setInterval(() => setPlaceholderIdx((n) => (n + 1) % PLACEHOLDER_EXAMPLES.length), 3600);
     return () => clearInterval(t);
-  }, [showPlaceholder]);
+  }, [showPlaceholder, reduceMotion]);
 
   useEffect(() => { onPromptChange?.(prompts[0] ?? ""); }, [prompts, onPromptChange]);
 
@@ -136,10 +197,7 @@ export const AiIdeaBox: React.FC<{
   }, [useAI, filled]);
 
   const genOne = async (idea: string, mode?: "story", interview?: { answers: Record<string, string>; text: string }, opts?: { style?: string; arc?: ArcContext }) => {
-    const res = await fetch("/api/v2/generate", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ idea, mode, style: opts?.style ?? styleArg, ai: useAI ? ai() : undefined, useAI, interview: interview?.answers, interviewText: interview?.text, arc: opts?.arc }),
-    });
+    const res = await postJSON("/api/v2/generate", { idea, mode, style: opts?.style ?? styleArg, ai: useAI ? ai() : undefined, useAI, interview: interview?.answers, interviewText: interview?.text, arc: opts?.arc, taste: tasteSummary() || undefined }, 90_000);
     const d = await res.json();
     try { if (Array.isArray(d?.addons)) for (const a of d.addons as Addon[]) if (a?.name) addAddon(a); } catch { /* registry full / SSR */ }
     return d;
@@ -147,26 +205,45 @@ export const AiIdeaBox: React.FC<{
 
   const fetchArc = async (ideas: string[]): Promise<StoryArc> => {
     try {
-      const r = await fetch("/api/v2/storyarc", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ideas, style: styleArg, ai: useAI ? ai() : undefined, useAI }),
-      });
+      const r = await postJSON("/api/v2/storyarc", { ideas, style: styleArg, ai: useAI ? ai() : undefined, useAI }, 60_000);
       if (r.ok) { const d = await r.json(); if (d?.sequences?.length === ideas.length) return d as StoryArc; }
     } catch { /* fall through to deterministic */ }
     return buildArc(ideas, { styleId: styleArg });
   };
 
   const ivLabel = (q: IVQ, val: string) => q.options.find((o) => o.value === val)?.label ?? val;
+
+  /** What the SELECTED answer does to the film — rendered live under each
+   *  question, so every tap visibly steers the director (these map 1:1 to the
+   *  binding directives the server injects into the Director prompt). */
+  const EFFECT_HINTS: Record<string, Record<string, string>> = {
+    tone: {
+      cinematic: "moody grade · the story climaxes in a hero shot",
+      calm: "gentle pacing · no tension beats · room to breathe",
+      urgent: "fast cuts · a tension beat mid-story · punchy titles",
+      epic: "opens wide · terrain on · slow hero finale",
+    },
+    energy: {
+      smooth: "gliding, eased camera — never abrupt",
+      dynamic: "chase camera · high pitch · motion in every beat",
+      punchy: "quick zooms · fast pacing",
+      locked: "still frames · the map breathes",
+    },
+    length: {
+      "8": "2–3 beats — one sharp idea",
+      "15": "3–4 beats — setup → payoff",
+      "30": "4–6 beats — a full mini-doc arc",
+    },
+  };
+  const effectFor = (q: IVQ, val: string): string =>
+    EFFECT_HINTS[q.id]?.[val] ?? (q.id === "focus" ? "the director builds the thesis around this" : "");
   const ivPayload = () => iv ? { answers: iv.answers, text: iv.questions.map((q) => `• ${q.question} → ${ivLabel(q, iv.answers[q.id])}`).join("\n") } : undefined;
   const setAnswer = (qid: string, value: string) => setIv((s) => (s ? { ...s, answers: { ...s.answers, [qid]: value } } : s));
 
   const startInterview = async (idea: string) => {
     setIvLoading(true); setError(null);
     try {
-      const r = await fetch("/api/v2/interview", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idea, ai: useAI ? ai() : undefined, useAI }),
-      });
+      const r = await postJSON("/api/v2/interview", { idea, ai: useAI ? ai() : undefined, useAI }, 45_000);
       const d = await r.json();
       if (d?.questions?.length) {
         const answers: Record<string, string> = {};
@@ -196,6 +273,7 @@ export const AiIdeaBox: React.FC<{
   const runGenerate = async () => {
     if (loading || filled.length === 0) return;
     onGenerateStart?.();
+    if (styleId !== "auto") recordTaste("signature", styleId);
     setStep({ current: 1, total: filled.length });
     setLoading(true); setError(null); setProgress(null); setAiNudge(false); setGenerationWarning(null);
     if (filled.length === 1 && useAI) {
@@ -243,16 +321,22 @@ export const AiIdeaBox: React.FC<{
       if (!d?.project) { setError(d?.error ?? "Couldn't generate that — try a clearer idea."); setLoading(false); return; }
       if (useAI && d.aiConfigured === false) setAiNudge(true);
       if (d._meta?.warning) setGenerationWarning(d._meta.warning);
-      if (d.story && d.plan) { setReview({ project: d.project, plan: d.plan, narration: d.narration ?? [], styleId, idea: filled[0], verification: d.verification, storyboard: d.storyboard, dirScript: d.dirScript }); setLoading(false); return; }
+      const choices = iv ? iv.questions.map((q) => ivLabel(q, iv.answers[q.id])) : undefined;
+      if (d.story && d.plan) { setReview({ project: d.project, plan: d.plan, narration: d.narration ?? [], styleId, idea: filled[0], verification: d.verification, storyboard: d.storyboard, dirScript: d.dirScript, choices }); setLoading(false); return; }
       if (d.plan || d.verification) {
         // Only pause at the single-scene review when AI research produced a
         // Director's Brief worth reading (thesis + facts). Smart Director goes
         // straight to the editor — no extra click needed.
         const hasResearch = !!(d.dirScript?.beats?.length || (d.verification?.thesis && d.verification?.facts?.length > 0));
-        if (hasResearch) { setReview({ project: d.project, plan: d.plan, narration: d.narration ?? [], styleId, idea: filled[0], verification: d.verification, storyboard: d.storyboard, dirScript: d.dirScript, single: true }); setLoading(false); return; }
+        if (hasResearch) { setReview({ project: d.project, plan: d.plan, narration: d.narration ?? [], styleId, idea: filled[0], verification: d.verification, storyboard: d.storyboard, dirScript: d.dirScript, single: true, choices }); setLoading(false); return; }
       }
       openInEditor(d.project, d.narration ?? []);
-    } catch { setError("Network error — please try again."); setLoading(false); }
+    } catch (e: any) {
+      setError(e?.name === "AbortError"
+        ? "The director is taking longer than usual — please try again."
+        : "Network error — please try again.");
+      setLoading(false);
+    }
   };
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -283,13 +367,16 @@ export const AiIdeaBox: React.FC<{
           78%  { opacity: 1; }
           100% { opacity: 0; transform: translateY(-4px); }
         }
-        @keyframes btnPulse {
-          0%, 100% { box-shadow: 0 0 20px rgba(110,123,255,0.35); }
-          50%       { box-shadow: 0 0 32px rgba(110,123,255,0.60); }
+        @keyframes dvRise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+        @keyframes focusBreathe {
+          0%, 100% { box-shadow: 0 16px 48px rgba(0,0,0,0.55), 0 0 40px rgba(110,123,255,0.15); }
+          50%       { box-shadow: 0 16px 48px rgba(0,0,0,0.55), 0 0 66px rgba(110,123,255,0.32); }
         }
+        .promptFocusGlow { animation: focusBreathe 3.6s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) { .promptFocusGlow { animation: none; } }
       `}</style>
       <div
-        className={`${containerCls} transition-all duration-300${isFocused && dm ? " ring-2 ring-iris/22 shadow-[0_0_48px_rgba(110,123,255,0.18)]" : ""}`}
+        className={`${containerCls} transition-all duration-300${isFocused && dm ? " ring-2 ring-iris/30 promptFocusGlow" : ""}`}
       >
         {/* ── TEXTAREA ROWS ─────────────────────────────────────────────────── */}
         <div className={dm ? "space-y-1 px-4 pt-4" : "space-y-1.5"}>
@@ -305,12 +392,26 @@ export const AiIdeaBox: React.FC<{
               )}
               <div className="relative flex-1">
                 <textarea
+                  ref={i === 0 && !multi ? firstFieldRef : undefined}
                   value={p}
                   onChange={(e) => setPrompt(i, e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) generate(); }}
-                  onFocus={() => setIsFocused(true)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { generate(); return; }
+                    // Tab on an empty field accepts the example you can see —
+                    // one keystroke from blank page to a running film.
+                    if (e.key === "Tab" && !e.shiftKey && showPlaceholder && i === 0 && p.trim() === "") {
+                      e.preventDefault();
+                      setPrompt(0, PLACEHOLDER_EXAMPLES[placeholderIdx].replace(/^[^\p{L}\p{N}"']+\s*/u, ""));
+                    }
+                  }}
+                  onFocus={() => {
+                    setIsFocused(true);
+                    // Warm the editor route the moment they engage, so Generate →
+                    // editor feels instant.
+                    if (!prefetchedRef.current) { prefetchedRef.current = true; try { router.prefetch("/studio2"); } catch {} }
+                  }}
                   onBlur={() => setIsFocused(false)}
-                  autoFocus={i === 0 && !multi}
+                  aria-label={multi ? `Scene ${i + 1} description` : "Describe the map story you want to create"}
                   rows={dm ? (multi ? 2 : 5) : (multi ? 2 : 3)}
                   placeholder={
                     multi
@@ -324,10 +425,15 @@ export const AiIdeaBox: React.FC<{
                   <div
                     key={`ph-${placeholderIdx}`}
                     className={`pointer-events-none absolute inset-x-0 top-2.5 text-[15px] italic leading-relaxed ${dm ? "text-white/20" : "text-graphite/40"} ${dm ? "" : "px-1"}`}
-                    style={{ animation: "phFade 3.6s ease both forwards" }}
+                    style={{ animation: reduceMotion ? undefined : "phFade 3.6s ease both forwards" }}
                     aria-hidden
                   >
                     &ldquo;{PLACEHOLDER_EXAMPLES[placeholderIdx]}&rdquo;
+                    {isFocused && (
+                      <span className={`ml-2 rounded border px-1 py-0.5 align-middle text-[9px] not-italic ${dm ? "border-white/15 text-white/35" : "border-graphite/20 text-graphite/45"}`}>
+                        ⇥ Tab to use this
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
@@ -404,6 +510,14 @@ export const AiIdeaBox: React.FC<{
                       );
                     })}
                   </div>
+                  {(() => {
+                    const eff = effectFor(q, iv!.answers[q.id]);
+                    return eff ? (
+                      <div key={iv!.answers[q.id]} className={`mt-1 text-[10px] ${dm ? "text-[#8fb8ff]/75" : "text-iris/75"}`} style={{ animation: "dvRise .25s ease" }}>
+                        → {eff}
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
               ))}
             </div>
@@ -468,29 +582,38 @@ export const AiIdeaBox: React.FC<{
                 }`}
                 style={dm ? {
                   background: "linear-gradient(135deg, #6E7BFF 0%, #B57BFF 100%)",
-                  animation: filled.length > 0 && !loading ? "btnPulse 2.2s ease-in-out infinite" : undefined,
+                  boxShadow: filled.length > 0 && !loading ? "0 10px 30px rgba(110,123,255,0.38)" : undefined,
                 } : undefined}
               >
                 {loading || ivLoading
                   ? <Loader2 size={14} className="animate-spin" />
                   : iv ? <ArrowRight size={14} />
                   : multi ? <Film size={14} />
+                  : willInterview ? <Wand2 size={14} />
                   : <Sparkles size={14} />}
                 {loading
                   ? (progress ?? "Creating…")
                   : ivLoading ? "Reading…"
                   : iv ? "Build animation"
                   : multi ? `Build ${filled.length} scenes`
+                  : willInterview ? "Set the vision"
                   : "Generate"}
+                {!multi && !iv && !loading && !ivLoading && filled.length > 0 && (
+                  <kbd className="pointer-events-none ml-0.5 inline-flex items-center gap-0.5 rounded bg-white/15 px-1 text-[9px] font-semibold leading-none text-white/75" aria-hidden>
+                    {modKey} ↵
+                  </kbd>
+                )}
               </button>
-              {useAI && estimatedTokens > 0 && !loading && !iv && (
-                <span className={`text-[9.5px] tabular-nums ${dm ? "text-white/20" : "text-graphite/28"}`} title="Estimated AI token usage">
-                  ~{estimatedTokens >= 1000 ? `${Math.round(estimatedTokens / 1000)}k` : estimatedTokens} tokens
-                </span>
-              )}
             </div>
           </div>
         </div>
+
+        {/* Engine consequence — the decisive choice, legible without hovering */}
+        {dm && (
+          <div className="-mt-1 px-4 pb-3.5 text-[10px] text-white/30">
+            {useAI ? "Researches, fact-checks & art-directs your story" : "Instant preview — built-in director logic"}
+          </div>
+        )}
 
         {/* Style selection removed — the AI director picks the look from the
             prompt itself ("vintage atlas", "documentary style" read as words).
@@ -498,23 +621,28 @@ export const AiIdeaBox: React.FC<{
 
         {/* ── ENGINE TOGGLE (light mode only — dark mode has it in the bar) ─── */}
         {!dm && (
-          <div className="mt-1 flex items-center justify-between gap-2 border-t border-black/5 px-2 pb-0.5 pt-2">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-graphite/35">Engine</span>
-            <div className="flex items-center rounded-lg border border-line bg-paper-100/60 p-0.5">
-              <button
-                onClick={() => setUseAI(true)}
-                title="Your AI model researches, fact-checks and art-directs the whole animation"
-                className={`inline-flex items-center gap-1 rounded-[7px] px-2.5 py-1 text-[11px] font-semibold transition-colors ${useAI ? "bg-brand text-white shadow-glow-iris" : "text-graphite/45 hover:text-graphite"}`}
-              >
-                <Wand2 size={11} /> AI-directed
-              </button>
-              <button
-                onClick={() => setUseAI(false)}
-                title="Built-in director logic — instant, no API key, fully private"
-                className={`inline-flex items-center gap-1 rounded-[7px] px-2.5 py-1 text-[11px] font-semibold transition-colors ${!useAI ? "bg-emerald-500 text-white shadow-sm" : "text-graphite/45 hover:text-graphite"}`}
-              >
-                ⚡ Smart (no AI)
-              </button>
+          <div className="mt-1 border-t border-black/5 px-2 pb-0.5 pt-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-graphite/35">Engine</span>
+              <div className="flex items-center rounded-lg border border-line bg-paper-100/60 p-0.5">
+                <button
+                  onClick={() => setUseAI(true)}
+                  title="Your AI model researches, fact-checks and art-directs the whole animation"
+                  className={`inline-flex items-center gap-1 rounded-[6px] px-2.5 py-1 text-[11px] font-semibold transition-colors ${useAI ? "bg-brand text-white shadow-glow-iris" : "text-graphite/45 hover:text-graphite"}`}
+                >
+                  <Wand2 size={11} /> AI-directed
+                </button>
+                <button
+                  onClick={() => setUseAI(false)}
+                  title="Built-in director logic — instant, no API key, fully private"
+                  className={`inline-flex items-center gap-1 rounded-[6px] px-2.5 py-1 text-[11px] font-semibold transition-colors ${!useAI ? "bg-emerald-500 text-white shadow-sm" : "text-graphite/45 hover:text-graphite"}`}
+                >
+                  ⚡ Smart (no AI)
+                </button>
+              </div>
+            </div>
+            <div className="mt-1.5 text-right text-[10px] text-graphite/40">
+              {useAI ? "Researches, fact-checks & art-directs your story" : "Instant preview — built-in director logic"}
             </div>
           </div>
         )}
@@ -585,16 +713,9 @@ export const AiIdeaBox: React.FC<{
       )}
 
       {/* ── FOOTER LINKS ────────────────────────────────────────────────────── */}
-      <div className={`mt-3 flex items-center justify-between gap-1.5 text-[11px] ${dm ? "text-white/22" : "text-graphite/40"}`}>
-        <div className="flex items-center gap-1.5">
-          <span>or</span>
-          <button
-            onClick={() => router.push("/studio2")}
-            className={`inline-flex items-center gap-1 transition-colors ${dm ? "text-white/38 hover:text-iris" : "text-graphite/55 hover:text-iris"}`}
-          >
-            start from a blank map <ArrowRight size={11} />
-          </button>
-        </div>
+      {/* "Start from a blank map" lives in the top nav — removed here per Micha
+          so the prompt box stays focused on describing a story. */}
+      <div className={`mt-3 flex items-center justify-end gap-1.5 text-[11px] ${dm ? "text-white/22" : "text-graphite/40"}`}>
         <button
           onClick={() => setSettingsOpen(true)}
           className={`inline-flex items-center gap-1 transition-colors ${dm ? "text-white/28 hover:text-iris" : "text-graphite/45 hover:text-iris"}`}
@@ -612,16 +733,18 @@ export const AiIdeaBox: React.FC<{
           onOpen={(project, narration) => { setReview(null); openInEditor(project, narration); }}
         />
       )}
-      <GeneratingOverlay
-        open={loading}
-        idea={filled[Math.min(step.current - 1, Math.max(0, filled.length - 1))] ?? filled[0]}
-        styleName={styleId === "auto" ? "Director's choice" : SIGNATURE_STYLES.find((s) => s.id === styleId)?.name}
-        current={step.current}
-        total={step.total}
-        phase={phase ?? undefined}
-        warning={generationWarning}
-        estimatedTokens={estimatedTokens}
-      />
+      {loading && (
+        <GeneratingOverlay
+          open
+          idea={filled[Math.min(step.current - 1, Math.max(0, filled.length - 1))] ?? filled[0]}
+          styleName={styleId === "auto" ? "Director's choice" : SIGNATURE_STYLES.find((s) => s.id === styleId)?.name}
+          current={step.current}
+          total={step.total}
+          phase={phase ?? undefined}
+          warning={generationWarning}
+          estimatedTokens={estimatedTokens}
+        />
+      )}
     </div>
   );
 };

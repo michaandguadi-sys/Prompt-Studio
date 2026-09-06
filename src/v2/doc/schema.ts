@@ -27,6 +27,9 @@ export const CameraPose = z.object({
   lon: z.number(),
   lat: z.number(),
   zoom: z.number().min(0).max(22),
+  // 85° is maplibre-gl 4.x's hard ceiling (values >85 throw in the Map
+  // constructor). The brief's full 90° look-ahead is blocked on the
+  // maplibre-gl v5 upgrade — raise here + every clamp site together then.
   pitch: z.number().min(0).max(85).default(0),
   bearing: z.number().default(0),
 });
@@ -86,12 +89,30 @@ export const Keyframe = z.object({
 });
 export type Keyframe = z.infer<typeof Keyframe>;
 
+/** Interpolation FROM a keyframe to the next one. */
+export const KfEase = z.enum(["linear", "smooth", "easeIn", "easeOut", "hold"]);
+export type KfEase = z.infer<typeof KfEase>;
+/** A keyframe on ONE numeric property: `value` at time `t` (0..1 of the scene),
+ *  with `ease` describing how it interpolates to the NEXT keyframe. Property
+ *  tracks power the universal "set a keyframe, move the playhead, set another"
+ *  workflow on any adjustable number (fill opacity, extrusion, glow, size…). */
+export const PropKeyframe = z.object({
+  t: z.number().min(0).max(1),
+  value: z.number(),
+  ease: KfEase.default("smooth"),
+});
+export type PropKeyframe = z.infer<typeof PropKeyframe>;
+
 const layerBase = {
   id: z.string(),
   name: z.string().default(""),
   enabled: z.boolean().default(true),
   /** Optional transform keyframes (position/scale/rotation along the scene). */
   kf: z.array(Keyframe).default([]),
+  /** Per-property animation tracks: { "fillOpacity": [{t,value,ease}, …], … }.
+   *  A property with a track ANIMATES between its keyframes; otherwise the plain
+   *  static field value is used. Sampled per-frame in the render via kfNum(). */
+  tracks: z.record(z.string(), z.array(PropKeyframe)).default({}),
 };
 
 // ── Layer: Camera (the base move — exactly one per composition) ──────────────
@@ -116,6 +137,19 @@ export const CameraLayer = z.object({
   moveFraction: z.number().min(0.1).max(1).default(0.85),
   easing: Easing.default("easeInOut"),
   smoothPath: z.boolean().default(true),
+  /**
+   * Explicit TIME-BASED camera keyframes (Google-Earth-Studio model): a full
+   * pose pinned at time `t` (0..1 of the scene). When `keys` has ≥1 entry it
+   * DRIVES the camera — the render samples the pose from these keyframes
+   * (interpolating between consecutive keys with each key's `ease`), overriding
+   * the style/start/end/waypoints scheduler. Empty = classic auto camera.
+   * Set live in the preview via the "Adjust camera" gizmo.
+   */
+  keys: z.array(z.object({
+    t: z.number().min(0).max(1),
+    pose: CameraPose,
+    ease: KfEase.default("smooth"),
+  })).default([]),
 });
 
 // ── Layer: Highlight (country / region / custom polygon) ─────────────────────
@@ -453,6 +487,14 @@ export const EarthLayer = z.object({
   tileMatrix: z.string().default("GoogleMapsCompatible_Level9"),
   /** Max zoom level this GIBS dataset supports (MODIS=9, Landsat=12, VIIRS=8). */
   maxzoom: z.number().min(1).max(15).default(9),
+  /** True for time-invariant layers (Blue Marble, Black Marble city lights) — the
+   *  GIBS URL then omits the date segment. Dated layers leave this false. */
+  staticTime: z.boolean().default(false),
+  /** How the data blends onto the map beneath it. MapLibre rasters have no true
+   *  blend-mode, so these are art-directed looks built from raster paint props
+   *  (saturation/contrast/brightness) — "screen" brightens (great for night
+   *  lights/fires on a dark style), "multiply" deepens over light styles. */
+  blend: z.enum(["normal", "vivid", "screen", "multiply", "ghost"]).default("normal"),
   /** Animated max opacity (0–1). The timing controls fade-in/out on top of this. */
   opacity: z.number().min(0).max(1).default(0.75),
   /** Human-readable label shown as an in-map legend chip. */
@@ -550,6 +592,10 @@ export const ConnectionsLayer = z.object({
   dotColor: z.string().default("#ffffff"),
   pulse: z.boolean().default(false),                   // travelling pulse along arcs
   showLabels: z.boolean().default(false),
+  /** Bold arrowhead at each destination end — turns arcs into directional flow
+   *  arrows (backer→proxy, advance, supply line — the Vox-explainer look). */
+  arrowheads: z.boolean().default(false),
+  arrowScale: z.number().min(0.5).max(4).default(1.6), // arrowhead size ×line width
 });
 
 // ── Layer: Spotlight (darken everything except a circle to direct the eye) ────
@@ -706,7 +752,7 @@ export const TrackLayer = z.object({
   dotColor: z.string().default("#ffffff"),    // the moving head
   showDot: z.boolean().default(true),
   // camera offsets layered on top of the variant's base framing
-  pitch: z.number().min(0).max(84).default(60),
+  pitch: z.number().min(0).max(85).default(60),
   zoomOffset: z.number().min(-4).max(4).default(0),
   bearingOffset: z.number().min(-180).max(180).default(0),
   // labels
@@ -887,6 +933,13 @@ export const Composition = z.object({
   /** Suggested voiceover / documentary narration for this beat.
    *  Rendered as a subtitle at the bottom when look.showCaptions is true. */
   narration: z.string().default(""),
+  /** Multi-beat timed narration captions — one line per story beat, shown at
+   *  its camera-arrival time. Any field outside this schema is silently
+   *  stripped by every parseProject() round-trip, so it must live here. */
+  narrationLines: z.array(z.object({
+    text: z.string(),
+    startSec: z.number(),
+  })).default([]),
   /** Journalism-grade in-frame source citations (e.g. "World Bank 2024", "UN OCHA").
    *  Auto-populated from the AI brief's fact sources; displayed as a subtle corner overlay. */
   citations: z.array(z.string()).default([]),
@@ -946,6 +999,19 @@ export function dimsFor(aspect: Aspect): { width: number; height: number } {
     case "1:1": return { width: 2160, height: 2160 };
     default: return { width: 3840, height: 2160 };
   }
+}
+
+/**
+ * World-wrap zoom floor: the lowest zoom at which ONE world copy still fills
+ * the frame, so the camera can never pull back far enough to show duplicated
+ * landmasses in a single frame. MapLibre's projected world is 512·2^zoom px
+ * wide, so the floor is log2(canvasWidth / 512) plus a small safety margin.
+ * 16:9 → ≈2.96 · 9:16 and 1:1 → ≈2.13.
+ * Enforced at the validation gate (fixPose) and as minZoom on the render <Map>.
+ */
+export function minZoomForAspect(aspect: Aspect): number {
+  const { width } = dimsFor(aspect);
+  return Math.log2(width / 512) + 0.05;
 }
 
 /** Parse + validate an unknown value into a Project (throws on invalid). */

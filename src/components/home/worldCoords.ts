@@ -50,6 +50,7 @@ const C: Record<string, Entry> = {
   "mongolia": [103.8, 46.9, 3.8],
   "australia": [133.8, -25.3, 3.0], "new zealand": [172.5, -42.0, 4.4], "fiji": [178.1, -17.7, 6.0],
   "papua new guinea": [144.0, -6.3, 4.6], "samoa": [-172.1, -13.8, 7.0],
+  "cook islands": [-159.78, -21.23, 5.6], "greenland": [-42.6, 71.7, 3.0],
 
   // ── cities ──
   "berlin": [13.40, 52.52, 8], "munich": [11.58, 48.14, 8], "hamburg": [9.99, 53.55, 8],

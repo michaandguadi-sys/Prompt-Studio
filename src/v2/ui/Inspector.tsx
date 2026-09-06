@@ -1,10 +1,13 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { MapPin, Upload, Sparkles, Boxes, Mic, Play, Square, X as XIcon, Loader2 } from "lucide-react";
+import { MapPin, Upload, Sparkles, Mic, Play, Square, X as XIcon, Loader2 } from "lucide-react";
 import { hasVoiceoverKey, loadVoiceoverSettings, generateVoiceover, measureAudioDuration } from "@/lib/voiceover";
-import { MAP3D_STYLES } from "@/lib/presets/map3dStyles";
-import { Field, Input, NumberInput, Select, Section, Slider, Toggle } from "./controls";
+import { Field, Input, NumberInput, Select, Section, Slider, Toggle, SegTabs, Advanced } from "./controls";
+import { confirmDialog, promptDialog } from "./dialogs";
+import { MapStyleGallery } from "./Map3DStyleModal";
+import { KfSlider } from "./KfControl";
+import { EARTH_PRESETS, EARTH_CATEGORIES, EARTH_DATE_OPTIONS } from "@/lib/presets/earthLayers";
 import { ColorInput } from "@/components/ui/ColorInput";
 import { ColorWheel } from "./ColorWheel";
 import { PlaceSearch } from "@/components/MapBuilder/PlaceSearch";
@@ -19,7 +22,7 @@ import { loadAddons, removeAddon as removeAddonStore, type Addon } from "@/lib/a
 import { useTier } from "@/hooks/useTier";
 import { TimingControls } from "./TimingControls";
 import { ThemePanel } from "./ThemePanel";
-import { FONT_CHOICES } from "../doc/themes";
+import { FONT_CHOICES, FONT_GROUPS } from "../doc/themes";
 import { LAYER_REGISTRY } from "../layers/registry";
 import type { Layer, Look } from "../doc/schema";
 
@@ -40,11 +43,6 @@ const CAMERA_MOVES: { v: string; label: string; pitch: number }[] = [
   { v: "pan", label: "Pan", pitch: 25 },
   { v: "hold", label: "Hold", pitch: 0 },
 ];
-
-// The Camera layer is now the SOLE camera driver — routes/highlights never
-// hijack the framing — so the old per-layer "drive the camera" picker is gone.
-// Kept as a no-op component so existing call sites stay valid (and easy to drop).
-const PriorityControl: React.FC<{ layerId: string; type: "camera" | "route" | "highlight" }> = () => null;
 
 const IDENTITY_TF = { offsetXPct: 0, offsetYPct: 0, scale: 1, rotation: 0 };
 
@@ -103,12 +101,17 @@ const TransformControls: React.FC<{ t: any; onChange: (tf: any) => void; kf?: an
   );
 };
 
-/** Font picker shared by text layers — "Theme default" falls back to the project font. */
+/** Font picker shared by text layers — the full grouped family catalogue
+ *  (Sans / Serif / Display / Condensed / Handwritten / Mono). */
 const FontField: React.FC<{ value: string | null; onChange: (v: string | null) => void }> = ({ value, onChange }) => (
   <Field label="Font" hint="Overrides the theme font">
     <Select value={value ?? ""} onChange={(e) => onChange(e.target.value || null)}>
       <option value="">Theme default</option>
-      {FONT_CHOICES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+      {FONT_GROUPS.map((g) => (
+        <optgroup key={g} label={g}>
+          {FONT_CHOICES.filter((f) => f.group === g).map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+        </optgroup>
+      ))}
     </Select>
   </Field>
 );
@@ -417,10 +420,8 @@ const NarrationCaptionField: React.FC = () => {
 const LookPanel: React.FC = () => {
   const look = (useEditor((s) => s.project.composition.look) ?? DEFAULT_LOOK) as Look;
   const patchComposition = useEditor((s) => s.patchComposition);
-  const proMode = useEditor((s) => s.proMode);
   const set = (patch: Partial<Look>) => patchComposition({ look: { ...look, ...patch } });
-  // Pro users default to advanced open; everyone gets an explicit toggle.
-  const [advanced, setAdvanced] = useState(proMode);
+  const [advanced, setAdvanced] = useState(false);
   return (
     <Section title="Look & grade">
       {/* Distinct one-tap looks */}
@@ -508,8 +509,8 @@ const QuickAdjust: React.FC = () => {
     const startZoom = m.v === "zoom-out" ? cam.end.zoom + delta : Math.max(1.4, cam.end.zoom - delta);
     patchLayer(cam.id, { style: m.v, end: { ...cam.end, pitch: m.pitch }, start: { ...cam.start, zoom: m.v === "hold" ? cam.end.zoom : startZoom, pitch: 0, bearing: 0 }, ...(m.v === "hold" ? { moveFraction: 0.2 } : {}) });
   };
-  const saveCurrent = () => {
-    const name = window.prompt("Name this preset (look + camera)")?.trim();
+  const saveCurrent = async () => {
+    const name = await promptDialog({ title: "Name this preset", message: "Saves the current look + camera.", confirmLabel: "Save preset" });
     if (!name) return;
     const p = { id: "ps_" + Math.random().toString(36).slice(2, 8), name, look: comp.look, styleUrl: (comp.basemap as any)?.styleUrl,
       cam: { style: cam.style, pitch: cam.end.pitch, bearing: cam.end.bearing, startZoom: cam.start.zoom, moveFraction: cam.moveFraction, easing: cam.easing } };
@@ -550,14 +551,14 @@ const QuickAdjust: React.FC = () => {
           format={(v) => (v < 0.3 ? "none" : v < 2 ? "subtle" : v < 4.5 ? "medium" : "big")} />
       )}
       <div className="grid grid-cols-2 gap-2">
-        <Slider label="Tilt" value={cam.end.pitch} min={0} max={80} step={1} onChange={(v) => patchLayer(cam.id, { end: { ...cam.end, pitch: v } })} format={(v) => `${Math.round(v)}°`} />
+        <Slider label="Tilt" value={cam.end.pitch} min={0} max={85} step={1} onChange={(v) => patchLayer(cam.id, { end: { ...cam.end, pitch: v } })} format={(v) => `${Math.round(v)}°`} />
         <Slider label="Pace" value={durationSec} min={2} max={30} step={0.5} onChange={(v) => patchComposition({ durationSec: v })} format={(v) => `${v.toFixed(1)}s`} />
       </div>
       <Field label="My presets" hint="save look + camera, reuse anywhere">
         <div className="flex flex-wrap gap-1.5">
           {presets.map((p) => (
             <button key={p.id} onClick={() => applyPreset(p)}
-              onContextMenu={(e) => { e.preventDefault(); if (window.confirm(`Delete preset "${p.name}"?`)) delPreset(p.id); }}
+              onContextMenu={async (e) => { e.preventDefault(); if (await confirmDialog({ title: `Delete preset "${p.name}"?`, confirmLabel: "Delete", danger: true })) delPreset(p.id); }}
               title={`${p.name} — click to apply, right-click to delete`}
               className="rounded-full border border-line px-2.5 py-1 text-[11px] font-medium text-graphite/70 transition-colors hover:border-iris hover:text-iris">
               {p.name}
@@ -603,8 +604,8 @@ const BrandKitPanel: React.FC = () => {
     if (k.look) patchComposition({ look: { ...comp.look, ...k.look } });
     setLogo(k.logo ?? null);
   };
-  const saveCurrent = () => {
-    const name = window.prompt("Name this brand kit")?.trim();
+  const saveCurrent = async () => {
+    const name = await promptDialog({ title: "Name this brand kit", confirmLabel: "Save kit" });
     if (!name) return;
     const lk = comp.look as any;
     persist([...kits.filter((k) => k.name !== name), {
@@ -621,7 +622,7 @@ const BrandKitPanel: React.FC = () => {
         <div className="flex flex-wrap gap-1.5">
           {kits.map((k) => (
             <button key={k.id} onClick={() => apply(k)}
-              onContextMenu={(e) => { e.preventDefault(); if (window.confirm(`Delete brand kit "${k.name}"?`)) persist(kits.filter((x) => x.id !== k.id)); }}
+              onContextMenu={async (e) => { e.preventDefault(); if (await confirmDialog({ title: `Delete brand kit "${k.name}"?`, confirmLabel: "Delete", danger: true })) persist(kits.filter((x) => x.id !== k.id)); }}
               title={`${k.name} — apply (right-click to delete)`}
               className="inline-flex items-center gap-1.5 rounded-full border border-line px-2.5 py-1 text-[11px] font-medium text-graphite/70 transition-colors hover:border-iris hover:text-iris">
               <span className="flex gap-0.5">{[k.theme.accent, k.theme.fill, k.theme.glow].map((c, i) => <span key={i} className="h-2.5 w-2.5 rounded-[2px]" style={{ background: c }} />)}</span>
@@ -640,29 +641,9 @@ const BrandKitPanel: React.FC = () => {
   );
 };
 
-/** The selectable basemaps — a VISUAL picker (thumbnail swatch + name) so the
- *  map style is the first, most obvious choice. Swatches approximate each look. */
-type CuratedStyle = { id: string; name: string; hint: string; kind: "flat" | "photoreal" | "3d"; url?: string; preset3dId?: string; swatch: React.CSSProperties };
-/** ONE curated set of distinct looks — flat bases + the standout 3D worlds +
- *  real-building Photoreal, so the picker is clear (not 19 cramped swatches). */
-const CURATED_STYLES: CuratedStyle[] = [
-  { id: "satellite", name: "Satellite", hint: "real imagery", kind: "flat", url: "mapbox://styles/mapbox/satellite-streets-v12", swatch: { background: "linear-gradient(135deg,#243a1c,#3b5a2a 45%,#7a6b3e 75%,#274b63)" } },
-  { id: "dark", name: "Dark", hint: "cinematic default", kind: "flat", url: "mapbox://styles/mapbox/dark-v11", swatch: { background: "linear-gradient(135deg,#0a0e1a,#121830 60%,#1b2547)" } },
-  { id: "minimal", name: "Minimal", hint: "clean & light", kind: "flat", url: "mapbox://styles/mapbox/light-v11", swatch: { background: "linear-gradient(135deg,#f4f5f8,#e7ebf2 60%,#d6deea)" } },
-  { id: "terrain", name: "Terrain", hint: "topographic relief", kind: "flat", url: "mapbox://styles/mapbox/outdoors-v12", swatch: { background: "linear-gradient(135deg,#cfe3b8,#a9cf8e 55%,#8bbf7a)" } },
-  { id: "photoreal", name: "Photoreal 3D", hint: "real buildings · like Google Earth", kind: "photoreal", swatch: { background: "linear-gradient(135deg,#3a4a2c,#6b7a4a 45%,#9a8a5a 70%,#2a4b63)" } },
-  { id: "papercraft", name: "Paper-craft", hint: "folded-paper 3D", kind: "3d", preset3dId: "papercraft", swatch: { background: "linear-gradient(135deg,#efe7d6,#d8cdb6 60%,#b9a98a)" } },
-  { id: "holographic", name: "Holographic", hint: "cyan hologram 3D", kind: "3d", preset3dId: "holographic", swatch: { background: "linear-gradient(135deg,#06121f,#0b3a4a 45%,#2FE0FF)" } },
-  { id: "aurora", name: "Aurora", hint: "teal-violet relief 3D", kind: "3d", preset3dId: "aurora", swatch: { background: "linear-gradient(135deg,#06161a,#155e57 45%,#36d39a 72%,#6E7BFF)" } },
-  { id: "molten", name: "Molten", hint: "lava & ember 3D", kind: "3d", preset3dId: "molten", swatch: { background: "linear-gradient(135deg,#120806,#7a2410 45%,#ff6a2a 78%,#ff8a3a)" } },
-  { id: "neon-noir", name: "Neon Noir", hint: "synthwave magenta 3D", kind: "3d", preset3dId: "neon-noir", swatch: { background: "linear-gradient(135deg,#14061f,#5e0a55 45%,#ff3df0)" } },
-  { id: "blueprint", name: "Blueprint", hint: "glowing technical 3D", kind: "3d", preset3dId: "blueprint", swatch: { background: "linear-gradient(135deg,#0a1f4d,#1d3f86 50%,#bcd4ff)" } },
-  { id: "crystal-ice", name: "Crystal Ice", hint: "glacial translucent 3D", kind: "3d", preset3dId: "crystal-ice", swatch: { background: "linear-gradient(135deg,#0a1622,#3a6d8a 50%,#bfe9ff)" } },
-  { id: "sakura", name: "Sakura", hint: "cherry-blossom dusk 3D", kind: "3d", preset3dId: "sakura", swatch: { background: "linear-gradient(135deg,#1a0a12,#7a2a52 48%,#ff9ec9)" } },
-  { id: "emerald", name: "Emerald", hint: "bio-luminescent green 3D", kind: "3d", preset3dId: "emerald", swatch: { background: "linear-gradient(135deg,#04140c,#0f5e3a 48%,#2fd98a)" } },
-  { id: "war-room", name: "War Room", hint: "tactical sand-table 3D", kind: "3d", preset3dId: "war-room", swatch: { background: "linear-gradient(135deg,#0e1622,#3a4a63 55%,#ffb020)" } },
-];
-/** Niche bases kept available as a small text row (not in the visual grid). */
+/** Niche bases kept available as a small text row (the full style gallery lives
+ *  in <MapStyleGallery />): a clean graticule grid + the OpenHistoricalMap base
+ *  that unlocks the year time-travel controls. */
 const MORE_STYLES: { url: string; name: string }[] = [
   { url: "grid", name: "Grid" },
   { url: "https://www.openhistoricalmap.org/map-styles/main/main.json", name: "Historical" },
@@ -672,10 +653,7 @@ const MORE_STYLES: { url: string; name: string }[] = [
  *  the per-style options (terrain, labels, land/water, historical year). */
 const MapStylePanel: React.FC = () => {
   const basemap = useEditor((s) => s.project.composition.basemap);
-  const look = useEditor((s) => s.project.composition.look);
-  const layers = useEditor((s) => s.project.composition.layers);
   const patchComposition = useEditor((s) => s.patchComposition);
-  const patchLayer = useEditor((s) => s.patchLayer);
   const { tier } = useTier();
   const isPro = PRO_DATA_TIERS.has(tier ?? "");
   const [customUrl, setCustomUrl] = useState("");
@@ -697,56 +675,22 @@ const MapStylePanel: React.FC = () => {
   };
   const loadStyle = (p: { basemap: Record<string, unknown> }) => patchComposition({ basemap: { ...basemap, ...p.basemap, photoreal3d: false } as any });
   const delStyle = (id: string) => persistStyles(stylePresets.filter((x) => x.id !== id));
-  // Apply a creative 3D world: merge its basemap + look + tilt the camera (same as the old modal).
-  const apply3d = (st: (typeof MAP3D_STYLES)[number]) => {
-    patchComposition({ basemap: { ...basemap, ...(st.basemap as any), style3d: st.id, photoreal3d: false } as any, look: { ...look, ...(st.look as any) } as any });
-    const cam = layers.find((l) => l.type === "camera") as any;
-    if (cam && typeof st.pitch === "number") patchLayer(cam.id, { end: { ...cam.end, pitch: st.pitch } } as any);
-  };
-  // Photoreal 3D — Google's real-building tiles (live preview needs a Maps key; exports as 3D satellite).
-  const applyPhotoreal = () => {
-    patchComposition({ basemap: { ...basemap, photoreal3d: true, style3d: "", terrain: true, buildings3d: true } as any });
-    const cam = layers.find((l) => l.type === "camera") as any;
-    if (cam) patchLayer(cam.id, { end: { ...cam.end, pitch: Math.max(cam.end?.pitch ?? 0, 55) } } as any);
-  };
-  const clear3d = () => patchComposition({ basemap: { ...basemap, style3d: "", photoreal3d: false, buildings3d: false, landColor: "", waterColor: "", buildingColor: "", boundaryGlow: "" } as any });
-  const applyCurated = (c: CuratedStyle) => {
-    if (c.kind === "photoreal") return applyPhotoreal();
-    if (c.kind === "3d") { const st = MAP3D_STYLES.find((s) => s.id === c.preset3dId); if (st) apply3d(st); return; }
-    patchComposition({ basemap: { ...basemap, styleUrl: c.url!, style3d: "", photoreal3d: false } as any });
-  };
-  const curatedActive = (c: CuratedStyle) =>
-    c.kind === "photoreal" ? photoreal
-      : c.kind === "3d" ? (!photoreal && style3d === c.preset3dId)
-        : (!style3d && !photoreal && basemap.styleUrl === c.url);
   return (
     <Section title="Map style">
-      {/* Visual basemap chooser — the first thing you pick. */}
-      {/* ONE curated picker — distinct flat bases + standout 3D + real Photoreal. */}
-      <div className="grid grid-cols-4 gap-1.5">
-        {CURATED_STYLES.map((c) => {
-          const active = curatedActive(c);
-          return (
-            <button key={c.id} onClick={() => applyCurated(c)} title={`${c.name} — ${c.hint}`}
-              className="group text-center transition-transform hover:-translate-y-0.5">
-              <div className={`relative flex h-11 w-full items-center justify-center overflow-hidden rounded-md border ${active ? "border-iris ring-2 ring-iris/40" : "border-black/10"}`} style={c.swatch}>
-                {c.kind === "photoreal" && <Boxes size={14} className="text-white/90" />}
-                {active && <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-iris shadow-glow-iris" />}
-              </div>
-              <div className={`mt-0.5 truncate text-[9px] font-medium ${active ? "text-iris" : "text-graphite/55 group-hover:text-iris"}`}>{c.name}</div>
-            </button>
-          );
-        })}
-      </div>
-      <div className="flex items-center gap-2.5 text-[10px] text-graphite/45">
-        <span className="uppercase tracking-wider text-graphite/35">More</span>
+      {/* The studio's ONE style picker — 30 cinematic looks + Live Earth + creative
+          worlds + every 3D knob, inline. Available to everyone; replaces the old
+          curated quick-picker and the top-nav modal. */}
+      <MapStyleGallery />
+
+      {/* Two special bases the gallery doesn't cover: a clean graticule grid, and the
+          real OpenHistoricalMap base that unlocks the year time-travel controls below. */}
+      <div className="flex items-center gap-2.5 pt-1 text-[10px] text-graphite/45">
+        <span className="uppercase tracking-wider text-graphite/35">More bases</span>
         {MORE_STYLES.map((m) => {
           const active = !style3d && !photoreal && basemap.styleUrl === m.url;
           return <button key={m.url} onClick={() => patchComposition({ basemap: { ...basemap, styleUrl: m.url, style3d: "", photoreal3d: false } as any })} className={`transition-colors hover:text-iris ${active ? "font-semibold text-iris" : ""}`}>{m.name}</button>;
         })}
-        {(style3d || photoreal) && <button onClick={clear3d} className="ml-auto transition-colors hover:text-iris">↺ flat</button>}
       </div>
-      {photoreal && <p className="text-[10px] leading-snug text-graphite/40">Photoreal 3D streams Google&apos;s real, textured buildings (like Google Earth) — needs a Google Maps key in Settings for the live preview. The difference: <b>Satellite</b> = flat aerial imagery, <b>Photoreal</b> = a real 3-D city you fly through.</p>}
 
       {/* Pro — bring your own map style (MapTiler / MapLibre style JSON; key lives in the URL) */}
       {isPro ? (
@@ -784,16 +728,16 @@ const MapStylePanel: React.FC = () => {
                   {hasYr && <button onClick={() => patchComposition({ basemap: { ...basemap, mapYear: "", mapYearEnd: "" } })} className="text-[10px] text-graphite/40 hover:text-iris">clear</button>}
                 </div>
               </div>
-              <input type="range" min={-2000} max={2026} step={1} value={cur} onChange={(e) => setYear(parseInt(e.target.value, 10))} className="w-full accent-iris" />
+              <input type="range" min={-4000} max={2026} step={1} value={cur} onChange={(e) => setYear(parseInt(e.target.value, 10))} className="w-full accent-iris" />
               <div className="flex items-center justify-between text-[9px] text-graphite/35">
-                <span>2000 BC</span>
+                <span>4000 BC</span>
                 <span className="font-mono text-[10px] text-graphite/70">{animate ? `${labelYr(cur)} → ${labelYr(yrEnd)}` : labelYr(cur)}</span>
                 <span>2026</span>
               </div>
               <Toggle label="Animate over time (watch history unfold)" checked={animate} onChange={(on) => setEnd(on ? 2000 : null)} />
               {animate && (
                 <div className="space-y-1 pl-0.5">
-                  <input type="range" min={-2000} max={2026} step={1} value={yrEnd} onChange={(e) => setEnd(parseInt(e.target.value, 10))} className="w-full accent-iris" />
+                  <input type="range" min={-4000} max={2026} step={1} value={yrEnd} onChange={(e) => setEnd(parseInt(e.target.value, 10))} className="w-full accent-iris" />
                   <p className="text-[10px] leading-relaxed text-graphite/40">Borders &amp; places morph from <span className="font-mono text-graphite/60">{labelYr(cur)}</span> to <span className="font-mono text-graphite/60">{labelYr(yrEnd)}</span> across the scene.</p>
                 </div>
               )}
@@ -864,7 +808,7 @@ const MapStylePanel: React.FC = () => {
             {stylePresets.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {stylePresets.map((p) => (
-                  <button key={p.id} onClick={() => loadStyle(p)} onContextMenu={(e) => { e.preventDefault(); if (window.confirm(`Delete style "${p.name}"?`)) delStyle(p.id); }}
+                  <button key={p.id} onClick={() => loadStyle(p)} onContextMenu={async (e) => { e.preventDefault(); if (await confirmDialog({ title: `Delete style "${p.name}"?`, confirmLabel: "Delete", danger: true })) delStyle(p.id); }}
                     title={`${p.name} — click to load, right-click to delete`}
                     className="rounded-full border border-line px-2.5 py-1 text-[11px] font-medium text-graphite/70 transition-colors hover:border-iris hover:text-iris">{p.name}</button>
                 ))}
@@ -903,7 +847,12 @@ const AddonsPanel: React.FC = () => {
     } catch { setErr("Network error."); }
     finally { setBusy(null); }
   };
-  const del = (id: string) => { setAddons(removeAddonStore(id)); if (open === id) setOpen(null); };
+  const del = async (id: string) => {
+    const name = addons.find((a) => a.id === id)?.name ?? "add-on";
+    if (!(await confirmDialog({ title: `Delete add-on "${name}"?`, confirmLabel: "Delete", danger: true }))) return;
+    setAddons(removeAddonStore(id));
+    if (open === id) setOpen(null);
+  };
 
   return (
     <Section title="AI add-ons">
@@ -931,7 +880,7 @@ const AddonsPanel: React.FC = () => {
                   </div>
                 ))}
                 {err && <div className="text-[10px] text-red-400">{err}</div>}
-                <button onClick={() => apply(a)} disabled={busy === a.id} className="w-full rounded-md bg-brand py-1.5 text-[11px] font-semibold text-white disabled:opacity-50">{busy === a.id ? "Applying…" : "Add to scene"}</button>
+                <button onClick={() => apply(a)} disabled={busy === a.id} className="w-full rounded-md bg-iris py-1.5 text-[11px] font-semibold text-white transition-colors hover:bg-iris/90 disabled:opacity-50">{busy === a.id ? "Applying…" : "Add to scene"}</button>
               </div>
             )}
           </div>
@@ -947,20 +896,48 @@ const Trash2Icon: React.FC = () => <span className="text-[11px] leading-none">�
 /** The project-wide sections shown regardless of selection. Map style is FIRST
  *  (the priority choice), then the camera, then grading, then palette / brand. */
 const GlobalSections: React.FC = () => {
+  // ONE context at a time — how a person actually works: "I'm styling now" vs
+  // "I'm setting up the format". Style gathers EVERYTHING look-related (map
+  // style, film grade, palette & fonts) in one place; Brand holds identity
+  // assets; Scene is the film's format. No more scrolling past five stacked
+  // panels to find the one knob you came for.
+  const [ctx, setCtx] = useState<"style" | "brand" | "scene">("style");
+  return (
+    <>
+      <div className="px-3 pt-3">
+        <SegTabs
+          tabs={[{ key: "style", label: "Style" }, { key: "brand", label: "Brand" }, { key: "scene", label: "Scene" }]}
+          active={ctx}
+          onChange={(k) => setCtx(k as any)}
+        />
+      </div>
+      {ctx === "style" && (
+        <>
+          {/* Everything that shapes the LOOK, together: map style → grade → type. */}
+          <MapStylePanel />
+          <LookPanel />
+          <ThemePanel />
+        </>
+      )}
+      {ctx === "brand" && (
+        <>
+          <BrandKitPanel />
+          <AddonsPanel />
+        </>
+      )}
+      {ctx === "scene" && <ScenePanel />}
+    </>
+  );
+};
+
+/** Scene — the film's format: duration, aspect, and one-tap retiming. */
+const ScenePanel: React.FC = () => {
   const aspect = useEditor((s) => s.project.composition.aspect);
   const durationSec = useEditor((s) => s.project.composition.durationSec);
   const patchComposition = useEditor((s) => s.patchComposition);
   const retimeScene = useEditor((s) => s.retimeScene);
   return (
     <>
-      <MapStylePanel />
-      <QuickAdjust />
-      <AddonsPanel />
-      <LookPanel />
-      <ThemePanel />
-      <BrandKitPanel />
-
-      {/* Scene-level controls always available at the bottom */}
       <Section title="Scene">
         <div className="grid grid-cols-2 gap-2">
           <Field label="Duration">
@@ -1078,7 +1055,17 @@ const LayerFields: React.FC<{ layer: Layer; set: (p: Record<string, unknown>) =>
     case "camera":
       return (
         <Section title="Camera move">
-          <PriorityControl layerId={layer.id} type="camera" />
+          {/* When the camera is keyframed, keys DRIVE the move and the fallback
+              start/end/style controls below do nothing — say so plainly, and
+              offer the one-click way back to the automatic camera. */}
+          {(layer.keys?.length ?? 0) > 0 && (
+            <div className="rounded-lg border border-[#38E1FF]/45 bg-[#38E1FF]/10 p-2.5 text-[11px] leading-relaxed text-graphite/75">
+              <div className="mb-1 font-semibold text-graphite/90">🎥 Keyframed camera · {layer.keys!.length} key{layer.keys!.length > 1 ? "s" : ""}</div>
+              The move is controlled by your camera keyframes — edit it with <span className="font-medium text-graphite/90">Adjust camera</span> in the preview, or on the timeline. The controls below are the fallback auto-camera, used only if you clear the keyframes.
+              <button onClick={() => useEditor.getState().clearCameraKeys()} className="mt-1.5 block rounded-md border border-line bg-paper px-2 py-1 text-[10.5px] font-medium text-graphite/70 transition-colors hover:border-red-400 hover:text-red-500">Clear keyframes → use auto camera</button>
+            </div>
+          )}
+          <div className={(layer.keys?.length ?? 0) > 0 ? "opacity-50 transition-opacity" : "transition-opacity"}>
           {/* Quick move — ONE tap sets a sensible Start + End from the End location.
               Every value then stays directly editable in the pose cards below
               (no hidden style-coupling that silently rewrites your zoom). */}
@@ -1127,6 +1114,7 @@ const LayerFields: React.FC<{ layer: Layer; set: (p: Record<string, unknown>) =>
             <Slider label="Move vs hold" hint="how much of the scene is moving" value={layer.moveFraction} min={0.1} max={1} step={0.05} onChange={(v) => set({ moveFraction: v })} format={(v) => `${Math.round(v * 100)}%`} />
             <Field label="Ease"><Select value={layer.easing} onChange={(e) => set({ easing: e.target.value })}><option value="easeInOut">Smooth</option><option value="easeOut">Ease out</option><option value="easeIn">Ease in</option><option value="linear">Linear</option><option value="spring">Spring</option></Select></Field>
           </div>
+          </div>
         </Section>
       );
 
@@ -1163,13 +1151,18 @@ const LayerFields: React.FC<{ layer: Layer; set: (p: Record<string, unknown>) =>
             <Field label="Colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
             <Field label="Accent"><ColorInput value={layer.accent} onChange={(v) => set({ accent: v })} /></Field>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <Field label="Size"><NumberInput value={layer.sizePx} step={2} min={16} max={200} unit="px" onChange={(v) => set({ sizePx: v })} /></Field>
-            <FontField value={layer.fontFamily} onChange={(v) => set({ fontFamily: v })} />
+          <div className="space-y-2.5 rounded-xl border border-iris/20 bg-iris/[0.03] p-3">
+            <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-iris/70">
+              <span className="h-[8px] w-[8px] rotate-45 rounded-[1.5px] bg-iris" /> Animate <span className="font-normal normal-case tracking-normal text-graphite/45">· tap ◆ to keyframe</span>
+            </div>
+            <KfSlider layerId={layer.id} prop="sizePx" label="Size" value={layer.sizePx} min={16} max={200} step={2} format={(v) => Math.round(v) + "px"} />
           </div>
-          <Slider label="Text shadow" value={(layer as any).shadow ?? 0.55} onChange={(v) => set({ shadow: v })} format={(v) => v <= 0 ? "off" : `${Math.round(v * 100)}%`} />
-          <Toggle label="Text outline" checked={(layer as any).outline ?? false} onChange={(v) => set({ outline: v })} />
-          <TransformControls t={(layer as any).transform} onChange={(tf) => set({ transform: tf })} kf={(layer as any).kf} onKf={(k) => set({ kf: k })} />
+          <Advanced label="Type & effects">
+            <FontField value={layer.fontFamily} onChange={(v) => set({ fontFamily: v })} />
+            <Slider label="Text shadow" value={(layer as any).shadow ?? 0.55} onChange={(v) => set({ shadow: v })} format={(v) => v <= 0 ? "off" : `${Math.round(v * 100)}%`} />
+            <Toggle label="Text outline" checked={(layer as any).outline ?? false} onChange={(v) => set({ outline: v })} />
+            <TransformControls t={(layer as any).transform} onChange={(tf) => set({ transform: tf })} kf={(layer as any).kf} onKf={(k) => set({ kf: k })} />
+          </Advanced>
         </Section>
       );
 
@@ -1315,14 +1308,70 @@ const LayerFields: React.FC<{ layer: Layer; set: (p: Record<string, unknown>) =>
     case "heatmap":
       return <DataFields layer={layer as any} set={set} kind="heatmap" />;
 
+    case "earthlayer":
+      return <EarthLayerFields layer={layer as any} set={set} />;
+
     default:
       return null;
   }
 };
 
+/* ── Live Earth (NASA GIBS) — real-world imagery/data layered OVER the style ── */
+
+const EarthLayerFields: React.FC<{ layer: any; set: (p: Record<string, unknown>) => void }> = ({ layer, set }) => {
+  const dsId = layer.datasetId ?? EARTH_PRESETS[0].cfg.datasetId;
+  const isStatic = !!layer.staticTime;
+  return (
+    <Section title="Live Earth · NASA">
+      <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/[0.06] px-3 py-2 text-[11px] leading-relaxed text-emerald-700">
+        Real NASA satellite imagery/data, laid <b>over your chosen map style</b> — the style's borders &amp; labels stay on top. Blend with Opacity.
+      </div>
+      <Field label="Data / imagery">
+        <Select value={dsId} onChange={(e) => {
+          const p = EARTH_PRESETS.find((d) => d.cfg.datasetId === e.target.value);
+          if (p) set({ ...p.cfg, name: p.name, date: p.cfg.staticTime ? "" : "latest", opacity: p.opacity });
+        }}>
+          {EARTH_CATEGORIES.map((cat) => (
+            <optgroup key={cat} label={cat}>
+              {EARTH_PRESETS.filter((p) => p.category === cat).map((p) => (
+                <option key={p.key} value={p.cfg.datasetId}>{p.name} — {p.tagline}</option>
+              ))}
+            </optgroup>
+          ))}
+        </Select>
+      </Field>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Opacity"><NumberInput value={Math.round((layer.opacity ?? 0.9) * 100)} step={5} min={0} max={100} unit="%" onChange={(v) => set({ opacity: v / 100 })} /></Field>
+        <Field label="Blend" hint="how it sits on your style">
+          <Select value={layer.blend ?? "normal"} onChange={(e) => set({ blend: e.target.value })}>
+            <option value="normal">Normal</option>
+            <option value="vivid">Vivid (punchy)</option>
+            <option value="screen">Screen (glow on dark)</option>
+            <option value="multiply">Multiply (deepen on light)</option>
+            <option value="ghost">Ghost (subtle)</option>
+          </Select>
+        </Field>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        {isStatic ? (
+          <Field label="Date" hint="seamless — no date"><div className="rounded-lg border border-line bg-paper-50 px-3 py-2 text-[12px] text-graphite/45">Timeless</div></Field>
+        ) : (
+          <Field label="Date">
+            <Select value={/^\d{4}-\d{2}-\d{2}$/.test(String(layer.date)) ? "latest" : (layer.date || "latest")} onChange={(e) => set({ date: e.target.value })}>
+              {EARTH_DATE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </Select>
+          </Field>
+        )}
+        <Field label="Caption" hint="on-frame credit"><Input value={layer.label ?? ""} onChange={(e) => set({ label: e.target.value })} /></Field>
+      </div>
+      <div className="text-[10px] text-graphite/45">Tip: <b>Blue Marble</b> is a seamless, cloud-free whole-Earth base that fits any view. Pick your look in <b>Project → Style</b> first — this renders through it, not instead of it.</div>
+    </Section>
+  );
+};
+
 /* ── Data layers (choropleth · bubble) — import REAL data, AI-cleaned, Pro-only ── */
 
-const PRO_DATA_TIERS = new Set(["teams", "custom", "agency"]); // Pro · Studio · Enterprise
+const PRO_DATA_TIERS = new Set(["pro"]); // data layers (choropleth · bubble) are a Pro perk
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Lerp two #rrggbb hex colours → the choropleth value ramp. */
@@ -1415,7 +1464,7 @@ const DataFields: React.FC<{ layer: any; set: (p: Record<string, unknown>) => vo
         }
         const ok = out.filter((r) => r.geojson).length;
         set({ data: out, metric: j.metric || layer.metric, unit: j.unit || layer.unit, colorLow: lo, colorHigh: hi });
-        setStatus(`${ok}/${out.length} regions mapped${ok < out.length ? " (some shapes not found)" : ""}`);
+        setStatus(`${ok}/${out.length} regions mapped${ok < out.length ? " (some shapes not found)" : ""}${data.length > capped.length ? ` — first ${capped.length} of ${data.length} shown (capped)` : ""}`);
       }
     } catch { setErr("Something went wrong — try again."); }
     setBusy(false);
@@ -1612,7 +1661,7 @@ const TrackFields: React.FC<{ layer: TrackLayer; set: (p: Record<string, unknown
       </Section>
 
       <Section title="Camera fine-tune">
-        <Slider label="Tilt" value={layer.pitch} min={0} max={80} step={1} onChange={(v) => set({ pitch: v })} format={(v) => `${Math.round(v)}°`} />
+        <Slider label="Tilt" value={layer.pitch} min={0} max={85} step={1} onChange={(v) => set({ pitch: v })} format={(v) => `${Math.round(v)}°`} />
         <Slider label="Zoom" value={layer.zoomOffset} min={-3} max={3} step={0.1} onChange={(v) => set({ zoomOffset: v })} format={(v) => (v > 0 ? `+${v.toFixed(1)}` : v.toFixed(1))} />
         <Slider label="Rotate" value={layer.bearingOffset} min={-180} max={180} step={1} onChange={(v) => set({ bearingOffset: v })} format={(v) => `${Math.round(v)}°`} />
       </Section>
@@ -1673,30 +1722,35 @@ const MarkerFields: React.FC<{ layer: Extract<Layer, { type: "marker" }>; set: (
       </div>
     </Field>
     <div className="grid grid-cols-2 gap-2">
-      <Field label="Custom emoji" hint="Overrides the symbol"><Input value={layer.emoji} placeholder="e.g. 🛢️" onChange={(e) => set({ emoji: e.target.value })} /></Field>
       <Field label="Label" hint="Caption beneath"><Input value={layer.label} onChange={(e) => set({ label: e.target.value })} /></Field>
-    </div>
-    <Field label="Entrance">
-      <Select value={layer.animation} onChange={(e) => set({ animation: e.target.value })}>
-        <option value="pop">Pop in</option>
-        <option value="drop">Drop in</option>
-        <option value="pulse">Pulse</option>
-        <option value="throb">Throb (breathe)</option>
-        <option value="spin">Spin in</option>
-        <option value="flash">Flash</option>
-        <option value="none">None</option>
-      </Select>
-    </Field>
-    <div className="grid grid-cols-2 gap-2">
-      <Field label="Size"><NumberInput value={layer.sizePx} step={5} min={16} max={400} unit="px" onChange={(v) => set({ sizePx: v })} /></Field>
       <Field label="Tint" hint="Ring & glow"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
     </div>
-    <Slider label="Glow" value={layer.glow} min={0} max={1.5} onChange={(v) => set({ glow: v })} />
-    <div className="grid grid-cols-2 gap-2">
-      <Toggle label="Locator ring" checked={layer.ring} onChange={(v) => set({ ring: v })} />
-      <Field label="Label colour"><ColorInput value={layer.labelColor} onChange={(v) => set({ labelColor: v })} /></Field>
+    <div className="space-y-2.5 rounded-xl border border-iris/20 bg-iris/[0.03] p-3">
+      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-iris/70">
+        <span className="h-[8px] w-[8px] rotate-45 rounded-[1.5px] bg-iris" /> Animate <span className="font-normal normal-case tracking-normal text-graphite/45">· tap ◆ to keyframe</span>
+      </div>
+      <KfSlider layerId={layer.id} prop="sizePx" label="Size" value={layer.sizePx} min={16} max={400} step={5} format={(v) => Math.round(v) + "px"} />
+      <KfSlider layerId={layer.id} prop="glow" label="Glow" value={layer.glow} min={0} max={1.5} step={0.05} format={(v) => v.toFixed(2)} />
     </div>
-    <TransformControls t={(layer as any).transform} onChange={(tf) => set({ transform: tf })} kf={(layer as any).kf} onKf={(k) => set({ kf: k })} />
+    <Advanced label="Entrance & details">
+      <Field label="Entrance">
+        <Select value={layer.animation} onChange={(e) => set({ animation: e.target.value })}>
+          <option value="pop">Pop in</option>
+          <option value="drop">Drop in</option>
+          <option value="pulse">Pulse</option>
+          <option value="throb">Throb (breathe)</option>
+          <option value="spin">Spin in</option>
+          <option value="flash">Flash</option>
+          <option value="none">None</option>
+        </Select>
+      </Field>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Custom emoji" hint="Overrides the symbol"><Input value={layer.emoji} placeholder="e.g. 🛢️" onChange={(e) => set({ emoji: e.target.value })} /></Field>
+        <Field label="Label colour"><ColorInput value={layer.labelColor} onChange={(v) => set({ labelColor: v })} /></Field>
+      </div>
+      <Toggle label="Locator ring" checked={layer.ring} onChange={(v) => set({ ring: v })} />
+      <TransformControls t={(layer as any).transform} onChange={(tf) => set({ transform: tf })} kf={(layer as any).kf} onKf={(k) => set({ kf: k })} />
+    </Advanced>
   </Section>
 );
 
@@ -1714,17 +1768,19 @@ const AnnotationFields: React.FC<{ layer: Extract<Layer, { type: "annotation" }>
       <Field label="Box side"><Select value={layer.side} onChange={(e) => set({ side: e.target.value })}><option value="auto">Auto</option><option value="top">Above</option><option value="bottom">Below</option><option value="left">Left</option><option value="right">Right</option></Select></Field>
       <Field label="Box style"><Select value={layer.boxStyle} onChange={(e) => set({ boxStyle: e.target.value })}><option value="card">Card</option><option value="bracket">Bracket</option><option value="underline">Underline</option><option value="none">Text only</option></Select></Field>
     </div>
-    <Slider label="Distance" value={layer.distance} min={0} max={60} onChange={(v) => set({ distance: v })} format={(v) => `${Math.round(v)}%`} />
     <div className="grid grid-cols-2 gap-2">
       <Field label="Text colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
       <Field label="Accent" hint="Line + box edge"><ColorInput value={layer.accent} onChange={(v) => set({ accent: v })} /></Field>
     </div>
-    <div className="grid grid-cols-2 gap-2">
-      <Field label="Size"><NumberInput value={layer.sizePx} step={2} min={14} max={160} unit="px" onChange={(v) => set({ sizePx: v })} /></Field>
-      <Toggle label="Draw line in" checked={layer.draw} onChange={(v) => set({ draw: v })} />
-    </div>
-    <FontField value={layer.fontFamily} onChange={(v) => set({ fontFamily: v })} />
-    <TransformControls t={(layer as any).transform} onChange={(tf) => set({ transform: tf })} kf={(layer as any).kf} onKf={(k) => set({ kf: k })} />
+    <Advanced label="Placement & type">
+      <Slider label="Distance" value={layer.distance} min={0} max={60} onChange={(v) => set({ distance: v })} format={(v) => `${Math.round(v)}%`} />
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Size"><NumberInput value={layer.sizePx} step={2} min={14} max={160} unit="px" onChange={(v) => set({ sizePx: v })} /></Field>
+        <Toggle label="Draw line in" checked={layer.draw} onChange={(v) => set({ draw: v })} />
+      </div>
+      <FontField value={layer.fontFamily} onChange={(v) => set({ fontFamily: v })} />
+      <TransformControls t={(layer as any).transform} onChange={(tf) => set({ transform: tf })} kf={(layer as any).kf} onKf={(k) => set({ kf: k })} />
+    </Advanced>
   </Section>
 );
 
@@ -1759,18 +1815,27 @@ const ConnectionsFields: React.FC<{ layer: Extract<Layer, { type: "connections" 
       <Field label="Colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
       <Field label="Node colour"><ColorInput value={layer.dotColor} onChange={(v) => set({ dotColor: v })} /></Field>
     </div>
-    <div className="grid grid-cols-2 gap-2">
-      <Field label="Line width"><NumberInput value={layer.width} step={1} min={1} max={40} unit="px" onChange={(v) => set({ width: v })} /></Field>
-      <Field label="Pattern"><Select value={layer.dashStyle} onChange={(e) => set({ dashStyle: e.target.value })}><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></Select></Field>
-    </div>
-    <Slider label="Arc bow" value={layer.curve} onChange={(v) => set({ curve: v })} />
-    <Slider label="Glow" value={layer.glow} min={0} max={1.5} onChange={(v) => set({ glow: v })} />
-    <Slider label="Stagger" value={layer.stagger} onChange={(v) => set({ stagger: v })} />
     <Field label="Reveal"><Select value={layer.reveal} onChange={(e) => set({ reveal: e.target.value })}><option value="draw">Draw on</option><option value="grow">Grow</option><option value="fade">Fade</option><option value="static">Static</option></Select></Field>
     <div className="grid grid-cols-2 gap-2">
-      <Toggle label="Node dots" checked={layer.dots} onChange={(v) => set({ dots: v })} />
-      <Toggle label="Place labels" checked={layer.showLabels} onChange={(v) => set({ showLabels: v })} />
+      <Toggle label="Flow arrows" checked={layer.arrowheads ?? false} onChange={(v) => set({ arrowheads: v })} />
+      <Toggle label="Pulse" checked={layer.pulse} onChange={(v) => set({ pulse: v })} />
     </div>
+    {layer.arrowheads && (
+      <Slider label="Arrow size" value={layer.arrowScale ?? 1.6} min={0.5} max={4} onChange={(v) => set({ arrowScale: v })} format={(v) => `${v.toFixed(1)}×`} />
+    )}
+    <Advanced label="Line & nodes">
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Line width"><NumberInput value={layer.width} step={1} min={1} max={40} unit="px" onChange={(v) => set({ width: v })} /></Field>
+        <Field label="Pattern"><Select value={layer.dashStyle} onChange={(e) => set({ dashStyle: e.target.value })}><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></Select></Field>
+      </div>
+      <Slider label="Arc bow" value={layer.curve} onChange={(v) => set({ curve: v })} />
+      <Slider label="Glow" value={layer.glow} min={0} max={1.5} onChange={(v) => set({ glow: v })} />
+      <Slider label="Stagger" value={layer.stagger} onChange={(v) => set({ stagger: v })} />
+      <div className="grid grid-cols-2 gap-2">
+        <Toggle label="Node dots" checked={layer.dots} onChange={(v) => set({ dots: v })} />
+        <Toggle label="Place labels" checked={layer.showLabels} onChange={(v) => set({ showLabels: v })} />
+      </div>
+    </Advanced>
   </Section>
 );
 
@@ -1817,27 +1882,27 @@ const RadiusFields: React.FC<{ layer: Extract<Layer, { type: "radius" }>; set: (
         <option value="static">Static</option>
       </Select>
     </Field>
-    <div className="grid grid-cols-2 gap-2">
-      <Field label={layer.mode === "ripple" ? "Pulse takes" : "Grow over"}><NumberInput value={layer.growSec} step={0.2} min={0.3} max={10} unit="s" onChange={(v) => set({ growSec: v })} /></Field>
-      {layer.mode === "ripple"
-        ? <Field label="Every"><NumberInput value={layer.intervalSec} step={0.2} min={0.5} max={10} unit="s" onChange={(v) => set({ intervalSec: v })} /></Field>
-        : <Field label="Line width"><NumberInput value={layer.width} step={0.5} min={0.5} max={20} unit="px" onChange={(v) => set({ width: v })} /></Field>}
-    </div>
-    <div className="grid grid-cols-2 gap-2">
-      <Field label="Colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
-      <Field label="Unit">
-        <Select value={layer.labelUnit} onChange={(e) => set({ labelUnit: e.target.value })}>
-          <option value="km">Kilometres</option>
-          <option value="mi">Miles</option>
-        </Select>
-      </Field>
-    </div>
-    <Slider label="Fill tint" value={layer.fillOpacity} min={0} max={0.5} onChange={(v) => set({ fillOpacity: v })} />
-    <div className="grid grid-cols-2 gap-2">
-      <Toggle label="Distance labels" checked={layer.showLabels} onChange={(v) => set({ showLabels: v })} />
-      <Toggle label="Dashed" checked={layer.dashed} onChange={(v) => set({ dashed: v })} />
-    </div>
-    <Toggle label="Centre dot" checked={layer.centerDot} onChange={(v) => set({ centerDot: v })} />
+    <Field label="Colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
+    <Advanced label="Timing & style">
+      <div className="grid grid-cols-2 gap-2">
+        <Field label={layer.mode === "ripple" ? "Pulse takes" : "Grow over"}><NumberInput value={layer.growSec} step={0.2} min={0.3} max={10} unit="s" onChange={(v) => set({ growSec: v })} /></Field>
+        {layer.mode === "ripple"
+          ? <Field label="Every"><NumberInput value={layer.intervalSec} step={0.2} min={0.5} max={10} unit="s" onChange={(v) => set({ intervalSec: v })} /></Field>
+          : <Field label="Line width"><NumberInput value={layer.width} step={0.5} min={0.5} max={20} unit="px" onChange={(v) => set({ width: v })} /></Field>}
+        <Field label="Unit">
+          <Select value={layer.labelUnit} onChange={(e) => set({ labelUnit: e.target.value })}>
+            <option value="km">Kilometres</option>
+            <option value="mi">Miles</option>
+          </Select>
+        </Field>
+      </div>
+      <Slider label="Fill tint" value={layer.fillOpacity} min={0} max={0.5} onChange={(v) => set({ fillOpacity: v })} />
+      <div className="grid grid-cols-2 gap-2">
+        <Toggle label="Distance labels" checked={layer.showLabels} onChange={(v) => set({ showLabels: v })} />
+        <Toggle label="Dashed" checked={layer.dashed} onChange={(v) => set({ dashed: v })} />
+      </div>
+      <Toggle label="Centre dot" checked={layer.centerDot} onChange={(v) => set({ centerDot: v })} />
+    </Advanced>
   </Section>
 );
 
@@ -1877,29 +1942,31 @@ const TimestampFields: React.FC<{ layer: Extract<Layer, { type: "timestamp" }>; 
     {layer.mode === "fixed" && (
       <Field label="Text"><Input value={layer.fixedText} onChange={(e) => set({ fixedText: e.target.value })} placeholder="MARCH 1944" /></Field>
     )}
-    <div className="grid grid-cols-2 gap-2">
-      <Field label="Position">
-        <Select value={layer.position} onChange={(e) => set({ position: e.target.value })}>
-          <option value="top-left">Top left</option>
-          <option value="top-center">Top centre</option>
-          <option value="top-right">Top right</option>
-          <option value="bottom-left">Bottom left</option>
-          <option value="bottom-center">Bottom centre</option>
-          <option value="bottom-right">Bottom right</option>
-        </Select>
-      </Field>
-      <Field label="Style">
-        <Select value={layer.style} onChange={(e) => set({ style: e.target.value })}>
-          <option value="chip">Chip (glass badge)</option>
-          <option value="minimal">Minimal (bare text)</option>
-        </Select>
-      </Field>
-    </div>
-    <Slider label="Size" value={layer.sizeVh} min={1} max={14} onChange={(v) => set({ sizeVh: v })} format={(v) => `${v.toFixed(1)}vh`} />
-    <div className="grid grid-cols-2 gap-2">
-      <Field label="Text colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
-      <Field label="Accent dot"><ColorInput value={layer.accent} onChange={(v) => set({ accent: v })} /></Field>
-    </div>
+    <Advanced label="Placement & style">
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Position">
+          <Select value={layer.position} onChange={(e) => set({ position: e.target.value })}>
+            <option value="top-left">Top left</option>
+            <option value="top-center">Top centre</option>
+            <option value="top-right">Top right</option>
+            <option value="bottom-left">Bottom left</option>
+            <option value="bottom-center">Bottom centre</option>
+            <option value="bottom-right">Bottom right</option>
+          </Select>
+        </Field>
+        <Field label="Style">
+          <Select value={layer.style} onChange={(e) => set({ style: e.target.value })}>
+            <option value="chip">Chip (glass badge)</option>
+            <option value="minimal">Minimal (bare text)</option>
+          </Select>
+        </Field>
+      </div>
+      <Slider label="Size" value={layer.sizeVh} min={1} max={14} onChange={(v) => set({ sizeVh: v })} format={(v) => `${v.toFixed(1)}vh`} />
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Text colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
+        <Field label="Accent dot"><ColorInput value={layer.accent} onChange={(v) => set({ accent: v })} /></Field>
+      </div>
+    </Advanced>
   </Section>
 );
 
@@ -2032,7 +2099,6 @@ const RouteFields: React.FC<{ layer: Extract<Layer, { type: "route" }>; set: (p:
   const resolved = layer.coordinates.length > 1;
   return (
     <Section title="Route">
-      <PriorityControl layerId={layer.id} type="route" />
       <Field label="From" hint={layer.from?.name}>
         <div className="space-y-1.5">
           <PlaceSearch size="sm" placeholder="Start place…" onPick={pickFrom} />
@@ -2068,48 +2134,9 @@ const RouteFields: React.FC<{ layer: Extract<Layer, { type: "route" }>; set: (p:
           )}
         </div>
       </Field>
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="Path" hint="Follow roads/sea, or a straight line">
-          <Select value={layer.pathStyle ?? "auto"} onChange={(e) => changePath(e.target.value)}>
-            <option value="auto">Follow roads / sea</option>
-            <option value="direct">Direct line</option>
-          </Select>
-        </Field>
-        <Field label="Direction"><Select value={layer.direction ?? "forward"} onChange={(e) => set({ direction: e.target.value })}><option value="forward">Start → End</option><option value="reverse">End → Start</option></Select></Field>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="Transport"><Select value={layer.transport} onChange={(e) => changeTransport(e.target.value)} disabled={(layer.pathStyle ?? "auto") === "direct"}><option value="driving">Driving</option><option value="walking">Walking</option><option value="cycling">Cycling</option><option value="boat">Boat</option><option value="aircraft">Aircraft</option></Select></Field>
-        <Field label="Reveal"><Select value={layer.reveal === "dotted" ? "draw" : layer.reveal} onChange={(e) => set({ reveal: e.target.value })}><option value="draw">Draw on</option><option value="grow">Grow in</option><option value="fade">Fade in</option><option value="pulse">Pulse</option><option value="static">Static</option></Select></Field>
-      </div>
-      <Field label="Camera (when priority)" hint="How the camera moves if this route is on top">
-        <Select value={layer.cameraMode ?? "follow"} onChange={(e) => set({ cameraMode: e.target.value })}>
-          <option value="follow">Follow the vehicle</option>
-          <option value="frame">Frame the whole journey</option>
-          <option value="chase">Chase (turn into each leg)</option>
-          <option value="orbit">Orbit the journey</option>
-        </Select>
-      </Field>
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="Colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
-        <Field label="Width"><NumberInput value={layer.width} step={1} min={1} max={40} onChange={(v) => set({ width: v })} /></Field>
-      </div>
-      <div className="space-y-2 rounded-lg border border-line bg-paper-50 p-2.5">
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] uppercase tracking-wider text-graphite/45">Line style</span>
-          <Toggle label="Show line" checked={layer.showLine !== false} onChange={(v) => set({ showLine: v })} />
-          <Toggle label="Endpoint pins" checked={(layer as any).showEndpoints !== false} onChange={(v) => set({ showEndpoints: v })} />
-        </div>
-        <Field label="Pattern">
-          <Select value={layer.dashStyle ?? "solid"} onChange={(e) => set({ dashStyle: e.target.value })}>
-            <option value="solid">Solid</option>
-            <option value="dotted">Dotted</option>
-            <option value="dashed">Dashed</option>
-          </Select>
-        </Field>
-        <Slider label="Opacity" value={layer.opacity ?? 1} onChange={(v) => set({ opacity: v })} />
-        <Slider label="Glow" value={layer.glow ?? 0.35} min={0} max={1.5} onChange={(v) => set({ glow: v })} />
-        <Slider label="Smooth (bezier)" value={layer.smoothness ?? 0} onChange={(v) => set({ smoothness: v })} />
-      </div>
+      {/* Vehicle IS the journey's character — one pick sets the icon AND routes
+          the path correctly (roads / water / air). Colour + speed complete the
+          essentials; everything mechanical lives in Advanced. */}
       <div className="grid grid-cols-2 gap-2">
         <Field label="Vehicle" hint="Sets the icon + routes it correctly">
           <Select value={layer.icon} onChange={(e) => pickVehicle(e.target.value)}>
@@ -2128,13 +2155,59 @@ const RouteFields: React.FC<{ layer: Extract<Layer, { type: "route" }>; set: (p:
             <option value="pin">📍 Pin</option>
           </Select>
         </Field>
-        <Field label="Custom icon" hint="Any emoji — overrides">
-          <Input value={(layer as any).iconEmoji ?? ""} placeholder="e.g. 🦅 🛸 🐎" maxLength={4} onChange={(e) => set({ iconEmoji: e.target.value })} />
-        </Field>
+        <Field label="Colour"><ColorInput value={layer.color} onChange={(v) => set({ color: v })} /></Field>
       </div>
       <Field label="Travel time" hint="Line, vehicle & follow-camera speed">
         <NumberInput value={Math.round(layer.drawFraction * 100)} step={5} min={10} max={100} unit="%" onChange={(v) => set({ drawFraction: v / 100 })} />
       </Field>
+      <div className="space-y-2.5 rounded-xl border border-iris/20 bg-iris/[0.03] p-3">
+        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-iris/70">
+          <span className="h-[8px] w-[8px] rotate-45 rounded-[1.5px] bg-iris" /> Animate <span className="font-normal normal-case tracking-normal text-graphite/45">· tap ◆ to keyframe</span>
+        </div>
+        <KfSlider layerId={layer.id} prop="width" label="Line width" value={layer.width} min={1} max={40} step={1} format={(v) => Math.round(v) + "px"} />
+        <KfSlider layerId={layer.id} prop="glow" label="Glow" value={layer.glow ?? 0.35} min={0} max={1.5} step={0.05} format={(v) => v.toFixed(2)} />
+      </div>
+
+      <Advanced label="Path & camera">
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Path" hint="Follow roads/sea, or a straight line">
+            <Select value={layer.pathStyle ?? "auto"} onChange={(e) => changePath(e.target.value)}>
+              <option value="auto">Follow roads / sea</option>
+              <option value="direct">Direct line</option>
+            </Select>
+          </Field>
+          <Field label="Direction"><Select value={layer.direction ?? "forward"} onChange={(e) => set({ direction: e.target.value })}><option value="forward">Start → End</option><option value="reverse">End → Start</option></Select></Field>
+          <Field label="Transport"><Select value={layer.transport} onChange={(e) => changeTransport(e.target.value)} disabled={(layer.pathStyle ?? "auto") === "direct"}><option value="driving">Driving</option><option value="walking">Walking</option><option value="cycling">Cycling</option><option value="boat">Boat</option><option value="aircraft">Aircraft</option></Select></Field>
+          <Field label="Reveal"><Select value={layer.reveal === "dotted" ? "draw" : layer.reveal} onChange={(e) => set({ reveal: e.target.value })}><option value="draw">Draw on</option><option value="grow">Grow in</option><option value="fade">Fade in</option><option value="pulse">Pulse</option><option value="static">Static</option></Select></Field>
+        </div>
+        <Field label="Camera (when priority)" hint="How the camera moves if this route is on top">
+          <Select value={layer.cameraMode ?? "follow"} onChange={(e) => set({ cameraMode: e.target.value })}>
+            <option value="follow">Follow the vehicle</option>
+            <option value="frame">Frame the whole journey</option>
+            <option value="chase">Chase (turn into each leg)</option>
+            <option value="orbit">Orbit the journey</option>
+          </Select>
+        </Field>
+        <Field label="Custom icon" hint="Any emoji — overrides the vehicle">
+          <Input value={(layer as any).iconEmoji ?? ""} placeholder="e.g. 🦅 🛸 🐎" maxLength={4} onChange={(e) => set({ iconEmoji: e.target.value })} />
+        </Field>
+      </Advanced>
+
+      <Advanced label="Line style">
+        <div className="flex items-center justify-between">
+          <Toggle label="Show line" checked={layer.showLine !== false} onChange={(v) => set({ showLine: v })} />
+          <Toggle label="Endpoint pins" checked={(layer as any).showEndpoints !== false} onChange={(v) => set({ showEndpoints: v })} />
+        </div>
+        <Field label="Pattern">
+          <Select value={layer.dashStyle ?? "solid"} onChange={(e) => set({ dashStyle: e.target.value })}>
+            <option value="solid">Solid</option>
+            <option value="dotted">Dotted</option>
+            <option value="dashed">Dashed</option>
+          </Select>
+        </Field>
+        <Slider label="Opacity" value={layer.opacity ?? 1} onChange={(v) => set({ opacity: v })} />
+        <Slider label="Smooth (bezier)" value={layer.smoothness ?? 0} onChange={(v) => set({ smoothness: v })} />
+      </Advanced>
       <div className="text-[10px] text-graphite/45">
         {busy ? "Resolving path…" : resolved ? `Path resolved (${layer.coordinates.length} points). The vehicle, the drawn line and (when this route is the priority) the camera all travel together.` : "Pick From + To to draw the route."}
       </div>
@@ -2179,7 +2252,6 @@ const HighlightFields: React.FC<{ layer: Extract<Layer, { type: "highlight" }>; 
 
   return (
     <Section title="Highlight">
-      <PriorityControl layerId={layer.id} type="highlight" />
       <Field label="Region / country" hint="Search a place, or draw a region on the map">
         <div className="space-y-1.5">
           <div className="relative">
@@ -2228,10 +2300,7 @@ const HighlightFields: React.FC<{ layer: Extract<Layer, { type: "highlight" }>; 
           </Field>
         </div>
       )}
-      <div className="grid grid-cols-2 gap-2">
-        <Field label={layer.fillType === "flag" ? "Flag opacity" : "Fill opacity"}><NumberInput value={layer.fillOpacity} step={0.02} min={0} max={1} onChange={(v) => set({ fillOpacity: v })} /></Field>
-        <Field label="Animation"><Select value={layer.animation} onChange={(e) => set({ animation: e.target.value })}><option value="fade">Fade</option><option value="sweep">Sweep</option><option value="pulse">Pulse</option><option value="border-first">Border first</option><option value="grow">Grow (expansion)</option><option value="shrink">Shrink (contraction)</option><option value="static">Static</option></Select></Field>
-      </div>
+      <Field label="Animation"><Select value={layer.animation} onChange={(e) => set({ animation: e.target.value })}><option value="fade">Fade</option><option value="sweep">Sweep</option><option value="pulse">Pulse</option><option value="border-first">Border first</option><option value="grow">Grow (expansion)</option><option value="shrink">Shrink (contraction)</option><option value="static">Static</option></Select></Field>
       {layer.animation === "border-first" && (
         <Field label="Fill delay" hint="how long the border stays alone">
           <NumberInput value={(layer as any).fillDelaySec ?? 1.2} step={0.1} min={0.2} max={5} unit="s" onChange={(v) => set({ fillDelaySec: v })} />
@@ -2250,24 +2319,20 @@ const HighlightFields: React.FC<{ layer: Extract<Layer, { type: "highlight" }>; 
           </div>
         </div>
       )}
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="Fill colour"><ColorInput value={layer.fillColor} onChange={(v) => set({ fillColor: v })} /></Field>
-        <Field label="Border"><ColorInput value={layer.borderColor} onChange={(v) => set({ borderColor: v })} /></Field>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="Glow colour"><ColorInput value={layer.glowColor} onChange={(v) => set({ glowColor: v })} /></Field>
-        <Field label="Glow size"><NumberInput value={layer.glowWidth} step={1} min={0} max={60} onChange={(v) => set({ glowWidth: v })} /></Field>
+      <Field label="Fill colour"><ColorInput value={layer.fillColor} onChange={(v) => set({ fillColor: v })} /></Field>
+
+      {/* ── Animate — tap the diamond to keyframe any of these over the timeline ── */}
+      <div className="space-y-2.5 rounded-xl border border-iris/20 bg-iris/[0.03] p-3">
+        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-iris/70">
+          <span className="h-[8px] w-[8px] rotate-45 rounded-[1.5px] bg-iris" /> Animate <span className="font-normal normal-case tracking-normal text-graphite/45">· tap ◆ to keyframe, move the playhead, tap again</span>
+        </div>
+        <KfSlider layerId={layer.id} prop="fillOpacity" label={layer.fillType === "flag" ? "Flag opacity" : "Fill opacity"} value={layer.fillOpacity} min={0} max={1} step={0.02} />
+        <KfSlider layerId={layer.id} prop="borderWidth" label="Border width" hint="0 = none" value={(layer as any).borderWidth ?? 3.5} min={0} max={20} step={0.5} format={(v) => v.toFixed(1)} />
+        <KfSlider layerId={layer.id} prop="glowWidth" label="Glow size" value={layer.glowWidth} min={0} max={60} step={1} format={(v) => Math.round(v).toString()} />
+        <KfSlider layerId={layer.id} prop="extrude" label="3D extrude" hint="needs camera tilt" value={(layer as any).extrude ?? 0} min={0} max={100} step={1} format={(v) => Math.round(v).toString()} />
       </div>
 
-      {/* Border thickness + style + 3D extrusion */}
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="Border width" hint="0 = no border"><NumberInput value={(layer as any).borderWidth ?? 3.5} step={0.5} min={0} max={20} onChange={(v) => set({ borderWidth: v })} /></Field>
-        <Field label="Border style"><Select value={(layer as any).borderDash ?? "solid"} onChange={(e) => set({ borderDash: e.target.value })}><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></Select></Field>
-        <Field label="Border opacity"><NumberInput value={Math.round(((layer as any).borderOpacity ?? 1) * 100)} step={5} min={0} max={100} unit="%" onChange={(v) => set({ borderOpacity: v / 100 })} /></Field>
-        <Field label="3D extrude" hint="Raise the region (needs camera tilt)"><NumberInput value={(layer as any).extrude ?? 0} step={2} min={0} max={100} onChange={(v) => set({ extrude: v })} /></Field>
-      </div>
-
-      {/* Editable on-map label */}
+      {/* Editable on-map label — the storytelling text ON the region. */}
       <div className="space-y-2 rounded-lg border border-line bg-paper-50 p-2.5">
         <Field label="On-map label" hint={layer.place ? "Overrides the region name" : "Type a label to show"}>
           <Input value={(layer as any).labelText ?? ""} placeholder={layer.place || "e.g. THE FRONTIER"} onChange={(e) => set({ labelText: e.target.value })} />
@@ -2277,6 +2342,16 @@ const HighlightFields: React.FC<{ layer: Extract<Layer, { type: "highlight" }>; 
           <Field label="Text colour"><ColorInput value={(layer as any).labelColor ?? "#ffffff"} onChange={(v) => set({ labelColor: v })} /></Field>
         </div>
       </div>
+
+      {/* The long tail — border & glow details, out of the way until wanted. */}
+      <Advanced label="Border & glow">
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Border colour"><ColorInput value={layer.borderColor} onChange={(v) => set({ borderColor: v })} /></Field>
+          <Field label="Glow colour"><ColorInput value={layer.glowColor} onChange={(v) => set({ glowColor: v })} /></Field>
+          <Field label="Border style"><Select value={(layer as any).borderDash ?? "solid"} onChange={(e) => set({ borderDash: e.target.value })}><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></Select></Field>
+          <Field label="Border opacity"><NumberInput value={Math.round(((layer as any).borderOpacity ?? 1) * 100)} step={5} min={0} max={100} unit="%" onChange={(v) => set({ borderOpacity: v / 100 })} /></Field>
+        </div>
+      </Advanced>
     </Section>
   );
 };
