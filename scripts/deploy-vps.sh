@@ -12,7 +12,7 @@
 set -euo pipefail
 
 APP_DIR=${APP_DIR:-/opt/mapanisy}
-APP_HOST=${APP_HOST:-mapinsy.guadiandmicha.com}
+APP_HOST=${APP_HOST:-mapinsy.com}
 REPO=${REPO:-https://github.com/michaandguadi-sys/Prompt-Studio.git}
 BRANCH=${BRANCH:-security-hardening}
 

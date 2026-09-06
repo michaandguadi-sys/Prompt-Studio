@@ -286,3 +286,52 @@ new versions. Unrecognised places do fall through to the AI director and the
 geocoder, so the product still works; but the deterministic path silently
 discards half of a user's stated journey, which is exactly the moment the app is
 supposed to feel like it understands the story.
+
+
+---
+
+## 8. Live deployment (2026-09-06)
+
+**Running at https://mapinsy.com** — Hostinger KVM 2, `srv1569245` / 82.112.238.211,
+in `/opt/mapanisy`, container `mapanisy`, alongside the existing site.
+
+What the box actually turned out to be, versus what §5 assumed:
+
+| Assumed | Actual |
+|---|---|
+| Caddy terminates TLS | **Traefik**, `network_mode: host`, docker-socket discovery |
+| A shared docker network | Traefik is host-networked → service uses `network_mode: bridge` |
+| KVM4, 4 vCPU / 16 GB | **KVM 2, 2 vCPU / 8 GB**, ~2.7 GB already in use |
+| Swap present | **None** — 4 GB swapfile added; the build used 708 MB of it |
+| `mapinsy.guadiandmicha.com` needs a new A record | **`mapinsy.com` already resolved here** and was serving nothing |
+
+`mapinsy.com` was nominally claimed by `agentbirdie-app`, a container that had
+restarted **19,210 times** (`fatal: destination path '/app' already exists`) and
+returned HTTP 000. Its Traefik label was malformed —
+
+    traefik.http.routers.agentbirdie.rule=Host(`mapinsy.com`)
+     Host(`www.mapinsy.com/`)
+
+a newline where `||` belongs, plus a trailing slash — so Traefik rejected the
+whole rule and logged `invalid value for HostSNI matcher` every minute. It was
+stopped (reversible: `docker start agentbirdie-app`), which is what let ACME
+complete for `mapinsy.com`.
+
+Deployed config: `docker-compose.vps.yml`, no published ports (Traefik reaches
+the bridge IP), `mem_limit 4g`, `shm_size 1gb`, `RENDER_CONCURRENCY=1`,
+persistence on the JSON file store (no `DATABASE_URL`), three data volumes under
+`/opt/mapanisy/data`. `BYPASS_QUOTA` and `TEST_UNLIMITED` were deliberately not
+shipped.
+
+Verified from the public internet: `/` 200 with a valid Let's Encrypt cert
+(CN=mapinsy.com, expires 2026-12-05), `/api/health` `ready: true`,
+`/api/agent/script` **200 / 19,250 bytes** — confirming the Dockerfile
+`COPY packages` fix, which returned 500 before. `/studio2` and `/home` 307 to
+sign-in (Clerk gating, correct). `guadiandmicha.com` and `www` both still 200.
+
+Two caveats: Clerk is a **development** instance (`pk_test`/`sk_test`) — fine for
+testing, shows Clerk's dev banner, and swapping to production keys needs a
+rebuild because the publishable key is baked into the client bundle. And renders
+run on **software WebGL across 2 vCPU**, so expect minutes per film.
+
+Update with: `cd /opt/mapanisy && git pull && docker compose -f docker-compose.vps.yml up -d --build`
