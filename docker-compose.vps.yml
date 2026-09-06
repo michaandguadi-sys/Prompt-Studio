@@ -59,7 +59,11 @@ services:
 
     labels:
       - traefik.enable=true
-      - traefik.http.routers.mapanisy.rule=Host(`${APP_HOST}`)
+      # TRAEFIK_RULE is the whole rule expression so several hostnames can be
+      # served by one router (Traefik needs `||` between them; a newline is NOT
+      # a separator — that is exactly the malformed label on agentbirdie-app
+      # that makes Traefik reject its route outright).
+      - traefik.http.routers.mapanisy.rule=${TRAEFIK_RULE}
       - traefik.http.routers.mapanisy.entrypoints=websecure
       - traefik.http.routers.mapanisy.tls=true
       - traefik.http.routers.mapanisy.tls.certresolver=letsencrypt
